@@ -1,0 +1,19 @@
+# Secrets
+.env
+ssl/
+
+# Data volumes (managed by Docker)
+data/
+postgres_data/
+
+# Logs
+*.log
+
+# Temporary files
+setup-info.txt
+*.tmp
+*.bak
+
+# OS files
+.DS_Store
+Thumbs.db
