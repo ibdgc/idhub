@@ -202,6 +202,7 @@ class REDCapPipeline:
             "format": "json",
             "type": "flat",
             "rawOrLabel": "raw",
+            "exportDataAccessGroups": "true",
         }
 
         try:
