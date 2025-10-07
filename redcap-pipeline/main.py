@@ -1,61 +1,72 @@
 # redcap-pipeline/main.py
 
-import requests
 import json
+import logging
+import os
+from datetime import datetime
+from typing import Any, Dict, List
+
 import boto3
 import psycopg2
+import requests
+from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
-from datetime import datetime
-import os
-import logging
-from typing import Dict, List, Any
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('logs/pipeline.log'),
-        logging.StreamHandler()
-    ]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("logs/pipeline.log"), logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
 
+
 class REDCapPipeline:
     def __init__(self):
-        self.redcap_url = os.getenv('REDCAP_API_URL')
-        self.redcap_token = os.getenv('REDCAP_API_TOKEN')
-        self.redcap_project_id = os.getenv('REDCAP_PROJECT_ID', '16894')
-        self.gsid_service_url = os.getenv('GSID_SERVICE_URL', 'http://gsid-service:8000')
-        self.s3_bucket = os.getenv('S3_BUCKET', 'idhub-curated-fragments')
+        self.redcap_url = os.getenv("REDCAP_API_URL")
+        self.redcap_token = os.getenv("REDCAP_API_TOKEN")
+        self.redcap_project_id = os.getenv("REDCAP_PROJECT_ID", "16894")
+        self.gsid_service_url = os.getenv(
+            "GSID_SERVICE_URL", "http://gsid-service:8000"
+        )
+        self.s3_bucket = os.getenv("S3_BUCKET", "idhub-curated-fragments")
 
-        self.s3_client = boto3.client('s3')
+        self.s3_client = boto3.client("s3")
 
-        with open('config/field_mappings.json') as f:
+        with open("config/field_mappings.json") as f:
             config = json.load(f)
-            self.mappings = config['mappings']
-            self.transformations = config.get('transformations', {})
+            self.mappings = config["mappings"]
+            self.transformations = config.get("transformations", {})
 
-        self.db_config = {
-            'host': os.getenv('DB_HOST'),
-            'database': os.getenv('DB_NAME'),
-            'user': os.getenv('DB_USER'),
-            'password': os.getenv('DB_PASSWORD')
-        }
+        # Create connection pool instead of individual connections
+        self.db_pool = psycopg2.pool.SimpleConnectionPool(
+            1,
+            10,  # min=1, max=10 connections
+            host=os.getenv("DB_HOST"),
+            database=os.getenv("DB_NAME"),
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASSWORD"),
+        )
 
     def get_db_connection(self):
-        """Get new DB connection for each operation"""
-        return psycopg2.connect(**self.db_config, cursor_factory=RealDictCursor)
+        """Get connection from pool"""
+        return self.db_pool.getconn()
 
-    def fetch_redcap_records_batch(self, batch_size: int = 100, offset: int = 0) -> List[Dict]:
+    def return_db_connection(self, conn):
+        """Return connection to pool"""
+        self.db_pool.putconn(conn)
+
+    def fetch_redcap_records_batch(
+        self, batch_size: int = 100, offset: int = 0
+    ) -> List[Dict]:
         """Fetch records in batches"""
         logger.info(f"Fetching batch: offset={offset}, limit={batch_size}")
 
         payload = {
-            'token': self.redcap_token,
-            'content': 'record',
-            'format': 'json',
-            'type': 'flat',
-            'rawOrLabel': 'raw'
+            "token": self.redcap_token,
+            "content": "record",
+            "format": "json",
+            "type": "flat",
+            "rawOrLabel": "raw",
         }
 
         try:
@@ -64,7 +75,7 @@ class REDCapPipeline:
 
             all_records = response.json()
 
-            return all_records[offset:offset + batch_size]
+            return all_records[offset : offset + batch_size]
 
         except requests.exceptions.Timeout:
             logger.error("REDCap API timeout")
@@ -80,15 +91,15 @@ class REDCapPipeline:
 
         transform = self.transformations[field_name]
 
-        if transform['type'] == 'extract_year':
+        if transform["type"] == "extract_year":
             if not value:
                 return None
-            return value.split('-')[0] if '-' in value else value
+            return value.split("-")[0] if "-" in value else value
 
-        elif transform['type'] == 'boolean':
-            if value in transform['true_values']:
+        elif transform["type"] == "boolean":
+            if value in transform["true_values"]:
                 return True
-            elif value in transform['false_values']:
+            elif value in transform["false_values"]:
                 return False
             return None
 
@@ -98,87 +109,96 @@ class REDCapPipeline:
         """Get center_id or create if doesn't exist"""
         conn = self.get_db_connection()
         try:
-            cur = conn.cursor()
+            cur = conn.cursor(cursor_factory=RealDictCursor)
 
             cur.execute("SELECT center_id FROM centers WHERE name = %s", (center_name,))
             result = cur.fetchone()
 
             if result:
-                return result['center_id']
+                return result["center_id"]
 
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO centers (name, investigator, country, consortium)
                 VALUES (%s, %s, %s, %s)
                 ON CONFLICT (center_id) DO NOTHING
                 RETURNING center_id
-            """, (center_name, 'Unknown', 'Unknown', 'IBD'))
+            """,
+                (center_name, "Unknown", "Unknown", "IBD"),
+            )
 
             result = cur.fetchone()
             conn.commit()
 
             if result:
-                return result['center_id']
+                return result["center_id"]
 
             cur.execute("SELECT center_id FROM centers WHERE name = %s", (center_name,))
             result = cur.fetchone()
-            return result['center_id']
+            return result["center_id"]
 
         finally:
-            conn.close()
+            self.return_db_connection(conn)
 
     def register_subject(self, record: Dict) -> str:
         """Register subject and get GSID"""
-        center_name = record.get('redcap_data_access_group', 'Unknown')
+        center_name = record.get("redcap_data_access_group", "Unknown")
         center_id = self.get_or_create_center(center_name)
 
-        local_subject_id = record.get('consortium_id') or record.get('local_id')
+        local_subject_id = record.get("consortium_id") or record.get("local_id")
         if not local_subject_id:
-            raise ValueError(f"No local_subject_id found in record: {record.get('record_id')}")
+            raise ValueError(
+                f"No local_subject_id found in record: {record.get('record_id')}"
+            )
 
-        registration_date = record.get('registration_date')
-        registration_year = self.transform_value('registration_date', registration_date)
+        registration_date = record.get("registration_date")
+        registration_year = self.transform_value("registration_date", registration_date)
 
-        control = self.transform_value('control', record.get('control', '0'))
+        control = self.transform_value("control", record.get("control", "0"))
 
         payload = {
-            'center_id': center_id,
-            'local_subject_id': local_subject_id,
-            'registration_year': registration_year,
-            'control': control,
-            'created_by': 'redcap_pipeline'
+            "center_id": center_id,
+            "local_subject_id": local_subject_id,
+            "registration_year": registration_year,
+            "control": control,
+            "created_by": "redcap_pipeline",
         }
 
         response = requests.post(f"{self.gsid_service_url}/register", json=payload)
         response.raise_for_status()
 
         result = response.json()
-        logger.info(f"Registered {local_subject_id} -> GSID {result['gsid']} ({result['action']})")
+        logger.info(
+            f"Registered {local_subject_id} -> GSID {result['gsid']} ({result['action']})"
+        )
 
-        return result['gsid']
+        return result["gsid"]
 
     def create_curated_fragment(self, record: Dict, gsid: str) -> Dict:
         """Create curated data fragment (PHI-free)"""
         fragment = {
-            'gsid': gsid,
-            'center_id': self.get_or_create_center(record.get('redcap_data_access_group', 'Unknown')),
-            'samples': {},
-            'family': {},
-            'metadata': {
-                'source': 'redcap',
-                'pipeline_version': '1.0',
-                'processed_at': datetime.utcnow().isoformat()
-            }
+            "gsid": gsid,
+            "center_id": self.get_or_create_center(
+                record.get("redcap_data_access_group", "Unknown")
+            ),
+            "samples": {},
+            "family": {},
+            "metadata": {
+                "source": "redcap",
+                "pipeline_version": "1.0",
+                "processed_at": datetime.utcnow().isoformat(),
+            },
         }
 
-        if record.get('sample_id'):
-            fragment['samples']['dna'] = record['sample_id']
-        if record.get('dna_id'):
-            fragment['samples']['dna'] = record['dna_id']
-        if record.get('dna_blood_id'):
-            fragment['samples']['blood'] = record['dna_blood_id']
+        if record.get("sample_id"):
+            fragment["samples"]["dna"] = record["sample_id"]
+        if record.get("dna_id"):
+            fragment["samples"]["dna"] = record["dna_id"]
+        if record.get("dna_blood_id"):
+            fragment["samples"]["blood"] = record["dna_blood_id"]
 
-        if record.get('family_id'):
-            fragment['family']['family_id'] = record['family_id']
+        if record.get("family_id"):
+            fragment["family"]["family_id"] = record["family_id"]
 
         return fragment
 
@@ -190,8 +210,8 @@ class REDCapPipeline:
             Bucket=self.s3_bucket,
             Key=key,
             Body=json.dumps(fragment, indent=2),
-            ContentType='application/json',
-            ServerSideEncryption='AES256'
+            ContentType="application/json",
+            ServerSideEncryption="AES256",
         )
 
         logger.info(f"Uploaded fragment to s3://{self.s3_bucket}/{key}")
@@ -203,11 +223,15 @@ class REDCapPipeline:
             fragment = self.create_curated_fragment(record, gsid)
             self.upload_to_s3(fragment, gsid)
 
-            return {'status': 'success', 'gsid': gsid}
+            return {"status": "success", "gsid": gsid}
 
         except Exception as e:
             logger.error(f"Error processing record {record.get('record_id')}: {str(e)}")
-            return {'status': 'error', 'error': str(e), 'record_id': record.get('record_id')}
+            return {
+                "status": "error",
+                "error": str(e),
+                "record_id": record.get("record_id"),
+            }
 
     def run(self):
         """Execute pipeline with batch processing"""
@@ -230,7 +254,7 @@ class REDCapPipeline:
 
                 for record in records:
                     result = self.process_record(record)
-                    if result['status'] == 'success':
+                    if result["status"] == "success":
                         total_success += 1
                     else:
                         total_errors += 1
@@ -238,12 +262,18 @@ class REDCapPipeline:
                 offset += batch_size
                 del records
 
-            logger.info(f"Pipeline complete: {total_success} success, {total_errors} errors")
+            logger.info(
+                f"Pipeline complete: {total_success} success, {total_errors} errors"
+            )
 
         except Exception as e:
             logger.error(f"Pipeline failed: {str(e)}")
             raise
+        finally:
+            # Close all connections in pool
+            self.db_pool.closeall()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     pipeline = REDCapPipeline()
     pipeline.run()

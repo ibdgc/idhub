@@ -25,8 +25,14 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts
 
-          # Start SSH tunnel in background (forward local 5432 to remote 5432)
-          ssh -f -N -L 5432:localhost:5432 $SSH_USER@$SSH_HOST
+          # Start SSH tunnel with IPv4 only
+          ssh -4 -f -N -L 127.0.0.1:5432:127.0.0.1:5432 $SSH_USER@$SSH_HOST
+
+          # Wait for tunnel to establish
+          sleep 5
+
+          # Test connection
+          nc -zv 127.0.0.1 5432 || echo "Warning: Tunnel may not be ready"
 
       - name: Set up Python
         uses: actions/setup-python@v4
