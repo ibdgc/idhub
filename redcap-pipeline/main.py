@@ -49,10 +49,14 @@ class REDCapPipeline:
         """Lazy initialization of connection pool"""
         if self.db_pool is None:
             logger.info("Initializing database connection pool...")
-            self.db_pool = psycopg2.pool.SimpleConnectionPool(
-                1, 10,
-                **self.db_config
-            )
+            try:
+                self.db_pool = psycopg2.pool.SimpleConnectionPool(
+                    1, 10,
+                    **self.db_config
+                )
+            except Exception as e:
+                logger.error(f"Failed to create connection pool: {e}")
+                raise  # Don't retry, fail fast
 
     def get_db_connection(self):
         """Get connection from pool"""
