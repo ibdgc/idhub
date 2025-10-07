@@ -24,16 +24,21 @@ jobs:
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts
-
+      
           # Start SSH tunnel with IPv4 only
           ssh -4 -f -N -L 127.0.0.1:5432:127.0.0.1:5432 $SSH_USER@$SSH_HOST
-
+      
           # Wait for tunnel to establish
-          sleep 5
-
-          # Test connection
-          nc -zv 127.0.0.1 5432 || echo "Warning: Tunnel may not be ready"
-
+          echo "Waiting for SSH tunnel..."
+          for i in {1..30}; do
+            if nc -zv 127.0.0.1 5432 2>&1 | grep -q succeeded; then
+              echo "Tunnel ready!"
+              break
+            fi
+            echo "Attempt $i/30..."
+            sleep 2
+          done
+      
       - name: Set up Python
         uses: actions/setup-python@v4
         with:

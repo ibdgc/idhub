@@ -20,40 +20,49 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+
 class REDCapPipeline:
     def __init__(self):
-        self.redcap_url = os.getenv("REDCAP_API_URL")
-        self.redcap_token = os.getenv("REDCAP_API_TOKEN")
-        self.redcap_project_id = os.getenv("REDCAP_PROJECT_ID", "16894")
-        self.gsid_service_url = os.getenv(
-            "GSID_SERVICE_URL", "http://gsid-service:8000"
-        )
-        self.s3_bucket = os.getenv("S3_BUCKET", "idhub-curated-fragments")
+        self.redcap_url = os.getenv('REDCAP_API_URL')
+        self.redcap_token = os.getenv('REDCAP_API_TOKEN')
+        self.redcap_project_id = os.getenv('REDCAP_PROJECT_ID', '16894')
+        self.gsid_service_url = os.getenv('GSID_SERVICE_URL', 'http://gsid-service:8000')
+        self.s3_bucket = os.getenv('S3_BUCKET', 'idhub-curated-fragments')
 
-        self.s3_client = boto3.client("s3")
+        self.s3_client = boto3.client('s3')
 
-        with open("config/field_mappings.json") as f:
+        with open('config/field_mappings.json') as f:
             config = json.load(f)
-            self.mappings = config["mappings"]
-            self.transformations = config.get("transformations", {})
+            self.mappings = config['mappings']
+            self.transformations = config.get('transformations', {})
 
-        # Create connection pool instead of individual connections
-        self.db_pool = psycopg2.pool.SimpleConnectionPool(
-            1,
-            10,  # min=1, max=10 connections
-            host=os.getenv("DB_HOST"),
-            database=os.getenv("DB_NAME"),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASSWORD"),
-        )
+        # Store DB config but don't create pool yet
+        self.db_config = {
+            'host': os.getenv('DB_HOST'),
+            'database': os.getenv('DB_NAME'),
+            'user': os.getenv('DB_USER'),
+            'password': os.getenv('DB_PASSWORD')
+        }
+        self.db_pool = None
+
+    def ensure_pool(self):
+        """Lazy initialization of connection pool"""
+        if self.db_pool is None:
+            logger.info("Initializing database connection pool...")
+            self.db_pool = psycopg2.pool.SimpleConnectionPool(
+                1, 10,
+                **self.db_config
+            )
 
     def get_db_connection(self):
         """Get connection from pool"""
+        self.ensure_pool()
         return self.db_pool.getconn()
 
     def return_db_connection(self, conn):
         """Return connection to pool"""
-        self.db_pool.putconn(conn)
+        if self.db_pool:
+            self.db_pool.putconn(conn)
 
     def fetch_redcap_records_batch(
         self, batch_size: int = 100, offset: int = 0
@@ -233,6 +242,7 @@ class REDCapPipeline:
                 "record_id": record.get("record_id"),
             }
 
+
     def run(self):
         """Execute pipeline with batch processing"""
         logger.info("Starting REDCap pipeline (batch mode)...")
@@ -254,7 +264,7 @@ class REDCapPipeline:
 
                 for record in records:
                     result = self.process_record(record)
-                    if result["status"] == "success":
+                    if result['status'] == 'success':
                         total_success += 1
                     else:
                         total_errors += 1
@@ -262,17 +272,15 @@ class REDCapPipeline:
                 offset += batch_size
                 del records
 
-            logger.info(
-                f"Pipeline complete: {total_success} success, {total_errors} errors"
-            )
+            logger.info(f"Pipeline complete: {total_success} success, {total_errors} errors")
 
         except Exception as e:
             logger.error(f"Pipeline failed: {str(e)}")
             raise
         finally:
             # Close all connections in pool
-            self.db_pool.closeall()
-
+            if self.db_pool:
+                self.db_pool.closeall()
 
 if __name__ == "__main__":
     pipeline = REDCapPipeline()
