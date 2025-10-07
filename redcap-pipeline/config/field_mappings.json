@@ -1,0 +1,59 @@
+{
+  "mappings": [
+    {
+      "source_field": "redcap_data_access_group",
+      "target_table": "centers",
+      "target_field": "name"
+    },
+    {
+      "source_field": "sample_id",
+      "target_table": "dna",
+      "target_field": "sample_id"
+    },
+    {
+      "source_field": "dna_id",
+      "target_table": "dna",
+      "target_field": "sample_id"
+    },
+    {
+      "source_field": "local_id",
+      "target_table": "local_subject_ids",
+      "target_field": "local_subject_id"
+    },
+    {
+      "source_field": "consortium_id",
+      "target_table": "local_subject_ids",
+      "target_field": "local_subject_id"
+    },
+    {
+      "source_field": "family_id",
+      "target_table": "family",
+      "target_field": "family_id"
+    },
+    {
+      "source_field": "dna_blood_id",
+      "target_table": "blood",
+      "target_field": "sample_id"
+    },
+    {
+      "source_field": "control",
+      "target_table": "subjects",
+      "target_field": "control"
+    },
+    {
+      "source_field": "registration_date",
+      "target_table": "subjects",
+      "target_field": "registration_year"
+    }
+  ],
+  "transformations": {
+    "registration_date": {
+      "type": "extract_year"
+    },
+    "control": {
+      "type": "boolean",
+      "true_values": ["1", "yes", "true"],
+      "false_values": ["0", "no", "false"]
+    }
+  }
+}

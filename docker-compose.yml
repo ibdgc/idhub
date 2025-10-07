@@ -103,6 +103,37 @@ services:
       timeout: 10s
       retries: 3
 
+  redcap-pipeline:
+    # NOTE: This service is primarily run via GitHub Actions
+    # Use 'docker-compose --profile pipeline up redcap-pipeline' for local testing only
+    build: ./redcap-pipeline
+    container_name: redcap_pipeline
+    restart: "no"
+    mem_limit: 256m
+    memswap_limit: 256m
+    environment:
+      - REDCAP_API_URL=${REDCAP_API_URL}
+      - REDCAP_API_TOKEN=${REDCAP_API_TOKEN}
+      - REDCAP_PROJECT_ID=${REDCAP_PROJECT_ID}
+      - GSID_SERVICE_URL=http://gsid-service:8000
+      - DB_HOST=idhub_db
+      - DB_NAME=${IDHUB_DB_NAME}
+      - DB_USER=${IDHUB_DB_USER}
+      - DB_PASSWORD=${IDHUB_DB_PASSWORD}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+      - S3_BUCKET=${S3_BUCKET}
+    volumes:
+      - ./redcap-pipeline/logs:/app/logs
+    networks:
+      - idhub_network
+    depends_on:
+      - idhub_db
+      - gsid-service
+    profiles:
+      - pipeline
+
 volumes:
   nocodb_data:
     driver: local

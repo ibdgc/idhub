@@ -1,0 +1,68 @@
+# .github/workflows/redcap-sync.yml
+name: REDCap Sync Pipeline
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up SSH tunnel
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts
+
+          # Start SSH tunnel in background (forward local 5432 to remote 5432)
+          ssh -f -N -L 5432:localhost:5432 $SSH_USER@$SSH_HOST
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          cd redcap-pipeline
+          pip install -r requirements.txt
+
+      - name: Create logs directory
+        run: mkdir -p redcap-pipeline/logs
+
+      - name: Run REDCap pipeline
+        env:
+          REDCAP_API_URL: ${{ secrets.REDCAP_API_URL }}
+          REDCAP_API_TOKEN: ${{ secrets.REDCAP_API_TOKEN }}
+          REDCAP_PROJECT_ID: ${{ secrets.REDCAP_PROJECT_ID }}
+          GSID_SERVICE_URL: https://api.idhub.ibdgc.org
+          DB_HOST: localhost
+          DB_NAME: idhub
+          DB_USER: idhub_user
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          S3_BUCKET: idhub-curated-fragments
+        run: |
+          cd redcap-pipeline
+          python main.py
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: pipeline-logs
+          path: redcap-pipeline/logs/
+          retention-days: 30
