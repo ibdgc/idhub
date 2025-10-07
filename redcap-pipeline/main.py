@@ -229,10 +229,72 @@ class REDCapPipeline:
 
         logger.info(f"Uploaded fragment to s3://{self.s3_bucket}/{key}")
 
+    def insert_samples(self, record: Dict, gsid: str):
+        """Insert sample records into database"""
+        conn = self.get_db_connection()
+        try:
+            cur = conn.cursor()
+
+            # DNA samples
+            if record.get("sample_id") or record.get("dna_id"):
+                sample_id = record.get("sample_id") or record.get("dna_id")
+                cur.execute(
+                    """
+                    INSERT INTO dna (sample_id, global_subject_id)
+                    VALUES (%s, %s)
+                    ON CONFLICT (sample_id) DO NOTHING
+                    """,
+                    (sample_id, gsid)
+                )
+
+            # Blood samples
+            if record.get("dna_blood_id"):
+                cur.execute(
+                    """
+                    INSERT INTO blood (sample_id, global_subject_id)
+                    VALUES (%s, %s)
+                    ON CONFLICT (sample_id) DO NOTHING
+                    """,
+                    (record["dna_blood_id"], gsid)
+                )
+
+            # Family linkage
+            if record.get("family_id"):
+                # Create family if doesn't exist
+                cur.execute(
+                    """
+                    INSERT INTO family (family_id)
+                    VALUES (%s)
+                    ON CONFLICT (family_id) DO NOTHING
+                    """,
+                    (record["family_id"],)
+                )
+
+                # Link subject to family
+                cur.execute(
+                    """
+                    UPDATE subjects
+                    SET family_id = %s
+                    WHERE global_subject_id = %s
+                    """,
+                    (record["family_id"], gsid)
+                )
+
+            conn.commit()
+            logger.info(f"Inserted samples for GSID {gsid}")
+
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error inserting samples for {gsid}: {e}")
+            raise
+        finally:
+            self.return_db_connection(conn)
+
     def process_record(self, record: Dict):
         """Process single REDCap record with isolated transaction"""
         try:
             gsid = self.register_subject(record)
+            self.insert_samples(record, gsid)  # Add this line
             fragment = self.create_curated_fragment(record, gsid)
             self.upload_to_s3(fragment, gsid)
 
