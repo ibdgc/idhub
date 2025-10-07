@@ -4,13 +4,14 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import boto3
 import psycopg2
 import requests
 from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
+from difflib import SequenceMatcher
 
 logging.basicConfig(
     level=logging.INFO,
@@ -19,7 +20,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
+CENTER_ALIASES = {
+    'mount_sinai': 'MSSM',
+    'mount_sinai_ny': 'MSSM',
+    'mount-sinai': 'MSSM',
+    'mt_sinai': 'MSSM',
+    'cedars_sinai': 'Cedars-Sinai',
+    'cedars-sinai': 'Cedars-Sinai',
+    'university_of_chicago': 'University of Chicago',
+    'uchicago': 'University of Chicago',
+    'u_chicago': 'University of Chicago',
+    'johns_hopkins': 'Johns Hopkins',
+    'jhu': 'Johns Hopkins',
+    'mass_general': 'Massachusetts General Hospital',
+    'mgh': 'Massachusetts General Hospital',
+    'pitt': 'Pittsburgh',
+    'upitt': 'Pittsburgh',
+    'university_of_pittsburgh': 'Pittsburgh',
+}
 
 class REDCapPipeline:
     def __init__(self):
@@ -44,6 +62,110 @@ class REDCapPipeline:
             'password': os.getenv('DB_PASSWORD')
         }
         self.db_pool = None
+        self._centers_cache = None
+
+    def _load_centers_cache(self):
+        """Load all centers into memory for fuzzy matching"""
+        if self._centers_cache is not None:
+            return
+
+        conn = self.get_db_connection()
+        try:
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute("SELECT center_id, name FROM centers")
+            self._centers_cache = cur.fetchall()
+            logger.info(f"Loaded {len(self._centers_cache)} centers into cache")
+        finally:
+            self.return_db_connection(conn)
+
+    def _fuzzy_match_center(self, input_name: str, threshold: float = 0.6) -> Optional[int]:
+        """
+        Fuzzy match center name using string similarity
+        Returns center_id if match found above threshold, None otherwise
+        """
+        self._load_centers_cache()
+
+        if not input_name:
+            return None
+
+        # Normalize input
+        input_normalized = input_name.lower().replace('_', '-').replace(' ', '-')
+
+        best_match = None
+        best_score = 0.0
+
+        for center in self._centers_cache:
+            center_normalized = center['name'].lower().replace('_', '-').replace(' ', '-')
+
+            # Calculate similarity ratio
+            score = SequenceMatcher(None, input_normalized, center_normalized).ratio()
+
+            if score > best_score:
+                best_score = score
+                best_match = center
+
+        if best_score >= threshold:
+            logger.info(f"Fuzzy matched '{input_name}' -> '{best_match['name']}' (score: {best_score:.2f})")
+            return best_match['center_id']
+
+        logger.warning(f"No fuzzy match found for '{input_name}' (best score: {best_score:.2f})")
+        return None
+
+    def _normalize_center_name(self, name: str) -> str:
+        """Normalize and check aliases"""
+        if not name:
+            return "Unknown"
+
+        normalized = name.lower().replace(' ', '_').replace('-', '_')
+
+        # Check aliases first
+        if normalized in CENTER_ALIASES:
+            canonical = CENTER_ALIASES[normalized]
+            logger.info(f"Alias matched '{name}' -> '{canonical}'")
+            return canonical
+
+        return name
+
+    def get_or_create_center(self, center_name: str) -> int:
+        """Get center_id with alias lookup, fuzzy matching, create if no match"""
+        # Apply alias normalization first
+        center_name = self._normalize_center_name(center_name)
+
+        conn = self.get_db_connection()
+        try:
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+
+            # Try exact match
+            cur.execute("SELECT center_id FROM centers WHERE name = %s", (center_name,))
+            result = cur.fetchone()
+            if result:
+                return result["center_id"]
+
+            # Try fuzzy match
+            fuzzy_center_id = self._fuzzy_match_center(center_name, threshold=0.7)
+            if fuzzy_center_id:
+                return fuzzy_center_id
+
+            # No match - create new center
+            logger.warning(f"Creating new center: '{center_name}'")
+            cur.execute(
+                """
+                INSERT INTO centers (name, investigator, country, consortium)
+                VALUES (%s, %s, %s, %s)
+                RETURNING center_id
+                """,
+                (center_name, "Unknown", "Unknown", "Unknown"),
+            )
+
+            result = cur.fetchone()
+            conn.commit()
+
+            self._centers_cache = None
+
+            return result["center_id"]
+
+        finally:
+            self.return_db_connection(conn)
 
     def ensure_pool(self):
         """Lazy initialization of connection pool"""
@@ -117,41 +239,6 @@ class REDCapPipeline:
             return None
 
         return value
-
-    def get_or_create_center(self, center_name: str) -> int:
-        """Get center_id or create if doesn't exist"""
-        conn = self.get_db_connection()
-        try:
-            cur = conn.cursor(cursor_factory=RealDictCursor)
-
-            cur.execute("SELECT center_id FROM centers WHERE name = %s", (center_name,))
-            result = cur.fetchone()
-
-            if result:
-                return result["center_id"]
-
-            cur.execute(
-                """
-                INSERT INTO centers (name, investigator, country, consortium)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (center_id) DO NOTHING
-                RETURNING center_id
-            """,
-                (center_name, "Unknown", "Unknown", "IBD"),
-            )
-
-            result = cur.fetchone()
-            conn.commit()
-
-            if result:
-                return result["center_id"]
-
-            cur.execute("SELECT center_id FROM centers WHERE name = %s", (center_name,))
-            result = cur.fetchone()
-            return result["center_id"]
-
-        finally:
-            self.return_db_connection(conn)
 
     def register_subject(self, record: Dict) -> str:
         """Register subject and get GSID"""
