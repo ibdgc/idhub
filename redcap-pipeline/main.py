@@ -241,11 +241,146 @@ class REDCapPipeline:
 
         return value
 
-    def register_subject(self, record: Dict) -> str:
-        """Register subject and get GSID"""
+    def extract_local_ids(self, record: Dict, center_id: int) -> List[Dict]:
+        """Extract all available local identifiers from record"""
+        identifiers = []
+
+        # Primary identifiers
+        if record.get("consortium_id"):
+            identifiers.append({
+                "center_id": center_id,
+                "local_subject_id": record["consortium_id"],
+                "identifier_type": "consortium_id"
+            })
+
+        if record.get("local_id"):
+            identifiers.append({
+                "center_id": center_id,
+                "local_subject_id": record["local_id"],
+                "identifier_type": "local_id"
+            })
+
+        # Additional identifiers that might exist
+        if record.get("subject_id"):
+            identifiers.append({
+                "center_id": center_id,
+                "local_subject_id": record["subject_id"],
+                "identifier_type": "subject_id"
+            })
+
+        if record.get("patient_id"):
+            identifiers.append({
+                "center_id": center_id,
+                "local_subject_id": record["patient_id"],
+                "identifier_type": "patient_id"
+            })
+
+        return identifiers
+
+    def register_all_local_ids(self, gsid: str, identifiers: List[Dict]):
+        """Register all local IDs for a subject, flag conflicts for review"""
+        conn = self.get_db_connection()
+        try:
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+
+            for identifier in identifiers:
+                # Check if this local_id already exists with a different GSID
+                cur.execute(
+                    """
+                    SELECT global_subject_id, identifier_type
+                    FROM local_subject_ids
+                    WHERE center_id = %s AND local_subject_id = %s
+                    """,
+                    (identifier["center_id"], identifier["local_subject_id"])
+                )
+                existing = cur.fetchone()
+
+                if existing and existing["global_subject_id"] != gsid:
+                    # CONFLICT: Same local_id points to different GSID
+                    logger.warning(
+                        f"CONFLICT: {identifier['local_subject_id']} already linked to "
+                        f"{existing['global_subject_id']}, attempting to link to {gsid}"
+                    )
+
+                    # Flag BOTH subjects for review
+                    cur.execute(
+                        """
+                        UPDATE subjects
+                        SET flagged_for_review = TRUE,
+                            review_notes = COALESCE(review_notes || E'\n', '') || %s
+                        WHERE global_subject_id IN (%s, %s)
+                        """,
+                        (
+                            f"[{datetime.utcnow().isoformat()}] Duplicate local_id conflict: "
+                            f"{identifier['local_subject_id']} (type: {identifier['identifier_type']}) "
+                            f"linked to both {gsid} and {existing['global_subject_id']}",
+                            gsid,
+                            existing["global_subject_id"]
+                        )
+                    )
+
+                    # Log to identity_resolutions
+                    cur.execute(
+                        """
+                        INSERT INTO identity_resolutions
+                        (input_center_id, input_local_id, matched_gsid, action,
+                         match_strategy, confidence_score, requires_review, review_reason, created_by)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            identifier["center_id"],
+                            identifier["local_subject_id"],
+                            gsid,
+                            "conflict_detected",
+                            "duplicate_local_id",
+                            0.0,
+                            True,
+                            f"Local ID already exists for GSID {existing['global_subject_id']}",
+                            "redcap_pipeline"
+                        )
+                    )
+
+                    # Skip inserting this conflicting ID
+                    continue
+
+                elif existing and existing["global_subject_id"] == gsid:
+                    # Already linked correctly, skip
+                    logger.debug(f"ID {identifier['local_subject_id']} already linked to {gsid}")
+                    continue
+
+                # No conflict - insert new mapping
+                cur.execute(
+                    """
+                    INSERT INTO local_subject_ids
+                    (center_id, local_subject_id, identifier_type, global_subject_id)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (
+                        identifier["center_id"],
+                        identifier["local_subject_id"],
+                        identifier["identifier_type"],
+                        gsid
+                    )
+                )
+                logger.info(
+                    f"Linked {identifier['identifier_type']}={identifier['local_subject_id']} -> {gsid}"
+                )
+
+            conn.commit()
+
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error registering local IDs for {gsid}: {e}")
+            raise
+        finally:
+            self.return_db_connection(conn)
+
+    def register_subject(self, record: Dict) -> tuple[str, int]:
+        """Register subject and get GSID - returns (gsid, center_id)"""
         center_name = record.get("redcap_data_access_group", "Unknown")
         center_id = self.get_or_create_center(center_name)
 
+        # Use consortium_id as primary for initial registration
         local_subject_id = record.get("consortium_id") or record.get("local_id")
         if not local_subject_id:
             raise ValueError(
@@ -254,7 +389,6 @@ class REDCapPipeline:
 
         registration_date = record.get("registration_date")
         registration_year = self.transform_value("registration_date", registration_date)
-
         control = self.transform_value("control", record.get("control", "0"))
 
         payload = {
@@ -273,7 +407,35 @@ class REDCapPipeline:
             f"Registered {local_subject_id} -> GSID {result['gsid']} ({result['action']})"
         )
 
-        return result["gsid"]
+        return result["gsid"], center_id
+
+    def process_record(self, record: Dict):
+        """Process single REDCap record with conflict detection"""
+        try:
+            # Register subject with primary ID
+            gsid, center_id = self.register_subject(record)
+
+            # Extract and register ALL local IDs (with conflict detection)
+            all_identifiers = self.extract_local_ids(record, center_id)
+            if all_identifiers:
+                self.register_all_local_ids(gsid, all_identifiers)
+
+            # Insert samples
+            self.insert_samples(record, gsid)
+
+            # Create and upload fragment
+            fragment = self.create_curated_fragment(record, gsid)
+            self.upload_to_s3(fragment, gsid)
+
+            return {"status": "success", "gsid": gsid}
+
+        except Exception as e:
+            logger.error(f"Error processing record {record.get('record_id')}: {str(e)}")
+            return {
+                "status": "error",
+                "error": str(e),
+                "record_id": record.get("record_id"),
+            }
 
     def create_curated_fragment(self, record: Dict, gsid: str) -> Dict:
         """Create curated data fragment (PHI-free)"""
@@ -377,25 +539,6 @@ class REDCapPipeline:
             raise
         finally:
             self.return_db_connection(conn)
-
-    def process_record(self, record: Dict):
-        """Process single REDCap record with isolated transaction"""
-        try:
-            gsid = self.register_subject(record)
-            self.insert_samples(record, gsid)  # Add this line
-            fragment = self.create_curated_fragment(record, gsid)
-            self.upload_to_s3(fragment, gsid)
-
-            return {"status": "success", "gsid": gsid}
-
-        except Exception as e:
-            logger.error(f"Error processing record {record.get('record_id')}: {str(e)}")
-            return {
-                "status": "error",
-                "error": str(e),
-                "record_id": record.get("record_id"),
-            }
-
 
     def run(self):
         """Execute pipeline with batch processing"""
