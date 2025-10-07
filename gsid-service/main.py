@@ -39,7 +39,7 @@ def generate_gsid() -> str:
 class SubjectRequest(BaseModel):
     center_id: int
     local_subject_id: str
-    registration_year: str | None = None  # Changed to string
+    registration_year: str | None = None
     control: bool = False
     created_by: str = "system"
 
@@ -55,7 +55,7 @@ class SubjectRequest(BaseModel):
         if len(v) == 4 and v.isdigit():
             year = int(v)
             if 1900 <= year <= 2100:
-                return v
+                return v  # Return just the year string, not a date
         return None
 
 
