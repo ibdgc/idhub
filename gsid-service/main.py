@@ -55,7 +55,7 @@ class SubjectRequest(BaseModel):
         if len(v) == 4 and v.isdigit():
             year = int(v)
             if 1900 <= year <= 2100:
-                return f"{year}-01-01"  # Convert to date for DB
+                return v
         return None
 
 
