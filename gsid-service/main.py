@@ -3,9 +3,7 @@
 import logging
 import os
 import secrets
-import string
 import time
-from datetime import date
 
 import psycopg2
 from fastapi import FastAPI, HTTPException
@@ -17,7 +15,6 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# Base32 alphabet (Crockford's Base32 - no ambiguous characters)
 BASE32_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 
@@ -27,14 +24,12 @@ def generate_gsid() -> str:
     - 6 chars: timestamp (milliseconds since epoch, base32)
     - 6 chars: random (base32)
     """
-    # Timestamp portion (6 chars)
     timestamp_ms = int(time.time() * 1000)
     timestamp_b32 = ""
     for _ in range(6):
         timestamp_b32 = BASE32_ALPHABET[timestamp_ms % 32] + timestamp_b32
         timestamp_ms //= 32
 
-    # Random portion (6 chars)
     random_b32 = "".join(secrets.choice(BASE32_ALPHABET) for _ in range(6))
 
     return timestamp_b32 + random_b32
@@ -43,26 +38,28 @@ def generate_gsid() -> str:
 class SubjectRequest(BaseModel):
     center_id: int
     local_subject_id: str
-    registration_year: str | None = None
+    identifier_type: str = "primary"
+    registration_year: int | None = None
     control: bool = False
     created_by: str = "system"
 
-    @field_validator('registration_year')
+    @field_validator("registration_year")
     @classmethod
     def validate_year(cls, v):
         if v is None:
             return None
-        # Accept YYYY format or convert YYYY-MM-DD to YYYY
         if isinstance(v, int):
-            return v
-        if '-' in str(v):
-            v = str(v).split('-')[0]
-        # Return as integer
+            if 1900 <= v <= 2100:
+                return v
+            return None
+        if "-" in str(v):
+            v = str(v).split("-")[0]
         if len(str(v)) == 4 and str(v).isdigit():
             year = int(v)
             if 1900 <= year <= 2100:
-                return year  # Return int, not string
+                return year
         return None
+
 
 class ResolutionResponse(BaseModel):
     gsid: str
@@ -84,19 +81,21 @@ def get_db():
     )
 
 
-def resolve_identity(conn, center_id: int, local_subject_id: str) -> dict:
-    """Core identity resolution logic"""
+def resolve_identity(
+    conn, center_id: int, local_subject_id: str, identifier_type: str = "primary"
+) -> dict:
+    """Core identity resolution logic with identifier_type support"""
     cur = conn.cursor()
 
-    # Check exact match
+    # Check exact match with identifier_type
     cur.execute(
         """
         SELECT s.global_subject_id, s.withdrawn 
         FROM local_subject_ids l
         JOIN subjects s ON l.global_subject_id = s.global_subject_id
-        WHERE l.center_id = %s AND l.local_subject_id = %s
-    """,
-        (center_id, local_subject_id),
+        WHERE l.center_id = %s AND l.local_subject_id = %s AND l.identifier_type = %s
+        """,
+        (center_id, local_subject_id, identifier_type),
     )
     exact = cur.fetchone()
 
@@ -124,7 +123,7 @@ def resolve_identity(conn, center_id: int, local_subject_id: str) -> dict:
         FROM subject_alias a
         JOIN subjects s ON a.global_subject_id = s.global_subject_id
         WHERE a.alias = %s
-    """,
+        """,
         (local_subject_id,),
     )
     alias = cur.fetchone()
@@ -166,7 +165,7 @@ def log_resolution(conn, resolution: dict, request: SubjectRequest):
          match_strategy, confidence_score, requires_review, review_reason, created_by)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING resolution_id
-    """,
+        """,
         (
             request.center_id,
             request.local_subject_id,
@@ -187,37 +186,43 @@ async def register_subject(request: SubjectRequest):
     """Register or link a subject with identity resolution"""
     conn = get_db()
     try:
-        # Resolve identity
-        resolution = resolve_identity(conn, request.center_id, request.local_subject_id)
+        # Resolve identity with identifier_type
+        resolution = resolve_identity(
+            conn, request.center_id, request.local_subject_id, request.identifier_type
+        )
 
         # Handle based on action
         if resolution["action"] == "create_new":
             # Generate new GSID
             gsid = generate_gsid()
 
-            # Ensure uniqueness (extremely rare collision check)
+            # Ensure uniqueness
             cur = conn.cursor()
             cur.execute("SELECT 1 FROM subjects WHERE global_subject_id = %s", (gsid,))
             if cur.fetchone():
-                # Collision detected, regenerate
                 gsid = generate_gsid()
 
-            # Create subject (removed created_by column)
+            # Create subject
             cur.execute(
                 """
                 INSERT INTO subjects (global_subject_id, center_id, registration_year, control)
                 VALUES (%s, %s, %s, %s)
-            """,
+                """,
                 (gsid, request.center_id, request.registration_year, request.control),
             )
 
-            # Create local_subject_id entry
+            # Create local_subject_id entry with identifier_type
             cur.execute(
                 """
-                INSERT INTO local_subject_ids (center_id, local_subject_id, global_subject_id)
-                VALUES (%s, %s, %s)
-            """,
-                (request.center_id, request.local_subject_id, gsid),
+                INSERT INTO local_subject_ids (center_id, local_subject_id, identifier_type, global_subject_id)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (
+                    request.center_id,
+                    request.local_subject_id,
+                    request.identifier_type,
+                    gsid,
+                ),
             )
 
             resolution["gsid"] = gsid
@@ -228,11 +233,16 @@ async def register_subject(request: SubjectRequest):
             cur = conn.cursor()
             cur.execute(
                 """
-                INSERT INTO local_subject_ids (center_id, local_subject_id, global_subject_id)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (center_id, local_subject_id) DO NOTHING
-            """,
-                (request.center_id, request.local_subject_id, gsid),
+                INSERT INTO local_subject_ids (center_id, local_subject_id, identifier_type, global_subject_id)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (center_id, local_subject_id, identifier_type) DO NOTHING
+                """,
+                (
+                    request.center_id,
+                    request.local_subject_id,
+                    request.identifier_type,
+                    gsid,
+                ),
             )
 
         elif resolution["action"] == "review_required":
@@ -245,7 +255,7 @@ async def register_subject(request: SubjectRequest):
                 SET flagged_for_review = TRUE,
                     review_notes = %s
                 WHERE global_subject_id = %s
-            """,
+                """,
                 (resolution["review_reason"], gsid),
             )
 
@@ -277,7 +287,8 @@ async def get_review_queue():
     conn = get_db()
     try:
         cur = conn.cursor()
-        cur.execute("""
+        cur.execute(
+            """
             SELECT 
                 s.global_subject_id,
                 s.review_notes,
@@ -291,7 +302,8 @@ async def get_review_queue():
             WHERE s.flagged_for_review = TRUE
             GROUP BY s.global_subject_id, s.review_notes, c.name, s.created_at, s.withdrawn
             ORDER BY s.created_at DESC
-        """)
+            """
+        )
         return cur.fetchall()
     finally:
         conn.close()
@@ -309,7 +321,7 @@ async def resolve_review(gsid: str, reviewed_by: str, notes: str = None):
             SET flagged_for_review = FALSE,
                 review_notes = %s
             WHERE global_subject_id = %s
-        """,
+            """,
             (notes, gsid),
         )
 
@@ -320,7 +332,7 @@ async def resolve_review(gsid: str, reviewed_by: str, notes: str = None):
                 reviewed_at = CURRENT_TIMESTAMP,
                 resolution_notes = %s
             WHERE matched_gsid = %s AND requires_review = TRUE
-        """,
+            """,
             (reviewed_by, notes, gsid),
         )
 

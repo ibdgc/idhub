@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from datetime import datetime
+from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional
 
 import boto3
@@ -11,7 +12,6 @@ import psycopg2
 import requests
 from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
-from difflib import SequenceMatcher
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,45 +21,48 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 CENTER_ALIASES = {
-    'mount_sinai': 'MSSM',
-    'mount_sinai_ny': 'MSSM',
-    'mount-sinai': 'MSSM',
-    'mt_sinai': 'MSSM',
-    'cedars_sinai': 'Cedars-Sinai',
-    'cedars-sinai': 'Cedars-Sinai',
-    'university_of_chicago': 'University of Chicago',
-    'uchicago': 'University of Chicago',
-    'u_chicago': 'University of Chicago',
-    'johns_hopkins': 'Johns Hopkins',
-    'jhu': 'Johns Hopkins',
-    'mass_general': 'Massachusetts General Hospital',
-    'mgh': 'Massachusetts General Hospital',
-    'pitt': 'Pittsburgh',
-    'upitt': 'Pittsburgh',
-    'university_of_pittsburgh': 'Pittsburgh',
+    "mount_sinai": "MSSM",
+    "mount_sinai_ny": "MSSM",
+    "mount-sinai": "MSSM",
+    "mt_sinai": "MSSM",
+    "cedars_sinai": "Cedars-Sinai",
+    "cedars-sinai": "Cedars-Sinai",
+    "university_of_chicago": "University of Chicago",
+    "uchicago": "University of Chicago",
+    "u_chicago": "University of Chicago",
+    "johns_hopkins": "Johns Hopkins",
+    "jhu": "Johns Hopkins",
+    "mass_general": "Massachusetts General Hospital",
+    "mgh": "Massachusetts General Hospital",
+    "pitt": "Pittsburgh",
+    "upitt": "Pittsburgh",
+    "university_of_pittsburgh": "Pittsburgh",
 }
+
 
 class REDCapPipeline:
     def __init__(self):
-        self.redcap_url = os.getenv('REDCAP_API_URL')
-        self.redcap_token = os.getenv('REDCAP_API_TOKEN')
-        self.redcap_project_id = os.getenv('REDCAP_PROJECT_ID', '16894')
-        self.gsid_service_url = os.getenv('GSID_SERVICE_URL', 'http://gsid-service:8000')
-        self.s3_bucket = os.getenv('S3_BUCKET', 'idhub-curated-fragments')
+        self.redcap_url = os.getenv("REDCAP_API_URL")
+        self.redcap_token = os.getenv("REDCAP_API_TOKEN")
+        self.redcap_project_id = os.getenv("REDCAP_PROJECT_ID", "16894")
+        self.gsid_service_url = os.getenv(
+            "GSID_SERVICE_URL", "http://gsid-service:8000"
+        )
+        self.s3_bucket = os.getenv("S3_BUCKET", "idhub-curated-fragments")
 
-        self.s3_client = boto3.client('s3')
+        self.s3_client = boto3.client("s3")
 
-        with open('config/field_mappings.json') as f:
+        with open("config/field_mappings.json") as f:
             config = json.load(f)
-            self.mappings = config['mappings']
-            self.transformations = config.get('transformations', {})
+            self.mappings = config["mappings"]
+            self.transformations = config.get("transformations", {})
 
         # Store DB config but don't create pool yet
         self.db_config = {
-            'host': os.getenv('DB_HOST'),
-            'database': os.getenv('DB_NAME'),
-            'user': os.getenv('DB_USER'),
-            'password': os.getenv('DB_PASSWORD')
+            "host": os.getenv("DB_HOST"),
+            "database": os.getenv("DB_NAME"),
+            "user": os.getenv("DB_USER"),
+            "password": os.getenv("DB_PASSWORD"),
         }
         self.db_pool = None
         self._centers_cache = None
@@ -78,7 +81,9 @@ class REDCapPipeline:
         finally:
             self.return_db_connection(conn)
 
-    def _fuzzy_match_center(self, input_name: str, threshold: float = 0.6) -> Optional[int]:
+    def _fuzzy_match_center(
+        self, input_name: str, threshold: float = 0.6
+    ) -> Optional[int]:
         """
         Fuzzy match center name using string similarity
         Returns center_id if match found above threshold, None otherwise
@@ -89,13 +94,15 @@ class REDCapPipeline:
             return None
 
         # Normalize input
-        input_normalized = input_name.lower().replace('_', '-').replace(' ', '-')
+        input_normalized = input_name.lower().replace("_", "-").replace(" ", "-")
 
         best_match = None
         best_score = 0.0
 
         for center in self._centers_cache:
-            center_normalized = center['name'].lower().replace('_', '-').replace(' ', '-')
+            center_normalized = (
+                center["name"].lower().replace("_", "-").replace(" ", "-")
+            )
 
             # Calculate similarity ratio
             score = SequenceMatcher(None, input_normalized, center_normalized).ratio()
@@ -105,10 +112,14 @@ class REDCapPipeline:
                 best_match = center
 
         if best_score >= threshold:
-            logger.info(f"Fuzzy matched '{input_name}' -> '{best_match['name']}' (score: {best_score:.2f})")
-            return best_match['center_id']
+            logger.info(
+                f"Fuzzy matched '{input_name}' -> '{best_match['name']}' (score: {best_score:.2f})"
+            )
+            return best_match["center_id"]
 
-        logger.warning(f"No fuzzy match found for '{input_name}' (best score: {best_score:.2f})")
+        logger.warning(
+            f"No fuzzy match found for '{input_name}' (best score: {best_score:.2f})"
+        )
         return None
 
     def _normalize_center_name(self, name: str) -> str:
@@ -116,7 +127,7 @@ class REDCapPipeline:
         if not name:
             return "Unknown"
 
-        normalized = name.lower().replace(' ', '_').replace('-', '_')
+        normalized = name.lower().replace(" ", "_").replace("-", "_")
 
         # Check aliases first
         if normalized in CENTER_ALIASES:
@@ -173,8 +184,7 @@ class REDCapPipeline:
             logger.info("Initializing database connection pool...")
             try:
                 self.db_pool = psycopg2.pool.SimpleConnectionPool(
-                    1, 10,
-                    **self.db_config
+                    1, 10, **self.db_config
                 )
             except Exception as e:
                 logger.error(f"Failed to create connection pool: {e}")
@@ -247,33 +257,41 @@ class REDCapPipeline:
 
         # Primary identifiers
         if record.get("consortium_id"):
-            identifiers.append({
-                "center_id": center_id,
-                "local_subject_id": record["consortium_id"],
-                "identifier_type": "consortium_id"
-            })
+            identifiers.append(
+                {
+                    "center_id": center_id,
+                    "local_subject_id": record["consortium_id"],
+                    "identifier_type": "consortium_id",
+                }
+            )
 
         if record.get("local_id"):
-            identifiers.append({
-                "center_id": center_id,
-                "local_subject_id": record["local_id"],
-                "identifier_type": "local_id"
-            })
+            identifiers.append(
+                {
+                    "center_id": center_id,
+                    "local_subject_id": record["local_id"],
+                    "identifier_type": "local_id",
+                }
+            )
 
         # Additional identifiers that might exist
         if record.get("subject_id"):
-            identifiers.append({
-                "center_id": center_id,
-                "local_subject_id": record["subject_id"],
-                "identifier_type": "subject_id"
-            })
+            identifiers.append(
+                {
+                    "center_id": center_id,
+                    "local_subject_id": record["subject_id"],
+                    "identifier_type": "subject_id",
+                }
+            )
 
         if record.get("patient_id"):
-            identifiers.append({
-                "center_id": center_id,
-                "local_subject_id": record["patient_id"],
-                "identifier_type": "patient_id"
-            })
+            identifiers.append(
+                {
+                    "center_id": center_id,
+                    "local_subject_id": record["patient_id"],
+                    "identifier_type": "patient_id",
+                }
+            )
 
         return identifiers
 
@@ -291,7 +309,7 @@ class REDCapPipeline:
                     FROM local_subject_ids
                     WHERE center_id = %s AND local_subject_id = %s
                     """,
-                    (identifier["center_id"], identifier["local_subject_id"])
+                    (identifier["center_id"], identifier["local_subject_id"]),
                 )
                 existing = cur.fetchone()
 
@@ -315,8 +333,8 @@ class REDCapPipeline:
                             f"{identifier['local_subject_id']} (type: {identifier['identifier_type']}) "
                             f"linked to both {gsid} and {existing['global_subject_id']}",
                             gsid,
-                            existing["global_subject_id"]
-                        )
+                            existing["global_subject_id"],
+                        ),
                     )
 
                     # Log to identity_resolutions
@@ -336,8 +354,8 @@ class REDCapPipeline:
                             0.0,
                             True,
                             f"Local ID already exists for GSID {existing['global_subject_id']}",
-                            "redcap_pipeline"
-                        )
+                            "redcap_pipeline",
+                        ),
                     )
 
                     # Skip inserting this conflicting ID
@@ -345,7 +363,9 @@ class REDCapPipeline:
 
                 elif existing and existing["global_subject_id"] == gsid:
                     # Already linked correctly, skip
-                    logger.debug(f"ID {identifier['local_subject_id']} already linked to {gsid}")
+                    logger.debug(
+                        f"ID {identifier['local_subject_id']} already linked to {gsid}"
+                    )
                     continue
 
                 # No conflict - insert new mapping
@@ -359,8 +379,8 @@ class REDCapPipeline:
                         identifier["center_id"],
                         identifier["local_subject_id"],
                         identifier["identifier_type"],
-                        gsid
-                    )
+                        gsid,
+                    ),
                 )
                 logger.info(
                     f"Linked {identifier['identifier_type']}={identifier['local_subject_id']} -> {gsid}"
@@ -376,12 +396,13 @@ class REDCapPipeline:
             self.return_db_connection(conn)
 
     def register_subject(self, record: Dict) -> tuple[str, int]:
-        """Register subject and get GSID - returns (gsid, center_id)"""
+        """Register subject with identifier_type"""
         center_name = record.get("redcap_data_access_group", "Unknown")
         center_id = self.get_or_create_center(center_name)
 
-        # Use consortium_id as primary for initial registration
         local_subject_id = record.get("consortium_id") or record.get("local_id")
+        identifier_type = "consortium_id" if record.get("consortium_id") else "local_id"
+
         if not local_subject_id:
             raise ValueError(
                 f"No local_subject_id found in record: {record.get('record_id')}"
@@ -394,6 +415,7 @@ class REDCapPipeline:
         payload = {
             "center_id": center_id,
             "local_subject_id": local_subject_id,
+            "identifier_type": identifier_type,  # NEW
             "registration_year": registration_year,
             "control": control,
             "created_by": "redcap_pipeline",
@@ -404,7 +426,7 @@ class REDCapPipeline:
 
         result = response.json()
         logger.info(
-            f"Registered {local_subject_id} -> GSID {result['gsid']} ({result['action']})"
+            f"Registered {local_subject_id} ({identifier_type}) -> GSID {result['gsid']} ({result['action']})"
         )
 
         return result["gsid"], center_id
@@ -494,7 +516,7 @@ class REDCapPipeline:
                     VALUES (%s, %s)
                     ON CONFLICT (sample_id) DO NOTHING
                     """,
-                    (sample_id, gsid)
+                    (sample_id, gsid),
                 )
 
             # Blood samples
@@ -505,7 +527,7 @@ class REDCapPipeline:
                     VALUES (%s, %s)
                     ON CONFLICT (sample_id) DO NOTHING
                     """,
-                    (record["dna_blood_id"], gsid)
+                    (record["dna_blood_id"], gsid),
                 )
 
             # Family linkage
@@ -517,7 +539,7 @@ class REDCapPipeline:
                     VALUES (%s)
                     ON CONFLICT (family_id) DO NOTHING
                     """,
-                    (record["family_id"],)
+                    (record["family_id"],),
                 )
 
                 # Link subject to family
@@ -527,7 +549,7 @@ class REDCapPipeline:
                     SET family_id = %s
                     WHERE global_subject_id = %s
                     """,
-                    (record["family_id"], gsid)
+                    (record["family_id"], gsid),
                 )
 
             conn.commit()
@@ -561,7 +583,7 @@ class REDCapPipeline:
 
                 for record in records:
                     result = self.process_record(record)
-                    if result['status'] == 'success':
+                    if result["status"] == "success":
                         total_success += 1
                     else:
                         total_errors += 1
@@ -569,7 +591,9 @@ class REDCapPipeline:
                 offset += batch_size
                 del records
 
-            logger.info(f"Pipeline complete: {total_success} success, {total_errors} errors")
+            logger.info(
+                f"Pipeline complete: {total_success} success, {total_errors} errors"
+            )
 
         except Exception as e:
             logger.error(f"Pipeline failed: {str(e)}")
@@ -578,6 +602,7 @@ class REDCapPipeline:
             # Close all connections in pool
             if self.db_pool:
                 self.db_pool.closeall()
+
 
 if __name__ == "__main__":
     pipeline = REDCapPipeline()
