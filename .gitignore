@@ -8,6 +8,7 @@ postgres_data/
 
 # Logs
 *.log
+fragment-validator/logs/
 
 # Temporary files
 setup-info.txt
