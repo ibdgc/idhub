@@ -21,7 +21,7 @@ CREATE TABLE family (
 CREATE TABLE subjects (
 	    global_subject_id VARCHAR(12) PRIMARY KEY,
 	    center_id INT NOT NULL REFERENCES centers(center_id),
-	    registration_year DATE,
+	    registration_year INTEGER,
 	    control BOOLEAN DEFAULT FALSE,
 	    withdrawn BOOLEAN DEFAULT FALSE,
 	    family_id VARCHAR REFERENCES family(family_id),

@@ -1,5 +1,6 @@
 # gsid-service/main.py
 
+import logging
 import os
 import secrets
 import string
@@ -10,6 +11,9 @@ import psycopg2
 from fastapi import FastAPI, HTTPException
 from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel, field_validator
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -49,18 +53,19 @@ class SubjectRequest(BaseModel):
         if v is None:
             return None
         # Accept YYYY format or convert YYYY-MM-DD to YYYY
-        if '-' in v:
-            v = v.split('-')[0]
-        # Validate it's a 4-digit year
-        if len(v) == 4 and v.isdigit():
+        if isinstance(v, int):
+            return v
+        if '-' in str(v):
+            v = str(v).split('-')[0]
+        # Return as integer
+        if len(str(v)) == 4 and str(v).isdigit():
             year = int(v)
             if 1900 <= year <= 2100:
-                return v  # Return just the year string, not a date
+                return year  # Return int, not string
         return None
 
-
 class ResolutionResponse(BaseModel):
-    gsid: str  # Changed from int
+    gsid: str
     action: str
     match_strategy: str
     confidence: float
@@ -197,7 +202,7 @@ async def register_subject(request: SubjectRequest):
                 # Collision detected, regenerate
                 gsid = generate_gsid()
 
-            # Create subject
+            # Create subject (removed created_by column)
             cur.execute(
                 """
                 INSERT INTO subjects (global_subject_id, center_id, registration_year, control)
@@ -260,6 +265,7 @@ async def register_subject(request: SubjectRequest):
 
     except Exception as e:
         conn.rollback()
+        logger.error(f"Registration error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()
