@@ -37,7 +37,7 @@ CREATE TABLE local_subject_ids (
 	    identifier_type VARCHAR,
 	    global_subject_id VARCHAR(12) REFERENCES subjects(global_subject_id),
 	    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-	    PRIMARY KEY (center_id, local_subject_id)
+	    PRIMARY KEY (center_id, local_subject_id, identifier_type)
 );
 
 CREATE TABLE subject_alias (

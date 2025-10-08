@@ -1,0 +1,12 @@
+{
+  "default_center_id": 1,
+  "identifier_fields": {
+    "consortium_id": "consortium_id",
+    "niddk_no": "niddk_no"
+  },
+  "field_mappings": {
+    "knumber": "knumber",
+    "niddk_no": "niddk_no",
+    "date_collected": "collection_date"
+  }
+}

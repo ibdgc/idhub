@@ -137,6 +137,53 @@ services:
     profiles:
       - pipeline
 
+  fragment-validator:
+    build: ./fragment-validator
+    container_name: fragment_validator
+    restart: "no"
+    environment:
+      - DB_HOST=idhub_db
+      - DB_NAME=${IDHUB_DB_NAME}
+      - DB_USER=${IDHUB_DB_USER}
+      - DB_PASSWORD=${IDHUB_DB_PASSWORD}
+      - GSID_SERVICE_URL=http://gsid-service:8000
+      - S3_BUCKET=${S3_BUCKET}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+    volumes:
+      - ./fragment-validator/logs:/app/logs
+      - ./fragment-validator/config:/app/config
+    networks:
+      - idhub_network
+    depends_on:
+      - idhub_db
+      - gsid-service
+    profiles:
+      - manual
+  
+  table-loader:
+    build: ./table-loader
+    container_name: table_loader
+    restart: "no"
+    environment:
+      - DB_HOST=idhub_db
+      - DB_NAME=${IDHUB_DB_NAME}
+      - DB_USER=${IDHUB_DB_USER}
+      - DB_PASSWORD=${IDHUB_DB_PASSWORD}
+      - S3_BUCKET=${S3_BUCKET}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+    volumes:
+      - ./table-loader/logs:/app/logs
+    networks:
+      - idhub_network
+    depends_on:
+      - idhub_db
+    profiles:
+      - manual
+
 volumes:
   nocodb_data:
     driver: local

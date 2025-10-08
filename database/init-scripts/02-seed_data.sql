@@ -2,6 +2,7 @@
 -- Initial reference data
 
 INSERT INTO centers (center_id, name, investigator, country, consortium) VALUES
+(0, 'Unknown', 'Unkown','Unknown', 'Unknown'),
 (1, 'Academic-Medical-Center-Amsterdam', 'Rinse Weersma', 'Netherlands', 'Netherlands_UMCG_PSI'),
 (2, 'Addenbrookes', 'Carl Anderson', 'United Kingdom', 'Sanger_Working_Group'),
 (3, 'Alfred', 'Miles Sparrow', 'Australia', 'ANZIBDC'),
@@ -82,4 +83,5 @@ INSERT INTO centers (center_id, name, investigator, country, consortium) VALUES
 (78, 'University-Medical-Center-Groningen', 'Rinse Weersma', 'Netherlands', 'Netherlands_UMCG_PSI'),
 (79, 'University-Medical-Center-Utrecht', 'Rinse Weersma', 'Netherlands', 'Netherlands_UMCG_PSI'),
 (80, 'Wellcome Trust', 'Carl Anderson', 'United Kingdom', 'Sanger_Working_Group'),
-(81, 'Yale', 'Judy Cho', 'United States', 'NIDDK_IBDGC');
+(81, 'Yale', 'Judy Cho', 'United States', 'NIDDK_IBDGC')
+ON CONFLICT (center_id) DO NOTHING;
