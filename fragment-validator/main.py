@@ -1,13 +1,14 @@
+# fragment-validator/main.py
+
 import argparse
 import json
 import logging
 import os
 import sys
 from datetime import datetime
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional
 
 import boto3
-import numpy as np
 import pandas as pd
 import psycopg2
 import requests
@@ -24,34 +25,6 @@ class FragmentValidator:
         self.s3_bucket = s3_bucket
         self.gsid_service_url = gsid_service_url
         self.s3_client = boto3.client("s3")
-        self.local_id_cache = {}
-        self._load_local_id_cache()
-
-    def _load_local_id_cache(self):
-        """Pre-load all local_subject_ids into memory for fast lookups"""
-        try:
-            conn = psycopg2.connect(**self.db_config)
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                SELECT center_id, local_subject_id, identifier_type, global_subject_id
-                FROM local_subject_ids
-            """)
-
-            for center_id, local_id, id_type, gsid in cursor.fetchall():
-                key = (center_id, local_id, id_type)
-                self.local_id_cache[key] = gsid
-
-            cursor.close()
-            conn.close()
-
-            logger.info(
-                f"Loaded {len(self.local_id_cache)} unique local IDs into cache"
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to load local ID cache: {e}")
-            raise
 
     def process_incoming_file(
         self,
@@ -130,18 +103,31 @@ class FragmentValidator:
     def _apply_mapping(
         self, raw_data: pd.DataFrame, mapping_config: dict
     ) -> pd.DataFrame:
-        """Apply field mapping from config"""
-
+        """Apply field mapping from config, preserving candidate fields"""
+    
         field_map = mapping_config.get("field_mapping", {})
+        candidate_fields = mapping_config.get("subject_id_candidates", [])
+        center_field = mapping_config.get("center_id_field")
+    
         mapped_data = pd.DataFrame()
-
+    
+        # Map specified fields
         for target_field, source_field in field_map.items():
             if source_field in raw_data.columns:
                 mapped_data[target_field] = raw_data[source_field]
             else:
                 logger.warning(f"Source field '{source_field}' not found in input data")
                 mapped_data[target_field] = None
-
+    
+        # Preserve candidate fields for subject resolution
+        for field in candidate_fields:
+            if field in raw_data.columns and field not in mapped_data.columns:
+                mapped_data[field] = raw_data[field]
+    
+        # Preserve center_id field if specified
+        if center_field and center_field in raw_data.columns and center_field not in mapped_data.columns:
+            mapped_data[center_field] = raw_data[center_field]
+    
         return mapped_data
 
     def _validate_schema(self, data: pd.DataFrame, table_name: str) -> List[dict]:
@@ -160,6 +146,7 @@ class FragmentValidator:
                 FROM information_schema.columns
                 WHERE table_name = %s
                 AND column_name != 'global_subject_id'
+                AND column_name != 'created_at'
                 ORDER BY ordinal_position
             """,
                 (table_name,),
@@ -206,92 +193,116 @@ class FragmentValidator:
         candidate_fields: List[str],
         center_id_field: Optional[str] = None,
     ) -> dict:
-        """Resolve using GSID service for consistency"""
-
+        """Resolve subject IDs using GSID service"""
+    
         gsids = []
         local_id_records = []
         warnings = []
         stats = {
             "existing_matches": 0,
-            "new_gsids_minted": 0,
+            "new_gsids_created": 0,
             "unknown_center_used": 0,
             "center_promoted": 0,
+            "conflicts_flagged": 0,
         }
-
+    
         for idx, row in data.iterrows():
-            center_id = (
-                int(row[center_id_field])
-                if center_id_field and pd.notna(row.get(center_id_field))
-                else 0
-            )
-
+            # Determine center_id
+            center_id = 0  # Default to Unknown
+            if center_id_field and pd.notna(row.get(center_id_field)):
+                try:
+                    center_id = int(row[center_id_field])
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid center_id at row {idx}, using Unknown")
+    
             if center_id == 0:
                 stats["unknown_center_used"] += 1
-
-            # Try each candidate field through GSID service
+    
+            # Try to resolve using first available candidate field
             found_gsid = None
-
+            resolution_errors = []
+    
             for field in candidate_fields:
-                if field in row and pd.notna(row[field]):
-                    local_id = str(row[field])
-
-                    # Use GSID service for resolution
-                    payload = {
-                        "center_id": center_id,
-                        "local_subject_id": local_id,
-                        "identifier_type": field,
-                        "created_by": "fragment_validator",
-                    }
-
-                    try:
-                        response = requests.post(
-                            f"{self.gsid_service_url}/register", json=payload
+                if field not in row or pd.isna(row[field]):
+                    continue
+    
+                local_id = str(row[field]).strip()
+                if not local_id:
+                    continue
+    
+                # Register/resolve through GSID service
+                payload = {
+                    "center_id": center_id,
+                    "local_subject_id": local_id,
+                    "identifier_type": field,
+                    "created_by": "fragment_validator",
+                }
+    
+                try:
+                    response = requests.post(
+                        f"{self.gsid_service_url}/register",
+                        json=payload,
+                        timeout=10,
+                    )
+                    response.raise_for_status()
+                    result = response.json()
+    
+                    # Successfully got a GSID
+                    found_gsid = result["gsid"]
+    
+                    if result["action"] == "create_new":
+                        stats["new_gsids_created"] += 1
+                    elif result["action"] == "link_existing":
+                        stats["existing_matches"] += 1
+    
+                        # Check for center promotion
+                        if center_id != 0:
+                            promoted = self._promote_center_if_needed(found_gsid, center_id)
+                            if promoted:
+                                stats["center_promoted"] += 1
+    
+                    elif result["action"] == "review_required":
+                        stats["conflicts_flagged"] += 1
+                        warnings.append(
+                            f"Row {idx}: {result.get('review_reason', 'Conflict detected')}"
                         )
-                        response.raise_for_status()
-                        result = response.json()
-
-                        found_gsid = result["gsid"]
-
-                        if result["action"] == "create_new":
-                            stats["new_gsids_minted"] += 1
-                        else:
-                            stats["existing_matches"] += 1
-
-                        # Record all IDs for this subject
-                        for alt_field in candidate_fields:
-                            if alt_field in row and pd.notna(row[alt_field]):
-                                local_id_records.append(
-                                    {
-                                        "center_id": center_id,
-                                        "local_subject_id": str(row[alt_field]),
-                                        "identifier_type": alt_field,
-                                        "global_subject_id": found_gsid,
-                                        "action": result["action"],
-                                    }
-                                )
-
-                        break  # Found match, stop trying candidates
-
-                    except Exception as e:
-                        logger.error(f"GSID resolution failed for {local_id}: {e}")
-                        continue
-
+    
+                    # Record ALL local IDs for this subject
+                    for alt_field in candidate_fields:
+                        if alt_field in row and pd.notna(row[alt_field]):
+                            alt_id = str(row[alt_field]).strip()
+                            if alt_id:
+                                local_id_records.append({
+                                    "center_id": center_id,
+                                    "local_subject_id": alt_id,
+                                    "identifier_type": alt_field,
+                                    "global_subject_id": found_gsid,
+                                })
+    
+                    break  # Success - stop trying other fields
+    
+                except requests.exceptions.RequestException as e:
+                    error_msg = f"Field '{field}' value '{local_id}': {str(e)}"
+                    if hasattr(e, 'response') and e.response is not None:
+                        error_msg += f" (HTTP {e.response.status_code})"
+                    resolution_errors.append(error_msg)
+                    logger.error(f"GSID service error: {error_msg}")
+                    continue  # Try next candidate field
+    
             if not found_gsid:
-                raise ValueError(f"Failed to resolve subject at row {idx}")
-
+                error_detail = "\n  ".join(resolution_errors) if resolution_errors else "No valid candidate fields found"
+                raise ValueError(
+                    f"Row {idx}: Failed to resolve subject ID\n  Candidates: {candidate_fields}\n  Errors:\n  {error_detail}"
+                )
+    
             gsids.append(found_gsid)
-
+    
         # Generate warnings
         if stats["unknown_center_used"] > 0:
             warnings.append(
                 f"{stats['unknown_center_used']} records used center_id=0 (Unknown)"
             )
-
-        if stats["center_promoted"] > 0:
-            warnings.append(
-                f"{stats['center_promoted']} records promoted from Unknown to known center"
-            )
-
+    
         return {
             "gsids": gsids,
             "local_id_records": local_id_records,
@@ -299,21 +310,43 @@ class FragmentValidator:
             "warnings": warnings,
         }
 
-    def _mint_new_gsid(self) -> str:
-        """Request new GSID from gsid-service"""
+    def _promote_center_if_needed(self, gsid: str, new_center_id: int) -> bool:
+        """Update subject's center from Unknown (0) to known center"""
         try:
-            # Use /register endpoint with minimal payload
-            payload = {
-                "center_id": 0,  # Unknown center
-                "local_subject_id": f"temp_{datetime.now().strftime('%Y%m%d%H%M%S%f')}",
-                "created_by": "fragment_validator",
-            }
-            response = requests.post(f"{self.gsid_service_url}/register", json=payload)
-            response.raise_for_status()
-            return response.json()["gsid"]
+            conn = psycopg2.connect(**self.db_config)
+            cursor = conn.cursor()
+
+            # Check if subject has center_id = 0
+            cursor.execute(
+                "SELECT center_id FROM subjects WHERE global_subject_id = %s",
+                (gsid,),
+            )
+            result = cursor.fetchone()
+
+            if result and result[0] == 0:
+                # Promote to known center
+                cursor.execute(
+                    """
+                    UPDATE subjects 
+                    SET center_id = %s, 
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE global_subject_id = %s
+                    """,
+                    (new_center_id, gsid),
+                )
+                conn.commit()
+                logger.info(f"Promoted {gsid} from Unknown to center {new_center_id}")
+                cursor.close()
+                conn.close()
+                return True
+
+            cursor.close()
+            conn.close()
+            return False
+
         except Exception as e:
-            logger.error(f"Failed to mint GSID: {e}")
-            raise
+            logger.error(f"Failed to promote center for {gsid}: {e}")
+            return False
 
     def _write_staging_outputs(
         self,
@@ -324,34 +357,58 @@ class FragmentValidator:
         report: dict,
     ):
         """Write validated data and metadata to staging area"""
-
+    
         staging_prefix = f"staging/validated/{batch_id}"
-
+    
+        # Remove candidate fields that aren't part of the table schema
+        # Keep only: table columns + global_subject_id
+        output_data = data.copy()
+    
+        # Get table schema to know which columns to keep
+        try:
+            conn = psycopg2.connect(**self.db_config)
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = %s",
+                (table_name,)
+            )
+            valid_columns = [row[0] for row in cursor.fetchall()]
+            cursor.close()
+            conn.close()
+    
+            # Keep only valid columns that exist in data
+            output_data = output_data[[col for col in output_data.columns if col in valid_columns]]
+    
+        except Exception as e:
+            logger.warning(f"Could not validate columns against schema: {e}")
+    
         # Write main table data
-        table_csv = data.to_csv(index=False)
+        table_csv = output_data.to_csv(index=False)
         self.s3_client.put_object(
             Bucket=self.s3_bucket,
             Key=f"{staging_prefix}/{table_name}.csv",
             Body=table_csv,
         )
-
-        # Write local_subject_ids records
+    
+        # Write local_subject_ids records (deduplicated)
         if local_id_records:
-            local_ids_df = pd.DataFrame(local_id_records)
+            local_ids_df = pd.DataFrame(local_id_records).drop_duplicates(
+                subset=["center_id", "local_subject_id", "identifier_type"]
+            )
             local_ids_csv = local_ids_df.to_csv(index=False)
             self.s3_client.put_object(
                 Bucket=self.s3_bucket,
                 Key=f"{staging_prefix}/local_subject_ids.csv",
                 Body=local_ids_csv,
             )
-
+    
         # Write validation report
         self.s3_client.put_object(
             Bucket=self.s3_bucket,
             Key=f"{staging_prefix}/validation_report.json",
             Body=json.dumps(report, indent=2),
         )
-
+    
         logger.info(
             f"Staging outputs written to s3://{self.s3_bucket}/{staging_prefix}/"
         )
@@ -376,24 +433,23 @@ class FragmentValidator:
             stats = report["resolution_summary"]
             print(f"\nSubject Resolution:")
             print(f"  - Existing matches: {stats['existing_matches']}")
-            print(f"  - New GSIDs minted: {stats['new_gsids_minted']}")
+            print(f"  - New GSIDs created: {stats['new_gsids_created']}")
             print(f"  - Unknown center used: {stats['unknown_center_used']}")
             print(f"  - Centers promoted: {stats['center_promoted']}")
+            print(f"  - Conflicts flagged: {stats['conflicts_flagged']}")
 
             if report["warnings"]:
-                print(f"\nWarnings:")
-                for warning in report["warnings"]:
+                print(f"\nWarnings ({len(report['warnings'])}):")
+                for warning in report["warnings"][:10]:  # Show first 10
                     print(f"  ⚠ {warning}")
+                if len(report["warnings"]) > 10:
+                    print(f"  ... and {len(report['warnings']) - 10} more")
 
             print(f"\nStaging: {report['staging_location']}")
         else:
             print(f"\nValidation Errors ({len(report['validation_errors'])}):")
             for error in report["validation_errors"]:
                 print(f"  ✗ [{error['type']}] {error['message']}")
-                if "column" in error:
-                    print(f"    Column: {error['column']}")
-                if "null_count" in error:
-                    print(f"    Null count: {error['null_count']}")
 
         print("=" * 70 + "\n")
 
@@ -422,8 +478,8 @@ def main():
         "password": os.getenv("DB_PASSWORD"),
     }
 
-    s3_bucket = os.getenv("S3_BUCKET", "idhub-curated-fragments")
-    gsid_service_url = os.getenv("GSID_SERVICE_URL", "http://gsid_service:8000")
+    s3_bucket = os.getenv("S3_BUCKET")
+    gsid_service_url = os.getenv("GSID_SERVICE_URL", "http://gsid-service:8000")
 
     try:
         validator = FragmentValidator(db_config, s3_bucket, gsid_service_url)
@@ -432,10 +488,8 @@ def main():
         )
 
         if report["status"] == "FAILED":
-            logger.error("✗ Validation failed")
             sys.exit(1)
         else:
-            logger.info("✓ Validation successful")
             sys.exit(0)
 
     except Exception as e:

@@ -1,7 +1,6 @@
 {
   "field_mapping": {
     "sample_id": "sample_id",
-    "consortium_id": "consortium_id",
     "sample_type": "sample_type",
     "date_collected": "date_collected"
   },

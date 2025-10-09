@@ -1,10 +1,11 @@
+# table-loader/main.py
+
 import argparse
 import json
 import logging
 import os
 import sys
-from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict
 
 import boto3
 import pandas as pd
@@ -14,7 +15,6 @@ from psycopg2.extras import execute_values
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[logging.FileHandler("logs/loader.log"), logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class TableLoader:
     def __init__(self):
         self.s3_client = boto3.client("s3")
-        self.s3_bucket = os.getenv("S3_BUCKET", "idhub-curated-fragments")
+        self.s3_bucket = os.getenv("S3_BUCKET")
         self.db_config = {
             "host": os.getenv("DB_HOST"),
             "database": os.getenv("DB_NAME"),
@@ -34,53 +34,61 @@ class TableLoader:
             "lcl": "knumber",
             "dna": "sample_id",
             "blood": "sample_id",
+            "wgs": "sample_id",
+            "immunochip": "sample_id",
+            "bge": "sample_id",
+            "exomechip": "sample_id",
+            "gwas2": "sample_id",
+            "plasma": "sample_id",
+            "enteroid": "sample_id",
+            "olink": "sample_id",
+            "rnaseq": "sample_id",
+            "wes": "seq_id",
             "genotyping": "genotype_id",
-            "local_subject_ids": ["center_id", "local_subject_id", "identifier_type"],
         }
 
-    def load_validated_batch(self, batch_id: str):
-        """Load validated batch from staging/validated/"""
+    def load_batch(self, batch_id: str) -> dict:
+        """Load validated batch into database"""
 
-        staging_prefix = f"staging/validated/{batch_id}/"
+        batch_path = f"staging/validated/{batch_id}"
 
         logger.info(f"Loading validated batch: {batch_id}")
 
-        # Check metadata
+        # Load validation report
         try:
             obj = self.s3_client.get_object(
-                Bucket=self.s3_bucket, Key=f"{staging_prefix}metadata.json"
+                Bucket=self.s3_bucket, Key=f"{batch_path}/validation_report.json"
             )
-            metadata = json.load(obj["Body"])
-        except:
-            raise ValueError(f"Batch {batch_id} not found in staging/validated/")
-
-        # List all CSV files
-        response = self.s3_client.list_objects_v2(
-            Bucket=self.s3_bucket, Prefix=staging_prefix
-        )
+            report = json.load(obj["Body"])
+            table_name = report["table_name"]
+        except Exception as e:
+            raise ValueError(f"Batch {batch_id} not found or invalid: {e}")
 
         results = {}
 
-        for obj in response.get("Contents", []):
-            key = obj["Key"]
-            if key.endswith(".csv"):
-                table_name = key.split("/")[-1].replace(".csv", "")
+        # Load main table
+        try:
+            row_count = self._load_table(table_name, f"{batch_path}/{table_name}.csv")
+            results[table_name] = {"status": "success", "rows": row_count}
+            logger.info(f"✓ Loaded {row_count} rows into {table_name}")
+        except Exception as e:
+            results[table_name] = {"status": "error", "message": str(e)}
+            logger.error(f"Failed to load {table_name}: {e}")
 
-                try:
-                    rows = self._load_table(table_name, key)
-                    results[table_name] = {"status": "success", "rows": rows}
+        # Load local_subject_ids
+        try:
+            row_count = self._load_local_subject_ids(
+                f"{batch_path}/local_subject_ids.csv"
+            )
+            results["local_subject_ids"] = {"status": "success", "rows": row_count}
+            logger.info(f"✓ Loaded {row_count} local_subject_ids")
+        except Exception as e:
+            results["local_subject_ids"] = {"status": "error", "message": str(e)}
+            logger.error(f"Failed to load local_subject_ids: {e}")
 
-                    # Archive to curated-tables
-                    self._archive_to_curated(table_name, key, batch_id)
-
-                except Exception as e:
-                    results[table_name] = {"status": "error", "error": str(e)}
-                    logger.error(f"Failed to load {table_name}: {e}")
-
-        # Move batch to loaded/
+        # Move batch to loaded
         self._move_to_loaded(batch_id)
 
-        # Print summary
         self._print_summary(batch_id, results)
 
         return results
@@ -120,101 +128,52 @@ class TableLoader:
         finally:
             conn.close()
 
-    def load_batch(self, batch_id: str) -> dict:
-        """Load validated batch into database"""
+    def _load_local_subject_ids(self, s3_key: str) -> int:
+        """Load local_subject_ids with deduplication"""
 
-        batch_path = f"staging/validated/{batch_id}"
+        obj = self.s3_client.get_object(Bucket=self.s3_bucket, Key=s3_key)
+        df = pd.read_csv(obj["Body"])
 
-        logger.info(f"Loading validated batch: {batch_id}")
+        # Deduplicate
+        df = df.drop_duplicates(
+            subset=["center_id", "local_subject_id", "identifier_type"]
+        )
 
-        # Load validation report
-        report = self._load_report(batch_path)
-        table_name = report["table_name"]
-
-        results = {}
-
+        conn = psycopg2.connect(**self.db_config)
         try:
-            # Load main table
-            row_count = self._load_table(batch_path, table_name)
-            results[table_name] = {"status": "success", "rows": row_count}
-            logger.info(f"✓ Loaded {row_count} rows into {table_name}")
+            cur = conn.cursor()
 
-            # Archive main table
-            self._archive_table(batch_path, table_name, batch_id)
-
-        except Exception as e:
-            results[table_name] = {"status": "error", "message": str(e)}
-            logger.error(f"Failed to load {table_name}: {e}")
-
-        try:
-            # Load local_subject_ids with special logic
-            row_count = self._load_local_subject_ids(batch_path)
-            results["local_subject_ids"] = {"status": "success", "rows": row_count}
-            logger.info(f"✓ Loaded {row_count} rows into local_subject_ids")
-
-        except Exception as e:
-            results["local_subject_ids"] = {"status": "error", "message": str(e)}
-            logger.error(f"Failed to load local_subject_ids: {e}")
-
-        # Move batch to loaded
-        self._move_to_loaded(batch_id)
-
-        self._print_summary(batch_id, results)
-
-        return results
-
-    def _load_local_subject_ids(self, batch_path: str) -> int:
-        """Load local_subject_ids with center promotion logic"""
-
-        local_ids_key = f"{batch_path}/local_subject_ids.csv"
-
-        try:
-            obj = self.s3_client.get_object(Bucket=self.s3_bucket, Key=local_ids_key)
-            df = pd.read_csv(obj["Body"])
-
-            conn = psycopg2.connect(**self.db_config)
-            cursor = conn.cursor()
-
-            # Prepare records
             records = [
                 (
-                    row["center_id"],
-                    row["local_subject_id"],
-                    row["identifier_type"],
-                    row["global_subject_id"],
+                    int(row["center_id"]),
+                    str(row["local_subject_id"]),
+                    str(row["identifier_type"]),
+                    str(row["global_subject_id"]),
                 )
                 for _, row in df.iterrows()
             ]
 
-            # Insert with center promotion logic
-            cursor.executemany(
+            execute_values(
+                cur,
                 """
                 INSERT INTO local_subject_ids 
                   (center_id, local_subject_id, identifier_type, global_subject_id)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (center_id, local_subject_id, identifier_type) 
-                DO UPDATE SET 
-                  center_id = CASE 
-                    WHEN local_subject_ids.center_id = 0 AND EXCLUDED.center_id != 0 
-                    THEN EXCLUDED.center_id
-                    ELSE local_subject_ids.center_id
-                  END,
-                  global_subject_id = COALESCE(EXCLUDED.global_subject_id, local_subject_ids.global_subject_id)
-            """,
+                VALUES %s
+                ON CONFLICT (center_id, local_subject_id, identifier_type) DO NOTHING
+                """,
                 records,
             )
 
+            rows_affected = cur.rowcount
             conn.commit()
-            row_count = len(records)
 
-            cursor.close()
-            conn.close()
-
-            return row_count
+            return rows_affected
 
         except Exception as e:
-            logger.error(f"Failed to load local_subject_ids: {e}")
+            conn.rollback()
             raise
+        finally:
+            conn.close()
 
     def _get_conflict_clause(self, table_name: str, columns: list) -> str:
         """Generate ON CONFLICT clause"""
@@ -223,30 +182,16 @@ class TableLoader:
         if not pk:
             return "ON CONFLICT DO NOTHING"
 
-        if isinstance(pk, list):
-            pk_clause = f"({', '.join(pk)})"
-            update_cols = [c for c in columns if c not in pk and c != "created_at"]
-        else:
-            pk_clause = f"({pk})"
-            update_cols = [c for c in columns if c != pk and c != "created_at"]
+        pk_clause = f"({pk})"
+        update_cols = [
+            c for c in columns if c != pk and c not in ["created_at", "global_subject_id"]
+        ]
 
         if not update_cols:
             return f"ON CONFLICT {pk_clause} DO NOTHING"
 
         updates = ", ".join([f"{c} = EXCLUDED.{c}" for c in update_cols])
         return f"ON CONFLICT {pk_clause} DO UPDATE SET {updates}"
-
-    def _archive_to_curated(self, table_name: str, source_key: str, batch_id: str):
-        """Archive to curated-tables/"""
-        dest_key = f"curated-tables/{table_name}/{table_name}_{batch_id}.csv"
-
-        self.s3_client.copy_object(
-            Bucket=self.s3_bucket,
-            CopySource={"Bucket": self.s3_bucket, "Key": source_key},
-            Key=dest_key,
-        )
-
-        logger.info(f"Archived to {dest_key}")
 
     def _move_to_loaded(self, batch_id: str):
         """Move batch from validated/ to loaded/"""
@@ -282,7 +227,7 @@ class TableLoader:
             if result["status"] == "success":
                 print(f"✓ {table}: {result['rows']} rows loaded")
             else:
-                print(f"✗ {table}: {result['error']}")
+                print(f"✗ {table}: {result.get('message', 'Unknown error')}")
 
         print("=" * 70 + "\n")
 
@@ -296,7 +241,7 @@ def main():
     loader = TableLoader()
 
     try:
-        loader.load_validated_batch(args.batch_id)
+        loader.load_batch(args.batch_id)
         logger.info("✓ Load complete")
 
     except Exception as e:
