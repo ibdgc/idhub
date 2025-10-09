@@ -1,4 +1,4 @@
-# gsid-service/main.py
+# gsid-service/main.py - Add logging to see what's happening
 
 import logging
 import os
@@ -19,19 +19,12 @@ BASE32_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 
 def generate_gsid() -> str:
-    """
-    Generate 12-character GSID: TTTTTTRRRRRR
-    - 6 chars: timestamp (milliseconds since epoch, base32)
-    - 6 chars: random (base32)
-    """
     timestamp_ms = int(time.time() * 1000)
     timestamp_b32 = ""
     for _ in range(6):
         timestamp_b32 = BASE32_ALPHABET[timestamp_ms % 32] + timestamp_b32
         timestamp_ms //= 32
-
     random_b32 = "".join(secrets.choice(BASE32_ALPHABET) for _ in range(6))
-
     return timestamp_b32 + random_b32
 
 
@@ -43,31 +36,37 @@ class SubjectRequest(BaseModel):
     control: bool = False
     created_by: str = "system"
 
-    @field_validator("registration_year")
+    @field_validator('registration_year', mode='before')
     @classmethod
     def validate_year(cls, v):
+        logger.info(f"Validator received: {v} (type: {type(v)})")
+
         if v is None:
+            logger.info("Year is None, returning None")
             return None
+
+        # Handle integer
         if isinstance(v, int):
             if 1900 <= v <= 2100:
+                logger.info(f"Valid integer year: {v}")
                 return v
-            return None
-        if "-" in str(v):
-            v = str(v).split("-")[0]
-        if len(str(v)) == 4 and str(v).isdigit():
-            year = int(v)
-            if 1900 <= year <= 2100:
-                return year
-        return None
+            logger.warning(f"Integer year {v} out of range")
+            raise ValueError(f"Year {v} out of valid range (1900-2100)")
 
+        # Handle string
+        if isinstance(v, str):
+            if '-' in v:
+                v = v.split('-')[0]
+            if v.isdigit() and len(v) == 4:
+                year = int(v)
+                if 1900 <= year <= 2100:
+                    logger.info(f"Valid string year converted: {year}")
+                    return year
+            logger.warning(f"Invalid string year: {v}")
+            raise ValueError(f"Invalid year format: {v}")
 
-class ResolutionResponse(BaseModel):
-    gsid: str
-    action: str
-    match_strategy: str
-    confidence: float
-    requires_review: bool
-    review_reason: str | None = None
+        logger.error(f"Unexpected type for year: {type(v)}")
+        raise ValueError(f"Year must be integer or string, got {type(v)}")
 
 
 def get_db():
@@ -84,10 +83,7 @@ def get_db():
 def resolve_identity(
     conn, center_id: int, local_subject_id: str, identifier_type: str = "primary"
 ) -> dict:
-    """Core identity resolution logic with identifier_type support"""
     cur = conn.cursor()
-
-    # Check exact match with identifier_type
     cur.execute(
         """
         SELECT s.global_subject_id, s.withdrawn 
@@ -116,7 +112,6 @@ def resolve_identity(
             "review_reason": None,
         }
 
-    # Check alias match
     cur.execute(
         """
         SELECT s.global_subject_id, s.withdrawn
@@ -145,7 +140,6 @@ def resolve_identity(
             "review_reason": None,
         }
 
-    # No match found
     return {
         "action": "create_new",
         "gsid": None,
@@ -156,7 +150,6 @@ def resolve_identity(
 
 
 def log_resolution(conn, resolution: dict, request: SubjectRequest):
-    """Log identity resolution for audit trail"""
     cur = conn.cursor()
     cur.execute(
         """
@@ -181,28 +174,27 @@ def log_resolution(conn, resolution: dict, request: SubjectRequest):
     return cur.fetchone()["resolution_id"]
 
 
-@app.post("/register", response_model=ResolutionResponse)
+@app.post("/register")
 async def register_subject(request: SubjectRequest):
-    """Register or link a subject with identity resolution"""
+    logger.info(f"Registration request: center_id={request.center_id}, "
+                f"local_id={request.local_subject_id}, "
+                f"year={request.registration_year} (type: {type(request.registration_year)})")
+
     conn = get_db()
     try:
-        # Resolve identity with identifier_type
         resolution = resolve_identity(
             conn, request.center_id, request.local_subject_id, request.identifier_type
         )
 
-        # Handle based on action
         if resolution["action"] == "create_new":
-            # Generate new GSID
             gsid = generate_gsid()
-
-            # Ensure uniqueness
             cur = conn.cursor()
             cur.execute("SELECT 1 FROM subjects WHERE global_subject_id = %s", (gsid,))
             if cur.fetchone():
                 gsid = generate_gsid()
 
-            # Create subject
+            logger.info(f"Creating subject with year: {request.registration_year}")
+
             cur.execute(
                 """
                 INSERT INTO subjects (global_subject_id, center_id, registration_year, control)
@@ -211,7 +203,6 @@ async def register_subject(request: SubjectRequest):
                 (gsid, request.center_id, request.registration_year, request.control),
             )
 
-            # Create local_subject_id entry with identifier_type
             cur.execute(
                 """
                 INSERT INTO local_subject_ids (center_id, local_subject_id, identifier_type, global_subject_id)
@@ -228,7 +219,6 @@ async def register_subject(request: SubjectRequest):
             resolution["gsid"] = gsid
 
         elif resolution["action"] == "link_existing":
-            # Add new local_subject_id to existing GSID
             gsid = resolution["gsid"]
             cur = conn.cursor()
             cur.execute(
@@ -246,7 +236,6 @@ async def register_subject(request: SubjectRequest):
             )
 
         elif resolution["action"] == "review_required":
-            # Flag for manual review
             gsid = resolution["gsid"]
             cur = conn.cursor()
             cur.execute(
@@ -259,19 +248,17 @@ async def register_subject(request: SubjectRequest):
                 (resolution["review_reason"], gsid),
             )
 
-        # Log resolution
         log_resolution(conn, resolution, request)
-
         conn.commit()
 
-        return ResolutionResponse(
-            gsid=resolution["gsid"],
-            action=resolution["action"],
-            match_strategy=resolution["match_strategy"],
-            confidence=resolution["confidence"],
-            requires_review=resolution["action"] == "review_required",
-            review_reason=resolution.get("review_reason"),
-        )
+        return {
+            "gsid": resolution["gsid"],
+            "action": resolution["action"],
+            "match_strategy": resolution["match_strategy"],
+            "confidence": resolution["confidence"],
+            "requires_review": resolution["action"] == "review_required",
+            "review_reason": resolution.get("review_reason"),
+        }
 
     except Exception as e:
         conn.rollback()
@@ -283,7 +270,6 @@ async def register_subject(request: SubjectRequest):
 
 @app.get("/review-queue")
 async def get_review_queue():
-    """Get subjects flagged for manual review"""
     conn = get_db()
     try:
         cur = conn.cursor()
@@ -311,7 +297,6 @@ async def get_review_queue():
 
 @app.post("/resolve-review/{gsid}")
 async def resolve_review(gsid: str, reviewed_by: str, notes: str = None):
-    """Mark a review as resolved"""
     conn = get_db()
     try:
         cur = conn.cursor()
