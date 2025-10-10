@@ -279,22 +279,46 @@ class FragmentValidator:
         try:
             table_id = self._get_table_id(table_name)
 
-            # Get columns for this table
-            columns_url = f"{self.nocodb_url}/api/v2/meta/tables/{table_id}/columns"
+            # Get table metadata (includes columns)
+            table_url = f"{self.nocodb_url}/api/v2/meta/tables/{table_id}"
             headers = {"xc-token": self.nocodb_token}
 
-            response = requests.get(columns_url, headers=headers)
+            response = requests.get(table_url, headers=headers)
             response.raise_for_status()
-            columns = response.json().get("list", [])
+            table_meta = response.json()
+
+            columns = table_meta.get("columns", [])
+
+            if not columns:
+                logger.warning(
+                    f"No columns found for table {table_name}, skipping schema validation"
+                )
+                return errors
+
+            # Skip these system/auto-generated columns
+            skip_columns = {
+                "created_at",
+                "updated_at",
+                "global_subject_id",  # Will be resolved during processing
+                "Id",
+            }
 
             # Check required columns exist
             for col in columns:
-                col_name = col["column_name"]
+                col_name = col.get("column_name")
 
-                # Skip auto-generated columns
-                if col_name in ["created_at", "updated_at", "global_subject_id"]:
+                if not col_name or col_name in skip_columns:
                     continue
 
+                # Skip primary keys (they're auto-generated or handled separately)
+                if col.get("pk", False):
+                    continue
+
+                # Skip auto-increment
+                if col.get("ai", False):
+                    continue
+
+                # Check if required
                 is_required = col.get("rqd", False)
 
                 if col_name not in data.columns and is_required:
@@ -308,9 +332,12 @@ class FragmentValidator:
 
             # Check for null values in NOT NULL columns
             for col in columns:
-                col_name = col["column_name"]
+                col_name = col.get("column_name")
 
-                if col_name in ["created_at", "updated_at", "global_subject_id"]:
+                if not col_name or col_name in skip_columns:
+                    continue
+
+                if col.get("pk", False) or col.get("ai", False):
                     continue
 
                 is_required = col.get("rqd", False)
@@ -328,6 +355,7 @@ class FragmentValidator:
                         )
 
         except Exception as e:
+            logger.error(f"Schema validation error: {e}")
             errors.append({"type": "schema_validation_error", "message": str(e)})
 
         return errors
