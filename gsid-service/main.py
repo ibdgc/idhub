@@ -74,6 +74,119 @@ class SubjectRequest(BaseModel):
         return None
 
 
+class BatchSubjectRequest(BaseModel):
+    requests: List[SubjectRequest]
+
+
+@app.post("/register/batch", response_model=List[ResolutionResponse])
+async def register_subjects_batch(
+    batch: BatchSubjectRequest, api_key: str = Depends(verify_api_key)
+):
+    """Register multiple subjects in a single request (requires API key)"""
+    conn = get_db()
+    results = []
+
+    try:
+        for request in batch.requests:
+            # Resolve identity with identifier_type
+            resolution = resolve_identity(
+                conn,
+                request.center_id,
+                request.local_subject_id,
+                request.identifier_type,
+            )
+
+            # Handle based on action
+            if resolution["action"] == "create_new":
+                gsid = generate_gsid()
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT 1 FROM subjects WHERE global_subject_id = %s", (gsid,)
+                )
+                if cur.fetchone():
+                    gsid = generate_gsid()
+
+                cur.execute(
+                    """
+                    INSERT INTO subjects (global_subject_id, center_id, registration_year, control)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (
+                        gsid,
+                        request.center_id,
+                        request.registration_year,
+                        request.control,
+                    ),
+                )
+
+                cur.execute(
+                    """
+                    INSERT INTO local_subject_ids (center_id, local_subject_id, identifier_type, global_subject_id)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (
+                        request.center_id,
+                        request.local_subject_id,
+                        request.identifier_type,
+                        gsid,
+                    ),
+                )
+
+                resolution["gsid"] = gsid
+
+            elif resolution["action"] == "link_existing":
+                gsid = resolution["gsid"]
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO local_subject_ids (center_id, local_subject_id, identifier_type, global_subject_id)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (center_id, local_subject_id, identifier_type) DO NOTHING
+                    """,
+                    (
+                        request.center_id,
+                        request.local_subject_id,
+                        request.identifier_type,
+                        gsid,
+                    ),
+                )
+
+            elif resolution["action"] == "review_required":
+                gsid = resolution["gsid"]
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    UPDATE subjects 
+                    SET flagged_for_review = TRUE, review_notes = %s
+                    WHERE global_subject_id = %s
+                    """,
+                    (resolution["review_reason"], gsid),
+                )
+
+            log_resolution(conn, resolution, request)
+
+            results.append(
+                ResolutionResponse(
+                    gsid=resolution["gsid"],
+                    action=resolution["action"],
+                    match_strategy=resolution["match_strategy"],
+                    confidence=resolution["confidence"],
+                    requires_review=resolution["action"] == "review_required",
+                    review_reason=resolution.get("review_reason"),
+                )
+            )
+
+        conn.commit()
+        return results
+
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Batch registration error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
 class ResolutionResponse(BaseModel):
     gsid: str
     action: str

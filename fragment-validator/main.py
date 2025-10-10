@@ -338,7 +338,7 @@ class FragmentValidator:
         candidate_fields: List[str],
         center_id_field: Optional[str] = None,
     ) -> dict:
-        """Resolve using GSID service for consistency"""
+        """Resolve using GSID service with batch processing for performance"""
 
         gsids = []
         local_id_records = []
@@ -349,6 +349,10 @@ class FragmentValidator:
             "unknown_center_used": 0,
             "center_promoted": 0,
         }
+
+        # Prepare batch requests
+        batch_requests = []
+        row_indices = []
 
         for idx, row in data.iterrows():
             # Handle center_id - default to 0 (Unknown) if not provided
@@ -362,49 +366,70 @@ class FragmentValidator:
                 center_id = 0
                 stats["unknown_center_used"] += 1
 
-            # Try each candidate field through GSID service
-            found_gsid = None
-            attempted_lookups = []
-
+            # Get first valid candidate field
+            local_id = None
+            used_field = None
             for field in candidate_fields:
-                if field not in row or pd.isna(row[field]):
-                    continue
+                if field in row and pd.notna(row[field]):
+                    local_id = str(row[field])
+                    used_field = field
+                    break
 
-                local_id = str(row[field])
-                attempted_lookups.append(f"{field}={local_id}")
+            if not local_id:
+                logger.error(
+                    f"Row {idx}: No valid subject ID found in candidate fields"
+                )
+                raise ValueError(f"Failed to resolve subject at row {idx}")
 
-                # Use GSID service for resolution
-                payload = {
+            batch_requests.append(
+                {
                     "center_id": center_id,
                     "local_subject_id": local_id,
-                    "identifier_type": field,
+                    "identifier_type": used_field,
                     "created_by": "fragment_validator",
                 }
+            )
+            row_indices.append((idx, row, used_field, center_id))
 
-                try:
-                    response = requests.post(
-                        f"{self.gsid_service_url}/register",
-                        json=payload,
-                        headers={"x-api-key": self.gsid_api_key},
-                        timeout=30,
-                    )
-                    response.raise_for_status()
-                    result = response.json()
+        # Process in batches of 100
+        batch_size = 100
+        total_batches = (len(batch_requests) + batch_size - 1) // batch_size
+
+        logger.info(
+            f"Processing {len(batch_requests)} records in {total_batches} batches..."
+        )
+
+        for batch_num in range(total_batches):
+            start_idx = batch_num * batch_size
+            end_idx = min(start_idx + batch_size, len(batch_requests))
+            batch = batch_requests[start_idx:end_idx]
+
+            try:
+                # Use batch endpoint
+                response = requests.post(
+                    f"{self.gsid_service_url}/register/batch",
+                    json={"requests": batch},
+                    headers={"x-api-key": self.gsid_api_key},
+                    timeout=60,
+                )
+                response.raise_for_status()
+                results = response.json()
+
+                # Process results
+                for i, result in enumerate(results):
+                    global_idx = start_idx + i
+                    idx, row, used_field, center_id = row_indices[global_idx]
 
                     found_gsid = result["gsid"]
 
                     if result["action"] == "create_new":
                         stats["new_gsids_minted"] += 1
-                        logger.info(
-                            f"Row {idx}: Minted new GSID {found_gsid} for {field}={local_id}"
-                        )
                     else:
                         stats["existing_matches"] += 1
-                        logger.debug(
-                            f"Row {idx}: Matched existing GSID {found_gsid} for {field}={local_id}"
-                        )
 
-                    # Record all IDs for this subject
+                    gsids.append(found_gsid)
+
+                    # Record local IDs
                     for alt_field in candidate_fields:
                         if alt_field in row and pd.notna(row[alt_field]):
                             local_id_records.append(
@@ -417,30 +442,12 @@ class FragmentValidator:
                                 }
                             )
 
-                    break  # Found match, stop trying candidates
+                if (batch_num + 1) % 10 == 0 or batch_num == total_batches - 1:
+                    logger.info(f"Processed {end_idx}/{len(batch_requests)} records...")
 
-                except requests.exceptions.HTTPError as e:
-                    logger.error(
-                        f"Row {idx}: GSID API error for {field}={local_id}: {e.response.status_code} - {e.response.text}"
-                    )
-                    continue
-                except Exception as e:
-                    logger.error(
-                        f"Row {idx}: GSID resolution failed for {field}={local_id}: {e}"
-                    )
-                    continue
-
-            if not found_gsid:
-                logger.error(
-                    f"Row {idx}: Failed to resolve subject\n"
-                    f"  center_id: {center_id}\n"
-                    f"  Attempted lookups: {attempted_lookups}\n"
-                    f"  Available candidate fields: {candidate_fields}\n"
-                    f"  Row data: {row.to_dict()}"
-                )
-                raise ValueError(f"Failed to resolve subject at row {idx}")
-
-            gsids.append(found_gsid)
+            except Exception as e:
+                logger.error(f"Batch {batch_num} failed: {e}")
+                raise
 
         # Generate warnings
         if stats["unknown_center_used"] > 0:
@@ -459,28 +466,6 @@ class FragmentValidator:
             "summary": stats,
             "warnings": warnings,
         }
-
-    def _mint_new_gsid(self) -> str:
-        """Request new GSID from gsid-service"""
-        try:
-            # Use /register endpoint with minimal payload
-            payload = {
-                "center_id": 0,  # Unknown center
-                "local_subject_id": f"temp_{datetime.now().strftime('%Y%m%d%H%M%S%f')}",
-                "created_by": "fragment_validator",
-            }
-            response = requests.post(
-                f"{self.gsid_service_url}/register",
-                json=payload,
-                headers={
-                    "x-api-key": self.gsid_api_key
-                },  # CHANGED: Added API key header
-            )
-            response.raise_for_status()
-            return response.json()["gsid"]
-        except Exception as e:
-            logger.error(f"Failed to mint GSID: {e}")
-            raise
 
     def _write_staging_outputs(
         self,
