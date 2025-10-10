@@ -18,10 +18,8 @@ app = FastAPI()
 BASE32_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 
-# NEW: API Key Authentication
-async def verify_api_key(
-    x_api_key: str = Header(..., description="API Key for authentication"),
-):
+# API Key Authentication
+async def verify_api_key(x_api_key: str = Header(..., alias="x-api-key")):
     """Verify API key from request header"""
     valid_key = os.getenv("GSID_API_KEY")
     if not valid_key:
@@ -196,12 +194,13 @@ def log_resolution(conn, resolution: dict, request: SubjectRequest):
     return cur.fetchone()["resolution_id"]
 
 
-@app.post(
-    "/register",
-    response_model=ResolutionResponse,
-    dependencies=[Depends(verify_api_key)],
-)  # CHANGED: Added API key dependency
-async def register_subject(request: SubjectRequest):
+@app.post("/register", response_model=ResolutionResponse)
+async def register_subject(
+    request: SubjectRequest,
+    api_key: str = Depends(
+        verify_api_key
+    ),  # CHANGED: Use Depends() in function signature
+):
     """Register or link a subject with identity resolution (requires API key)"""
     conn = get_db()
     try:
@@ -361,7 +360,7 @@ async def resolve_review(gsid: str, reviewed_by: str, notes: str = None):
         conn.close()
 
 
-@app.get("/health")  # No API key required for health checks
+@app.get("/health")
 async def health():
     """Health check endpoint (public access)"""
     try:

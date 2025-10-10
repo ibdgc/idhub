@@ -6,12 +6,17 @@ import logging
 import os
 import sys
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 import boto3
 import numpy as np
 import pandas as pd
 import requests
+from dotenv import load_dotenv
+
+# Load .env file from current directory or parent directories
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -26,27 +31,88 @@ class FragmentValidator:
         gsid_service_url: str,
         gsid_api_key: str,
         nocodb_config: dict,
-    ):  # CHANGED: Replaced db_config with nocodb_config and added gsid_api_key
+    ):
         self.s3_bucket = s3_bucket
         self.gsid_service_url = gsid_service_url
-        self.gsid_api_key = gsid_api_key  # NEW
+        self.gsid_api_key = gsid_api_key
         self.s3_client = boto3.client("s3")
 
-        # NEW: NocoDB configuration
+        # NocoDB configuration
         self.nocodb_url = nocodb_config["url"]
         self.nocodb_token = nocodb_config["token"]
-        self.nocodb_base = nocodb_config["base"]
+        self.nocodb_base = nocodb_config.get("base")  # Optional - will auto-detect
+
+        # Cache for base and table IDs
+        self._base_id_cache = None
+        self._table_id_cache = {}
 
         self.local_id_cache = {}
         self._load_local_id_cache()
 
+    def _get_base_id(self) -> str:
+        """Get base ID (auto-detect if not provided, cached after first call)"""
+        if self._base_id_cache:
+            return self._base_id_cache
+
+        # Use provided base ID if available
+        if self.nocodb_base:
+            self._base_id_cache = self.nocodb_base
+            logger.info(f"Using provided NocoDB base ID: {self.nocodb_base}")
+            return self._base_id_cache
+
+        # Auto-detect base ID
+        url = f"{self.nocodb_url}/api/v2/meta/bases"
+        headers = {"xc-token": self.nocodb_token}
+
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        bases = response.json().get("list", [])
+
+        if not bases:
+            raise ValueError("No NocoDB bases found")
+
+        # Use first base (or you could match by name if needed)
+        base_id = bases[0]["id"]
+        base_title = bases[0].get("title", "Unknown")
+        self._base_id_cache = base_id
+
+        logger.info(f"Auto-detected NocoDB base: '{base_title}' (ID: {base_id})")
+
+        return base_id
+
+    def _get_table_id(self, table_name: str) -> str:
+        """Get table ID by name (cached after first lookup)"""
+        if table_name in self._table_id_cache:
+            return self._table_id_cache[table_name]
+
+        base_id = self._get_base_id()
+        url = f"{self.nocodb_url}/api/v2/meta/bases/{base_id}/tables"
+        headers = {"xc-token": self.nocodb_token}
+
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        tables = response.json().get("list", [])
+
+        # Find table by name
+        table = next((t for t in tables if t["table_name"] == table_name), None)
+
+        if not table:
+            raise ValueError(f"Table '{table_name}' not found in NocoDB base")
+
+        table_id = table["id"]
+        self._table_id_cache[table_name] = table_id
+
+        logger.info(f"Found table '{table_name}' (ID: {table_id})")
+
+        return table_id
+
     def _load_local_id_cache(self):
-        """Pre-load all local_subject_ids into memory for fast lookups via NocoDB API"""  # CHANGED: Now uses NocoDB API
+        """Pre-load all local_subject_ids into memory for fast lookups via NocoDB API"""
         try:
             logger.info("Loading local_subject_ids cache from NocoDB...")
 
-            # NocoDB API v2 endpoint for table data
-            url = f"{self.nocodb_url}/api/v2/tables/{self.nocodb_base}/records"
+            table_id = self._get_table_id("local_subject_ids")
+            records_url = f"{self.nocodb_url}/api/v2/tables/{table_id}/records"
             headers = {"xc-token": self.nocodb_token}
 
             offset = 0
@@ -55,13 +121,9 @@ class FragmentValidator:
 
             while True:
                 response = requests.get(
-                    url,
+                    records_url,
                     headers=headers,
-                    params={
-                        "limit": limit,
-                        "offset": offset,
-                        "viewId": "local_subject_ids",
-                    },
+                    params={"limit": limit, "offset": offset},
                 )
                 response.raise_for_status()
                 data = response.json()
@@ -81,7 +143,9 @@ class FragmentValidator:
 
                 offset += limit
 
-                if len(records) < limit:
+                # Check pagination
+                page_info = data.get("pageInfo", {})
+                if page_info.get("isLastPage", True):
                     break
 
             logger.info(f"Loaded {total_loaded} unique local IDs into cache")
@@ -90,22 +154,20 @@ class FragmentValidator:
             logger.error(f"Failed to load local ID cache: {e}")
             raise
 
-    def process_local_file(  # CHANGED: Renamed from process_incoming_file
+    def process_local_file(
         self,
         table_name: str,
-        local_file_path: str,  # CHANGED: Now accepts local file path instead of S3 key
+        local_file_path: str,
         mapping_config: dict,
         source_name: str,
         auto_approve: bool = False,
     ) -> dict:
-        """Process local CSV file through validation pipeline"""  # CHANGED: Updated docstring
+        """Process local CSV file through validation pipeline"""
 
         logger.info(f"Processing {local_file_path} for table {table_name}")
 
-        # CHANGED: Load from local file instead of S3
         raw_data = pd.read_csv(local_file_path)
 
-        # NEW: Upload to S3 incoming/ directory
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         s3_key = f"incoming/{table_name}/{table_name}_{timestamp}.csv"
 
@@ -136,7 +198,7 @@ class FragmentValidator:
             "table_name": table_name,
             "source_name": source_name,
             "timestamp": datetime.now().isoformat(),
-            "input_file": local_file_path,  # CHANGED: Now shows local path
+            "input_file": local_file_path,
             "s3_location": s3_key,  # NEW: Added S3 location
             "row_count": len(mapped_data),
             "validation_errors": validation_errors,
@@ -180,8 +242,12 @@ class FragmentValidator:
         """Apply field mapping from config"""
 
         field_map = mapping_config.get("field_mapping", {})
+        subject_id_candidates = mapping_config.get("subject_id_candidates", [])
+        center_id_field = mapping_config.get("center_id_field")
+
         mapped_data = pd.DataFrame()
 
+        # Map explicitly defined fields
         for target_field, source_field in field_map.items():
             if source_field in raw_data.columns:
                 mapped_data[target_field] = raw_data[source_field]
@@ -189,35 +255,34 @@ class FragmentValidator:
                 logger.warning(f"Source field '{source_field}' not found in input data")
                 mapped_data[target_field] = None
 
+        # Auto-include subject ID candidate fields if not already mapped
+        for candidate in subject_id_candidates:
+            if candidate not in mapped_data.columns and candidate in raw_data.columns:
+                mapped_data[candidate] = raw_data[candidate]
+                logger.info(f"Auto-included subject ID candidate field: {candidate}")
+
+        # Auto-include center_id field if specified and not already mapped
+        if (
+            center_id_field
+            and center_id_field not in mapped_data.columns
+            and center_id_field in raw_data.columns
+        ):
+            mapped_data[center_id_field] = raw_data[center_id_field]
+            logger.info(f"Auto-included center_id field: {center_id_field}")
+
         return mapped_data
 
     def _validate_schema(self, data: pd.DataFrame, table_name: str) -> List[dict]:
-        """Validate data against target table schema via NocoDB API"""  # CHANGED: Now uses NocoDB API
-
+        """Validate data against target table schema via NocoDB API"""
         errors = []
 
         try:
-            # Get table metadata from NocoDB
-            url = f"{self.nocodb_url}/api/v2/meta/bases/{self.nocodb_base}/tables"
-            headers = {"xc-token": self.nocodb_token}
-
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
-            tables = response.json().get("list", [])
-
-            # Find target table
-            table = next((t for t in tables if t["table_name"] == table_name), None)
-            if not table:
-                errors.append(
-                    {
-                        "type": "table_not_found",
-                        "message": f"Table '{table_name}' not found",
-                    }
-                )
-                return errors
+            table_id = self._get_table_id(table_name)
 
             # Get columns for this table
-            columns_url = f"{self.nocodb_url}/api/v2/meta/tables/{table['id']}/columns"
+            columns_url = f"{self.nocodb_url}/api/v2/meta/tables/{table_id}/columns"
+            headers = {"xc-token": self.nocodb_token}
+
             response = requests.get(columns_url, headers=headers)
             response.raise_for_status()
             columns = response.json().get("list", [])
@@ -230,7 +295,7 @@ class FragmentValidator:
                 if col_name in ["created_at", "updated_at", "global_subject_id"]:
                     continue
 
-                is_required = col.get("rqd", False)  # NocoDB uses 'rqd' for required
+                is_required = col.get("rqd", False)
 
                 if col_name not in data.columns and is_required:
                     errors.append(
@@ -286,69 +351,93 @@ class FragmentValidator:
         }
 
         for idx, row in data.iterrows():
-            center_id = (
-                int(row[center_id_field])
-                if center_id_field and pd.notna(row.get(center_id_field))
-                else 0
-            )
-
-            if center_id == 0:
+            # Handle center_id - default to 0 (Unknown) if not provided
+            if (
+                center_id_field
+                and center_id_field in row
+                and pd.notna(row[center_id_field])
+            ):
+                center_id = int(row[center_id_field])
+            else:
+                center_id = 0
                 stats["unknown_center_used"] += 1
 
             # Try each candidate field through GSID service
             found_gsid = None
+            attempted_lookups = []
 
             for field in candidate_fields:
-                if field in row and pd.notna(row[field]):
-                    local_id = str(row[field])
+                if field not in row or pd.isna(row[field]):
+                    continue
 
-                    # Use GSID service for resolution
-                    payload = {
-                        "center_id": center_id,
-                        "local_subject_id": local_id,
-                        "identifier_type": field,
-                        "created_by": "fragment_validator",
-                    }
+                local_id = str(row[field])
+                attempted_lookups.append(f"{field}={local_id}")
 
-                    try:
-                        response = requests.post(
-                            f"{self.gsid_service_url}/register",
-                            json=payload,
-                            headers={
-                                "x-api-key": self.gsid_api_key
-                            },  # CHANGED: Added API key header
-                            timeout=30,  # NEW: Added timeout
+                # Use GSID service for resolution
+                payload = {
+                    "center_id": center_id,
+                    "local_subject_id": local_id,
+                    "identifier_type": field,
+                    "created_by": "fragment_validator",
+                }
+
+                try:
+                    response = requests.post(
+                        f"{self.gsid_service_url}/register",
+                        json=payload,
+                        headers={"x-api-key": self.gsid_api_key},
+                        timeout=30,
+                    )
+                    response.raise_for_status()
+                    result = response.json()
+
+                    found_gsid = result["gsid"]
+
+                    if result["action"] == "create_new":
+                        stats["new_gsids_minted"] += 1
+                        logger.info(
+                            f"Row {idx}: Minted new GSID {found_gsid} for {field}={local_id}"
                         )
-                        response.raise_for_status()
-                        result = response.json()
+                    else:
+                        stats["existing_matches"] += 1
+                        logger.debug(
+                            f"Row {idx}: Matched existing GSID {found_gsid} for {field}={local_id}"
+                        )
 
-                        found_gsid = result["gsid"]
+                    # Record all IDs for this subject
+                    for alt_field in candidate_fields:
+                        if alt_field in row and pd.notna(row[alt_field]):
+                            local_id_records.append(
+                                {
+                                    "center_id": center_id,
+                                    "local_subject_id": str(row[alt_field]),
+                                    "identifier_type": alt_field,
+                                    "global_subject_id": found_gsid,
+                                    "action": result["action"],
+                                }
+                            )
 
-                        if result["action"] == "create_new":
-                            stats["new_gsids_minted"] += 1
-                        else:
-                            stats["existing_matches"] += 1
+                    break  # Found match, stop trying candidates
 
-                        # Record all IDs for this subject
-                        for alt_field in candidate_fields:
-                            if alt_field in row and pd.notna(row[alt_field]):
-                                local_id_records.append(
-                                    {
-                                        "center_id": center_id,
-                                        "local_subject_id": str(row[alt_field]),
-                                        "identifier_type": alt_field,
-                                        "global_subject_id": found_gsid,
-                                        "action": result["action"],
-                                    }
-                                )
-
-                        break  # Found match, stop trying candidates
-
-                    except Exception as e:
-                        logger.error(f"GSID resolution failed for {local_id}: {e}")
-                        continue
+                except requests.exceptions.HTTPError as e:
+                    logger.error(
+                        f"Row {idx}: GSID API error for {field}={local_id}: {e.response.status_code} - {e.response.text}"
+                    )
+                    continue
+                except Exception as e:
+                    logger.error(
+                        f"Row {idx}: GSID resolution failed for {field}={local_id}: {e}"
+                    )
+                    continue
 
             if not found_gsid:
+                logger.error(
+                    f"Row {idx}: Failed to resolve subject\n"
+                    f"  center_id: {center_id}\n"
+                    f"  Attempted lookups: {attempted_lookups}\n"
+                    f"  Available candidate fields: {candidate_fields}\n"
+                    f"  Row data: {row.to_dict()}"
+                )
                 raise ValueError(f"Failed to resolve subject at row {idx}")
 
             gsids.append(found_gsid)
@@ -497,20 +586,22 @@ def main():
     with open(args.mapping_config, "r") as f:
         mapping_config = json.load(f)
 
-    # CHANGED: NocoDB config instead of database config
-    nocodb_config = {
-        "url": os.getenv("NOCODB_URL"),
-        "token": os.getenv("NOCODB_API_TOKEN"),
-        "base": os.getenv("NOCODB_BASE_ID"),
-    }
+        nocodb_config = {
+            "url": os.getenv("NOCODB_URL"),
+            "token": os.getenv("NOCODB_API_TOKEN"),
+            "base": os.getenv("NOCODB_BASE_ID"),  # Optional - will auto-detect if None
+        }
 
     s3_bucket = os.getenv("S3_BUCKET", "idhub-curated-fragments")
-    gsid_service_url = os.getenv(
-        "GSID_SERVICE_URL", "https://api.idhub.ibdgc.org"
-    )  # CHANGED: Default to HTTPS endpoint
-    gsid_api_key = os.getenv("GSID_API_KEY")  # NEW
+    gsid_service_url = os.getenv("GSID_SERVICE_URL", "https://api.idhub.ibdgc.org")
+    gsid_api_key = os.getenv("GSID_API_KEY")
 
-    # NEW: Validate required configuration
+    if not all([nocodb_config["url"], nocodb_config["token"], gsid_api_key]):
+        logger.error(
+            "Missing required environment variables: NOCODB_URL, NOCODB_API_TOKEN, GSID_API_KEY"
+        )
+        sys.exit(1)
+
     if not all(
         [
             nocodb_config["url"],
@@ -527,8 +618,8 @@ def main():
     try:
         validator = FragmentValidator(
             s3_bucket, gsid_service_url, gsid_api_key, nocodb_config
-        )  # CHANGED: Updated constructor call
-        report = validator.process_local_file(  # CHANGED: Renamed method
+        )
+        report = validator.process_local_file(
             args.table_name,
             args.input_file,
             mapping_config,
