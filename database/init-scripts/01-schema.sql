@@ -47,9 +47,9 @@ CREATE TABLE subject_alias (
 );
 
 CREATE TABLE lcl (
-    knumber VARCHAR(7) PRIMARY KEY,
+    niddk_no INT PRIMARY KEY,
+    knumber VARCHAR(7),
     global_subject_id VARCHAR(12) REFERENCES subjects(global_subject_id),
-    niddk_no INT NOT NULL,
     date_collected DATE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
