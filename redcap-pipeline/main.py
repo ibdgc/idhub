@@ -414,18 +414,25 @@ class REDCapPipeline:
         payload = {
             "center_id": center_id,
             "local_subject_id": local_subject_id,
-            # Remove identifier_type from here
             "registration_year": registration_year,
             "control": control,
             "created_by": "redcap_pipeline",
         }
     
-        response = requests.post(f"{self.gsid_service_url}/register", json=payload)
+        # Add API key header
+        headers = {
+            "x-api-key": os.getenv("GSID_API_KEY")
+        }
+    
+        response = requests.post(
+            f"{self.gsid_service_url}/register", 
+            json=payload,
+            headers=headers
+        )
         response.raise_for_status()
     
         result = response.json()
     
-        # Determine identifier_type for logging
         identifier_type = "consortium_id" if record.get("consortium_id") else "local_id"
         logger.info(
             f"Registered {local_subject_id} ({identifier_type}) -> GSID {result['gsid']} ({result['action']})"

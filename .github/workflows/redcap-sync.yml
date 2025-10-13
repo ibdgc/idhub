@@ -65,6 +65,7 @@ jobs:
           REDCAP_API_TOKEN: ${{ secrets.REDCAP_API_TOKEN }}
           REDCAP_PROJECT_ID: ${{ secrets.REDCAP_PROJECT_ID }}
           GSID_SERVICE_URL: https://api.idhub.ibdgc.org
+          GSID_API_KEY: ${{ secrets.GSID_API_KEY }}
           DB_HOST: localhost
           DB_NAME: idhub
           DB_USER: idhub_user
