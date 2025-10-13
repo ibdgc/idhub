@@ -396,40 +396,43 @@ class REDCapPipeline:
             self.return_db_connection(conn)
 
     def register_subject(self, record: Dict) -> tuple[str, int]:
-        """Register subject with identifier_type"""
+        """Register subject with primary identifier"""
         center_name = record.get("redcap_data_access_group", "Unknown")
         center_id = self.get_or_create_center(center_name)
-
+    
         local_subject_id = record.get("consortium_id") or record.get("local_id")
-        identifier_type = "consortium_id" if record.get("consortium_id") else "local_id"
-
+    
         if not local_subject_id:
             raise ValueError(
                 f"No local_subject_id found in record: {record.get('record_id')}"
             )
-
+    
         registration_date = record.get("registration_date")
         registration_year = self.transform_value("registration_date", registration_date)
         control = self.transform_value("control", record.get("control", "0"))
-
+    
         payload = {
             "center_id": center_id,
             "local_subject_id": local_subject_id,
-            "identifier_type": identifier_type,  # NEW
+            # Remove identifier_type from here
             "registration_year": registration_year,
             "control": control,
             "created_by": "redcap_pipeline",
         }
-
+    
         response = requests.post(f"{self.gsid_service_url}/register", json=payload)
         response.raise_for_status()
-
+    
         result = response.json()
+    
+        # Determine identifier_type for logging
+        identifier_type = "consortium_id" if record.get("consortium_id") else "local_id"
         logger.info(
             f"Registered {local_subject_id} ({identifier_type}) -> GSID {result['gsid']} ({result['action']})"
         )
-
+    
         return result["gsid"], center_id
+
 
     def process_record(self, record: Dict):
         """Process single REDCap record with conflict detection"""
