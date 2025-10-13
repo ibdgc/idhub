@@ -584,9 +584,7 @@ class FragmentValidator:
 def main():
     parser = argparse.ArgumentParser(description="Validate and stage data fragments")
     parser.add_argument("table_name", help="Target database table name")
-    parser.add_argument(
-        "input_file", help="Local path to CSV file"
-    )  # CHANGED: Now accepts local file path
+    parser.add_argument("input_file", help="Local path to CSV file")
     parser.add_argument("mapping_config", help="Path to mapping config JSON file")
     parser.add_argument("--source", required=True, help="Source system name")
     parser.add_argument(
@@ -599,32 +597,20 @@ def main():
     with open(args.mapping_config, "r") as f:
         mapping_config = json.load(f)
 
-        nocodb_config = {
-            "url": os.getenv("NOCODB_URL"),
-            "token": os.getenv("NOCODB_API_TOKEN"),
-            "base": os.getenv("NOCODB_BASE_ID"),  # Optional - will auto-detect if None
-        }
+    nocodb_config = {
+        "url": os.getenv("NOCODB_URL"),
+        "token": os.getenv("NOCODB_API_TOKEN"),
+        "base": os.getenv("NOCODB_BASE_ID"),  # Optional - will auto-detect if None
+    }
 
     s3_bucket = os.getenv("S3_BUCKET", "idhub-curated-fragments")
     gsid_service_url = os.getenv("GSID_SERVICE_URL", "https://api.idhub.ibdgc.org")
     gsid_api_key = os.getenv("GSID_API_KEY")
 
+    # Single validation check - base is optional
     if not all([nocodb_config["url"], nocodb_config["token"], gsid_api_key]):
         logger.error(
             "Missing required environment variables: NOCODB_URL, NOCODB_API_TOKEN, GSID_API_KEY"
-        )
-        sys.exit(1)
-
-    if not all(
-        [
-            nocodb_config["url"],
-            nocodb_config["token"],
-            nocodb_config["base"],
-            gsid_api_key,
-        ]
-    ):
-        logger.error(
-            "Missing required environment variables: NOCODB_URL, NOCODB_API_TOKEN, NOCODB_BASE_ID, GSID_API_KEY"
         )
         sys.exit(1)
 

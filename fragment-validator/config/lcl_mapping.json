@@ -1,12 +1,9 @@
 {
-  "default_center_id": 1,
-  "identifier_fields": {
-    "consortium_id": "consortium_id",
+  "field_mapping": {
+    "knumber": "knumber",
     "niddk_no": "niddk_no"
   },
-  "field_mappings": {
-    "knumber": "knumber",
-    "niddk_no": "niddk_no",
-    "date_collected": "collection_date"
-  }
+  "subject_id_candidates": ["consortium_id"],
+  "center_id_field": null,
+  "default_center_id": 0
 }
