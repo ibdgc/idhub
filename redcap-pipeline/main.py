@@ -399,18 +399,18 @@ class REDCapPipeline:
         """Register subject with primary identifier"""
         center_name = record.get("redcap_data_access_group", "Unknown")
         center_id = self.get_or_create_center(center_name)
-    
+
         local_subject_id = record.get("consortium_id") or record.get("local_id")
-    
+
         if not local_subject_id:
             raise ValueError(
                 f"No local_subject_id found in record: {record.get('record_id')}"
             )
-    
+
         registration_date = record.get("registration_date")
         registration_year = self.transform_value("registration_date", registration_date)
         control = self.transform_value("control", record.get("control", "0"))
-    
+
         payload = {
             "center_id": center_id,
             "local_subject_id": local_subject_id,
@@ -418,28 +418,23 @@ class REDCapPipeline:
             "control": control,
             "created_by": "redcap_pipeline",
         }
-    
+
         # Add API key header
-        headers = {
-            "x-api-key": os.getenv("GSID_API_KEY")
-        }
-    
+        headers = {"x-api-key": os.getenv("GSID_API_KEY")}
+
         response = requests.post(
-            f"{self.gsid_service_url}/register", 
-            json=payload,
-            headers=headers
+            f"{self.gsid_service_url}/register", json=payload, headers=headers
         )
         response.raise_for_status()
-    
+
         result = response.json()
-    
+
         identifier_type = "consortium_id" if record.get("consortium_id") else "local_id"
         logger.info(
             f"Registered {local_subject_id} ({identifier_type}) -> GSID {result['gsid']} ({result['action']})"
         )
-    
-        return result["gsid"], center_id
 
+        return result["gsid"], center_id
 
     def process_record(self, record: Dict):
         """Process single REDCap record with conflict detection"""
@@ -469,34 +464,6 @@ class REDCapPipeline:
                 "record_id": record.get("record_id"),
             }
 
-    def create_curated_fragment(self, record: Dict, gsid: str) -> Dict:
-        """Create curated data fragment (PHI-free)"""
-        fragment = {
-            "gsid": gsid,
-            "center_id": self.get_or_create_center(
-                record.get("redcap_data_access_group", "Unknown")
-            ),
-            "samples": {},
-            "family": {},
-            "metadata": {
-                "source": "redcap",
-                "pipeline_version": "1.0",
-                "processed_at": datetime.utcnow().isoformat(),
-            },
-        }
-
-        if record.get("sample_id"):
-            fragment["samples"]["dna"] = record["sample_id"]
-        if record.get("dna_id"):
-            fragment["samples"]["dna"] = record["dna_id"]
-        if record.get("dna_blood_id"):
-            fragment["samples"]["blood"] = record["dna_blood_id"]
-
-        if record.get("family_id"):
-            fragment["family"]["family_id"] = record["family_id"]
-
-        return fragment
-
     def upload_to_s3(self, fragment: Dict, gsid: str):
         """Upload curated fragment to S3"""
         key = f"subjects/{gsid}/{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
@@ -512,37 +479,39 @@ class REDCapPipeline:
         logger.info(f"Uploaded fragment to s3://{self.s3_bucket}/{key}")
 
     def insert_samples(self, record: Dict, gsid: str):
-        """Insert sample records into database"""
+        """Insert sample records into database using field mappings"""
         conn = self.get_db_connection()
         try:
             cur = conn.cursor()
 
-            # DNA samples
-            if record.get("sample_id") or record.get("dna_id"):
-                sample_id = record.get("sample_id") or record.get("dna_id")
-                cur.execute(
-                    """
-                    INSERT INTO dna (sample_id, global_subject_id)
-                    VALUES (%s, %s)
-                    ON CONFLICT (sample_id) DO NOTHING
-                    """,
-                    (sample_id, gsid),
-                )
+            # Process all specimen mappings from config
+            for mapping in self.mappings:
+                if mapping.get("target_table") == "specimen":
+                    source_field = mapping["source_field"]
+                    sample_type = mapping.get("sample_type")
 
-            # Blood samples
-            if record.get("dna_blood_id"):
-                cur.execute(
-                    """
-                    INSERT INTO blood (sample_id, global_subject_id)
-                    VALUES (%s, %s)
-                    ON CONFLICT (sample_id) DO NOTHING
-                    """,
-                    (record["dna_blood_id"], gsid),
-                )
+                    if record.get(source_field):
+                        cur.execute(
+                            """
+                            INSERT INTO specimen (sample_id, global_subject_id, sample_type, redcap_event)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (sample_id) DO UPDATE SET
+                                sample_type = EXCLUDED.sample_type,
+                                redcap_event = EXCLUDED.redcap_event
+                            """,
+                            (
+                                record[source_field],
+                                gsid,
+                                sample_type,
+                                record.get("redcap_event_name"),
+                            ),
+                        )
+                        logger.debug(
+                            f"Inserted specimen: {record[source_field]} (type: {sample_type})"
+                        )
 
             # Family linkage
             if record.get("family_id"):
-                # Create family if doesn't exist
                 cur.execute(
                     """
                     INSERT INTO family (family_id)
@@ -552,7 +521,6 @@ class REDCapPipeline:
                     (record["family_id"],),
                 )
 
-                # Link subject to family
                 cur.execute(
                     """
                     UPDATE subjects
@@ -571,6 +539,46 @@ class REDCapPipeline:
             raise
         finally:
             self.return_db_connection(conn)
+
+    def create_curated_fragment(self, record: Dict, gsid: str) -> Dict:
+        """Create curated data fragment (PHI-free)"""
+        fragment = {
+            "gsid": gsid,
+            "center_id": self.get_or_create_center(
+                record.get("redcap_data_access_group", "Unknown")
+            ),
+            "samples": {},
+            "family": {},
+            "metadata": {
+                "source": "redcap",
+                "pipeline_version": "1.0",
+                "processed_at": datetime.utcnow().isoformat(),
+            },
+        }
+
+        # Group specimens by type from mappings
+        specimen_types = {}
+        for mapping in self.mappings:
+            if mapping.get("target_table") == "specimen":
+                source_field = mapping["source_field"]
+                sample_type = mapping.get("sample_type")
+
+                if record.get(source_field):
+                    if sample_type not in specimen_types:
+                        specimen_types[sample_type] = []
+                    specimen_types[sample_type].append(record[source_field])
+
+        # Add to fragment
+        for sample_type, sample_ids in specimen_types.items():
+            if len(sample_ids) == 1:
+                fragment["samples"][sample_type] = sample_ids[0]
+            else:
+                fragment["samples"][sample_type] = sample_ids
+
+        if record.get("family_id"):
+            fragment["family"]["family_id"] = record["family_id"]
+
+        return fragment
 
     def run(self):
         """Execute pipeline with batch processing"""

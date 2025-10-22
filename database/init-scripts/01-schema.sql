@@ -54,17 +54,15 @@ CREATE TABLE lcl (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE blood (
+CREATE TABLE specimen (
     sample_id VARCHAR PRIMARY KEY,
     global_subject_id VARCHAR(12) REFERENCES subjects(global_subject_id),
-    sample_type VARCHAR(6),
-    date_collected DATE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE dna (
-    sample_id VARCHAR PRIMARY KEY,
-    global_subject_id VARCHAR(12) REFERENCES subjects(global_subject_id),
+    sample_type VARCHAR,
+    year_collected INTEGER,
+    redcap_event VARCHAR,
+    region_location VARCHAR,
+    sample_available BOOLEAN DEFAULT TRUE,
+    project VARCHAR,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -93,12 +91,6 @@ CREATE TABLE exomechip (
 );
 
 CREATE TABLE gwas2 (
-    sample_id VARCHAR PRIMARY KEY,
-    global_subject_id VARCHAR(12) REFERENCES subjects(global_subject_id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE plasma (
     sample_id VARCHAR PRIMARY KEY,
     global_subject_id VARCHAR(12) REFERENCES subjects(global_subject_id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
