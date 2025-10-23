@@ -1,7 +1,359 @@
-Here's the updated README section for fragment ingestion:
-
-```markdown
 # IBDGC IDhub
+
+# idHub - IBDGC Data Hub
+
+[![Tests](https://github.com/ibdgc/idhub/actions/workflows/tests.yml/badge.svg)](https://github.com/ibdgc/idhub/actions/workflows/tests.yml)
+[![Code Coverage](https://github.com/ibdgc/idhub/actions/workflows/coverage.yml/badge.svg)](https://github.com/ibdgc/idhub/actions/workflows/coverage.yml)
+
+## 4. Add Pre-commit Hook for Local Testing
+
+```yaml:.github/workflows/pre-commit.yml
+name: Pre-commit Checks
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  pre-commit:
+    name: Pre-commit Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install pre-commit
+        run: |
+          pip install pre-commit
+
+      - name: Run pre-commit
+        run: |
+          pre-commit run --all-files
+```
+
+## 5. Create Pre-commit Configuration
+
+```yaml:.pre-commit-config.yaml
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: check-json
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  - repo: https://github.com/psf/black
+    rev: 23.12.1
+    hooks:
+      - id: black
+        language_version: python3.11
+        files: \.(py)$
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.0.0
+    hooks:
+      - id: flake8
+        args: ['--max-line-length=120', '--ignore=E203,W503']
+        files: \.(py)$
+
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args: ['--profile', 'black']
+        files: \.(py)$
+```
+
+## 6. Add Test Requirements to Each Service
+
+```text:gsid-service/requirements-test.txt
+# gsid-service/requirements-test.txt
+-r requirements.txt
+pytest==7.4.3
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+pytest-asyncio==0.21.1
+httpx==0.25.2
+```
+
+```text:redcap-pipeline/requirements-test.txt
+# redcap-pipeline/requirements-test.txt
+-r requirements.txt
+pytest==7.4.3
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+```
+
+```text:fragment-validator/requirements-test.txt
+# fragment-validator/requirements-test.txt
+-r requirements.txt
+pytest==7.4.3
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+```
+
+```text:table-loader/requirements-test.txt
+# table-loader/requirements-test.txt
+-r requirements.txt
+pytest==7.4.3
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+```
+
+## 7. Update Test Dockerfiles to Use Test Requirements
+
+```dockerfile:gsid-service/Dockerfile.test
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements-test.txt .
+RUN pip install --no-cache-dir -r requirements-test.txt
+
+COPY . .
+
+CMD ["pytest", "-v", "--cov=.", "--cov-report=term-missing", "--cov-report=html", "--cov-report=xml"]
+```
+
+## 8. Create a Test Status Check Workflow
+
+```yaml:.github/workflows/test-status.yml
+name: Test Status Check
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test-status:
+    name: Required Tests Status
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run all tests
+        run: |
+          docker-compose -f docker-compose.test.yml build
+          docker-compose -f docker-compose.test.yml run --rm test-gsid
+          docker-compose -f docker-compose.test.yml run --rm test-redcap
+          docker-compose -f docker-compose.test.yml run --rm test-validator
+          docker-compose -f docker-compose.test.yml run --rm test-loader
+
+      - name: Comment PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const output = `#### Test Results 🧪
+
+            - ✅ GSID Service Tests
+            - ✅ REDCap Pipeline Tests
+            - ✅ Fragment Validator Tests
+            - ✅ Table Loader Tests
+
+            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+```
+
+## 9. Add Branch Protection Rules
+
+Go to GitHub Settings → Branches → Add rule:
+
+```
+Branch name pattern: main
+
+☑ Require a pull request before merging
+  ☑ Require approvals: 1
+  ☑ Dismiss stale pull request approvals when new commits are pushed
+
+☑ Require status checks to pass before merging
+  ☑ Require branches to be up to date before merging
+  Status checks that are required:
+    - Test GSID Service
+    - Test REDCap Pipeline
+    - Test Fragment Validator
+    - Test Table Loader
+
+☑ Require conversation resolution before merging
+☑ Do not allow bypassing the above settings
+```
+
+## 10. Create a Quick Test Script for Local Development
+
+```bash:.github/scripts/run-tests.sh
+#!/bin/bash
+# .github/scripts/run-tests.sh
+
+set -e
+
+echo "🧪 Running idHub Test Suite"
+echo "======================================"
+
+# Colors
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
+# Build test containers
+echo "📦 Building test containers..."
+docker-compose -f docker-compose.test.yml build --no-cache
+
+# Run tests
+FAILED=0
+
+echo ""
+echo "🔬 Testing GSID Service..."
+if docker-compose -f docker-compose.test.yml run --rm test-gsid; then
+    echo -e "${GREEN}✅ GSID Service tests passed${NC}"
+else
+    echo -e "${RED}❌ GSID Service tests failed${NC}"
+    FAILED=1
+fi
+
+echo ""
+echo "🔬 Testing REDCap Pipeline..."
+if docker-compose -f docker-compose.test.yml run --rm test-redcap; then
+    echo -e "${GREEN}✅ REDCap Pipeline tests passed${NC}"
+else
+    echo -e "${RED}❌ REDCap Pipeline tests failed${NC}"
+    FAILED=1
+fi
+
+echo ""
+echo "🔬 Testing Fragment Validator..."
+if docker-compose -f docker-compose.test.yml run --rm test-validator; then
+    echo -e "${GREEN}✅ Fragment Validator tests passed${NC}"
+else
+    echo -e "${RED}❌ Fragment Validator tests failed${NC}"
+    FAILED=1
+fi
+
+echo ""
+echo "🔬 Testing Table Loader..."
+if docker-compose -f docker-compose.test.yml run --rm test-loader; then
+    echo -e "${GREEN}✅ Table Loader tests passed${NC}"
+else
+    echo -e "${RED}❌ Table Loader tests failed${NC}"
+    FAILED=1
+fi
+
+echo ""
+echo "======================================"
+if [ $FAILED -eq 0 ]; then
+    echo -e "${GREEN}✅ All tests passed!${NC}"
+    exit 0
+else
+    echo -e "${RED}❌ Some tests failed${NC}"
+    exit 1
+fi
+```
+
+```bash
+chmod +x .github/scripts/run-tests.sh
+```
+
+## 11. Update Makefile
+
+```makefile:Makefile
+# Add to existing Makefile
+
+.PHONY: test-ci test-local test-quick
+
+# Run tests as they would run in CI
+test-ci:
+	@echo "Running tests in CI mode..."
+	@.github/scripts/run-tests.sh
+
+# Run tests locally with coverage
+test-local:
+	@echo "Running tests locally with coverage..."
+	docker-compose -f docker-compose.test.yml build
+	docker-compose -f docker-compose.test.yml run --rm test-gsid pytest --cov=. --cov-report=html
+	docker-compose -f docker-compose.test.yml run --rm test-redcap pytest --cov=. --cov-report=html
+	docker-compose -f docker-compose.test.yml run --rm test-validator pytest --cov=. --cov-report=html
+	docker-compose -f docker-compose.test.yml run --rm test-loader pytest --cov=. --cov-report=html
+	@echo "Coverage reports generated in each service's htmlcov/ directory"
+
+# Quick test run (no rebuild)
+test-quick:
+	@echo "Running quick tests..."
+	docker-compose -f docker-compose.test.yml run --rm test-gsid
+	docker-compose -f docker-compose.test.yml run --rm test-redcap
+	docker-compose -f docker-compose.test.yml run --rm test-validator
+	docker-compose -f docker-compose.test.yml run --rm test-loader
+```
+
+## 12. Commit and Push
+
+```bash
+# Add all test files
+git add .github/workflows/tests.yml
+git add .github/workflows/coverage.yml
+git add .github/workflows/test-status.yml
+git add .github/scripts/run-tests.sh
+git add .pre-commit-config.yaml
+git add */requirements-test.txt
+git add */tests/
+
+# Commit
+git commit -m "Add comprehensive test suite with GitHub Actions integration"
+
+# Push
+git push origin main
+```
+
+## 13. Verify in GitHub
+
+1. Go to your repository on GitHub
+2. Click on "Actions" tab
+3. You should see the workflows running
+4. Check the test results
+
+## 14. Optional: Add Slack/Discord Notifications
+
+```yaml:.github/workflows/test-notifications.yml
+name: Test Notifications
+
+on:
+  workflow_run:
+    workflows: ["Tests"]
+    types:
+      - completed
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send notification
+        if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ github.event.workflow_run.conclusion }}
+          text: 'Tests failed on ${{ github.event.workflow_run.head_branch }}'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+
 
 Project and Dataset Intersection Through Globally-Resolved Subject Identifiers
 
@@ -779,5 +1131,3 @@ docker-compose run --rm table-loader python main.py \
 - Fragment loader uses direct PostgreSQL insertion for reliability
 - NocoDB automatically syncs with PostgreSQL data changes
 - Always run dry-run mode first before executing loads
-
-```

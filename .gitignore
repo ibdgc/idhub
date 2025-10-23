@@ -1,8 +1,3 @@
-# Secrets
-.env
-ssl/
-
-# Data volumes (managed by Docker)
 data/
 postgres_data/
 
@@ -18,3 +13,12 @@ setup-info.txt
 # OS files
 .DS_Store
 Thumbs.db
+
+# Test artifacts
+htmlcov/
+test-reports/
+.coverage
+coverage.xml
+.pytest_cache/
+*.pyc
+__pycache__/

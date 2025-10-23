@@ -1,0 +1,67 @@
+---
+version: '3.8'
+services:
+  test-gsid:
+    build:
+      context: ./gsid-service
+      dockerfile: Dockerfile.test
+    container_name: test_gsid
+    volumes: [./gsid-service:/app]
+    environment:
+      - GSID_API_KEY=test-api-key
+      - DB_HOST=localhost
+      - DB_NAME=test_db
+      - DB_USER=test_user
+      - DB_PASSWORD=test_pass
+      - DB_PORT=5432
+    command: >
+      sh -c "pytest -v  --cov=.  --cov-report=term-missing  --cov-report=html:htmlcov  --cov-report=xml:test-reports/coverage.xml  --junitxml=test-reports/junit.xml
+      --html=test-reports/report.html  --self-contained-html"
+  test-redcap:
+    build:
+      context: ./redcap-pipeline
+      dockerfile: Dockerfile.test
+    container_name: test_redcap
+    volumes: [./redcap-pipeline:/app]
+    environment:
+      - REDCAP_API_URL=https://test.redcap.edu/api/
+      - REDCAP_API_TOKEN=test_token
+      - GSID_SERVICE_URL=http://localhost:8000
+      - DB_HOST=localhost
+      - DB_NAME=test_db
+      - DB_USER=test_user
+      - DB_PASSWORD=test_pass
+    command: >
+      sh -c "pytest -v  --cov=.  --cov-report=term-missing  --cov-report=html:htmlcov  --cov-report=xml:test-reports/coverage.xml  --junitxml=test-reports/junit.xml
+      --html=test-reports/report.html  --self-contained-html"
+  test-validator:
+    build:
+      context: ./fragment-validator
+      dockerfile: Dockerfile.test
+    container_name: test_validator
+    volumes: [./fragment-validator:/app]
+    environment:
+      - AWS_ACCESS_KEY_ID=test_key
+      - AWS_SECRET_ACCESS_KEY=test_secret
+      - AWS_DEFAULT_REGION=us-east-1
+      - S3_BUCKET=test-bucket
+    command: >
+      sh -c "pytest -v  --cov=.  --cov-report=term-missing  --cov-report=html:htmlcov  --cov-report=xml:test-reports/coverage.xml  --junitxml=test-reports/junit.xml
+      --html=test-reports/report.html  --self-contained-html"
+  test-loader:
+    build:
+      context: ./table-loader
+      dockerfile: Dockerfile.test
+    container_name: test_loader
+    volumes: [./table-loader:/app]
+    environment:
+      - DB_HOST=localhost
+      - DB_NAME=test_db
+      - DB_USER=test_user
+      - DB_PASSWORD=test_pass
+      - AWS_ACCESS_KEY_ID=test_key
+      - AWS_SECRET_ACCESS_KEY=test_secret
+      - S3_BUCKET=test-bucket
+    command: >-
+      sh -c "pytest -v  --cov=.  --cov-report=term-missing  --cov-report=html:htmlcov  --cov-report=xml:test-reports/coverage.xml  --junitxml=test-reports/junit.xml
+      --html=test-reports/report.html  --self-contained-html"

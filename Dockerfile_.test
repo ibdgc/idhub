@@ -1,0 +1,43 @@
+# Dockerfile.test
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements files
+COPY requirements-dev.txt .
+COPY gsid-service/requirements.txt ./gsid-service/
+COPY redcap-pipeline/requirements.txt ./redcap-pipeline/
+COPY fragment-validator/requirements.txt ./fragment-validator/
+COPY table-loader/requirements.txt ./table-loader/
+
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements-dev.txt && \
+    pip install --no-cache-dir -r gsid-service/requirements.txt && \
+    pip install --no-cache-dir -r redcap-pipeline/requirements.txt && \
+    pip install --no-cache-dir -r fragment-validator/requirements.txt && \
+    pip install --no-cache-dir -r table-loader/requirements.txt
+
+# Copy source code
+COPY gsid-service/ ./gsid-service/
+COPY redcap-pipeline/ ./redcap-pipeline/
+COPY fragment-validator/ ./fragment-validator/
+COPY table-loader/ ./table-loader/
+
+# Copy tests and config
+COPY tests/ ./tests/
+COPY conftest.py .
+COPY pytest.ini .
+
+# Create necessary directories
+RUN mkdir -p test-reports htmlcov
+
+# Set Python path
+ENV PYTHONPATH=/app
+
+CMD ["pytest", "-v", "--cov=.", "--cov-report=html", "--cov-report=term"]
