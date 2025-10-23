@@ -1,6 +1,7 @@
 import logging
 from typing import Any, Dict, List
 
+from core.config import settings
 from core.database import db_manager
 
 from .center_resolver import CenterResolver
@@ -13,6 +14,7 @@ class DataProcessor:
     def __init__(self, center_resolver: CenterResolver, gsid_client: GSIDClient):
         self.center_resolver = center_resolver
         self.gsid_client = gsid_client
+        self.field_mappings = settings.load_field_mappings()
 
     def process_records(self, records: List[Dict[str, Any]]):
         """Process REDCap records"""
