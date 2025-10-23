@@ -1,8 +1,6 @@
-# redcap-pipeline/services/data_processor.py
 import logging
 from typing import Any, Dict, List
 
-from core.config import settings
 from core.database import db_manager
 
 from .center_resolver import CenterResolver
@@ -12,20 +10,18 @@ logger = logging.getLogger(__name__)
 
 
 class DataProcessor:
-    def __init__(self):
-        self.center_resolver = CenterResolver()
-        self.gsid_client = GSIDClient()
-        self.field_mappings = settings.load_field_mappings()
+    def __init__(self, center_resolver: CenterResolver, gsid_client: GSIDClient):
+        self.center_resolver = center_resolver
+        self.gsid_client = gsid_client
 
     def process_records(self, records: List[Dict[str, Any]]):
-        """Process REDCap records and update database"""
-        subjects_to_create = []
-        specimens_to_create = []
-
+        """Process REDCap records"""
         for record in records:
-            # Resolve center
+            # Get center - use get_or_create_center to match original behavior
             center_name = record.get("redcap_data_access_group")
-            center_id = self.center_resolver.resolve_center_id(center_name)
+            center_id = self.center_resolver.get_or_create_center(
+                center_name or "Unknown"
+            )
 
             if not center_id:
                 logger.warning(
@@ -55,22 +51,18 @@ class DataProcessor:
                 if result:
                     return result["subject_id"]
 
-                # Generate GSID
-                gsids = self.gsid_client.generate_gsids(1)
-                gsid = gsids[0]
-
-                # Create subject
+                # Create new subject
                 cursor.execute(
                     """
-                    INSERT INTO subjects (gsid, center_id, local_id, created_at)
-                    VALUES (%s, %s, %s, NOW())
+                    INSERT INTO subjects (center_id, local_id, control)
+                    VALUES (%s, %s, %s)
                     RETURNING subject_id
                     """,
-                    (gsid, center_id, record_id),
+                    (center_id, record_id, record.get("control", False)),
                 )
-                subject_id = cursor.fetchone()["subject_id"]
-                logger.info(f"Created subject {gsid} for record {record_id}")
-                return subject_id
+                result = cursor.fetchone()
+                conn.commit()
+                return result["subject_id"]
 
     def _process_specimens(self, record: Dict[str, Any], subject_id: int):
         """Process specimen data from record"""
