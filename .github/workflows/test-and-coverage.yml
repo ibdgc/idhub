@@ -1,0 +1,112 @@
+---
+name: Test and Coverage
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [gsid, redcap, validator, loader]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build test container for ${{ matrix.service }}
+        run: docker compose -f docker-compose.test.yml build test-${{ matrix.service }}
+      - name: Run tests for ${{ matrix.service }}
+        run: docker compose -f docker-compose.test.yml run --rm test-${{ matrix.service }}
+      - name: Copy coverage reports from container
+        if: always()
+        run: |
+          # Reports are already in the mounted volume, just verify they exist
+          ls -la */htmlcov/ */test-reports/ || true
+      - name: Upload coverage HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html-${{ matrix.service }}
+          path: |
+            gsid-service/htmlcov/
+            redcap-pipeline/htmlcov/
+            fragment-validator/htmlcov/
+            table-loader/htmlcov/
+          retention-days: 30
+          if-no-files-found: warn
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ matrix.service }}
+          path: |
+            gsid-service/test-reports/
+            redcap-pipeline/test-reports/
+            fragment-validator/test-reports/
+            table-loader/test-reports/
+          retention-days: 30
+          if-no-files-found: warn
+      - name: Upload coverage to Codecov
+        if: matrix.service == 'gsid'
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./gsid-service/test-reports/coverage.xml
+          flags: gsid-service
+          name: gsid-service-coverage
+          fail_ci_if_error: false
+      - name: Upload coverage to Codecov
+        if: matrix.service == 'redcap'
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./redcap-pipeline/test-reports/coverage.xml
+          flags: redcap-pipeline
+          name: redcap-pipeline-coverage
+          fail_ci_if_error: false
+      - name: Upload coverage to Codecov
+        if: matrix.service == 'validator'
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./fragment-validator/test-reports/coverage.xml
+          flags: fragment-validator
+          name: fragment-validator-coverage
+          fail_ci_if_error: false
+      - name: Upload coverage to Codecov
+        if: matrix.service == 'loader'
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./table-loader/test-reports/coverage.xml
+          flags: table-loader
+          name: table-loader-coverage
+          fail_ci_if_error: false
+  coverage-summary:
+    runs-on: ubuntu-latest
+    needs: test
+    if: always()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Download all coverage reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-reports-*
+          merge-multiple: true
+      - name: Display coverage summary
+        run: |-
+          echo "## Test Coverage Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          for service in gsid-service redcap-pipeline fragment-validator table-loader; do
+            if [ -f "$service/test-reports/coverage.xml" ]; then
+              echo "### $service" >> $GITHUB_STEP_SUMMARY
+              # Extract coverage percentage from XML (basic parsing)
+              coverage=$(grep -oP 'line-rate="\K[0-9.]+' "$service/test-reports/coverage.xml" | head -1)
+              if [ -n "$coverage" ]; then
+                percentage=$(echo "$coverage * 100" | bc)
+                echo "Coverage: ${percentage}%" >> $GITHUB_STEP_SUMMARY
+              fi
+              echo "" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
