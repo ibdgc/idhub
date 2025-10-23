@@ -32,41 +32,60 @@ class DataProcessor:
                 continue
 
             # Check if subject exists
-            subject_id = self._get_or_create_subject(record, center_id)
+            global_subject_id = self._get_or_create_subject(record, center_id)
 
             # Process specimens
-            self._process_specimens(record, subject_id)
+            self._process_specimens(record, global_subject_id)
 
-    def _get_or_create_subject(self, record: Dict[str, Any], center_id: int) -> int:
+    def _get_or_create_subject(self, record: Dict[str, Any], center_id: int) -> str:
         """Get existing subject or create new one"""
         record_id = record.get("record_id")
 
         with db_manager.get_connection() as conn:
             with db_manager.get_cursor(conn) as cursor:
-                # Check if subject exists
+                # Check if subject exists via local_subject_ids table
                 cursor.execute(
-                    "SELECT subject_id FROM subjects WHERE center_id = %s AND local_id = %s",
+                    """
+                    SELECT global_subject_id 
+                    FROM local_subject_ids 
+                    WHERE center_id = %s AND local_subject_id = %s
+                    """,
                     (center_id, record_id),
                 )
                 result = cursor.fetchone()
 
                 if result:
-                    return result["subject_id"]
+                    return result["global_subject_id"]
+
+                # Generate new GSID
+                gsids = self.gsid_client.generate_gsids(1)
+                global_subject_id = gsids[0]
 
                 # Create new subject
                 cursor.execute(
                     """
-                    INSERT INTO subjects (center_id, local_id, control)
+                    INSERT INTO subjects (global_subject_id, center_id, control)
                     VALUES (%s, %s, %s)
-                    RETURNING subject_id
                     """,
-                    (center_id, record_id, record.get("control", False)),
+                    (global_subject_id, center_id, record.get("control", False)),
                 )
-                result = cursor.fetchone()
-                conn.commit()
-                return result["subject_id"]
 
-    def _process_specimens(self, record: Dict[str, Any], subject_id: int):
+                # Create local_subject_id mapping
+                cursor.execute(
+                    """
+                    INSERT INTO local_subject_ids (center_id, local_subject_id, identifier_type, global_subject_id)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (center_id, record_id, "primary", global_subject_id),
+                )
+
+                conn.commit()
+                logger.info(
+                    f"Created new subject {global_subject_id} for record {record_id}"
+                )
+                return global_subject_id
+
+    def _process_specimens(self, record: Dict[str, Any], global_subject_id: str):
         """Process specimen data from record"""
         specimen_mappings = [
             m
@@ -87,18 +106,18 @@ class DataProcessor:
 
                     # Check if specimen exists
                     cursor.execute(
-                        "SELECT 1 FROM specimen WHERE subject_id = %s AND sample_id = %s",
-                        (subject_id, sample_id),
+                        "SELECT 1 FROM specimen WHERE global_subject_id = %s AND sample_id = %s",
+                        (global_subject_id, sample_id),
                     )
 
                     if not cursor.fetchone():
                         cursor.execute(
                             """
-                            INSERT INTO specimen (subject_id, sample_id, sample_type, created_at)
+                            INSERT INTO specimen (global_subject_id, sample_id, sample_type, created_at)
                             VALUES (%s, %s, %s, NOW())
                             """,
-                            (subject_id, sample_id, sample_type),
+                            (global_subject_id, sample_id, sample_type),
                         )
                         logger.debug(
-                            f"Created specimen {sample_id} for subject {subject_id}"
+                            f"Created specimen {sample_id} for subject {global_subject_id}"
                         )
