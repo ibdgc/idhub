@@ -1,4 +1,4 @@
-'''# gsid-service/api/routes.py
+# gsid-service/api/routes.py
 import logging
 from typing import List
 
@@ -39,9 +39,7 @@ async def register_subject(
         if resolution["action"] == "create_new":
             gsid = generate_gsid()
             cur = conn.cursor()
-            cur.execute(
-                "SELECT 1 FROM subjects WHERE global_subject_id = %s", (gsid,)
-            )
+            cur.execute("SELECT 1 FROM subjects WHERE global_subject_id = %s", (gsid,))
             if cur.fetchone():
                 gsid = generate_gsid()  # Regenerate if collision (rare)
 
@@ -305,4 +303,4 @@ async def health():
     finally:
         if conn:
             conn.close()
-''
+

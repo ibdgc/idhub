@@ -5,7 +5,6 @@ from typing import Any, Dict, List
 
 import boto3
 from botocore.exceptions import ClientError
-
 from core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -13,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 class S3Uploader:
     def __init__(self):
-        self.s3_client = boto3.client("s3", region_name=settings.AWS_REGION)
+        self.s3_client = boto3.client("s3", region_name=settings.AWS_DEFAULT_REGION)
         self.bucket = settings.S3_BUCKET
 
     def create_curated_fragment(
@@ -56,12 +55,10 @@ class S3Uploader:
 
         return fragment
 
-    def upload_fragment(
-        self, record: Dict[str, Any], gsid: str, center_id: int
-    ) -> str:
+    def upload_fragment(self, record: Dict[str, Any], gsid: str, center_id: int) -> str:
         """Create and upload curated fragment to S3"""
         fragment = self.create_curated_fragment(record, gsid, center_id)
-        
+
         key = f"subjects/{gsid}/{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
 
         try:
@@ -78,9 +75,7 @@ class S3Uploader:
             logger.error(f"Failed to upload fragment to S3: {e}")
             raise
 
-    def upload_batch_summary(
-        self, results: List[Dict[str, Any]], batch_id: str
-    ) -> str:
+    def upload_batch_summary(self, results: List[Dict[str, Any]], batch_id: str) -> str:
         """Upload batch processing summary"""
         key = f"batches/{batch_id}/summary.json"
 
@@ -106,4 +101,3 @@ class S3Uploader:
         except ClientError as e:
             logger.error(f"Failed to upload batch summary: {e}")
             raise
-

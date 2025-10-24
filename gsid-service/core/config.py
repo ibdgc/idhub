@@ -1,26 +1,22 @@
 import json
 import os
 from pathlib import Path
+from typing import ClassVar, Dict
 
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     # Database
-    DB_HOST: str = os.getenv("DB_HOST", "localhost")
-    DB_PORT: int = int(os.getenv("DB_PORT", "5432"))
+    DB_HOST: str = os.getenv("DB_HOST", "idhub_db")
     DB_NAME: str = os.getenv("DB_NAME", "idhub")
-    DB_USER: str = os.getenv("DB_USER", "postgres")
+    DB_USER: str = os.getenv("DB_USER", "idhub_user")
     DB_PASSWORD: str = os.getenv("DB_PASSWORD", "")
-
-    # REDCap
-    REDCAP_API_URL: str = os.getenv("REDCAP_API_URL", "")
-    REDCAP_API_TOKEN: str = os.getenv("REDCAP_API_TOKEN", "")
-    REDCAP_PROJECT_ID: str = os.getenv("REDCAP_PROJECT_ID", "16894")
+    DB_PORT: int = int(os.getenv("DB_PORT", "5432"))
 
     # GSID Service
-    GSID_SERVICE_URL: str = os.getenv("GSID_SERVICE_URL", "http://gsid-service:8000")
     GSID_API_KEY: str = os.getenv("GSID_API_KEY", "")
+    GSID_SERVICE_URL: str = os.getenv("GSID_SERVICE_URL", "http://gsid-service:8000")
 
     # S3
     S3_BUCKET: str = os.getenv("S3_BUCKET", "idhub-curated-fragments")
@@ -29,15 +25,8 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 
-    @property
-    def FIELD_MAPPINGS(self):
-        """Load field mappings from JSON config"""
-        config_path = Path(__file__).parent.parent / "config" / "field_mappings.json"
-        with open(config_path) as f:
-            return json.load(f)
-
-    # Center Aliases
-    CENTER_ALIASES = {
+    # Center Aliases - use ClassVar to prevent Pydantic from treating it as a field
+    CENTER_ALIASES: ClassVar[Dict[str, str]] = {
         "mount_sinai": "MSSM",
         "mount_sinai_ny": "MSSM",
         "mount-sinai": "MSSM",
@@ -56,6 +45,12 @@ class Settings(BaseSettings):
         "university_of_pittsburgh": "Pittsburgh",
     }
 
+    @property
+    def FIELD_MAPPINGS(self):
+        """Load field mappings from JSON config"""
+        config_path = Path(__file__).parent.parent / "config" / "field_mappings.json"
+        with open(config_path) as f:
+            return json.load(f)
+
 
 settings = Settings()
-
