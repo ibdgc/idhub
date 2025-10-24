@@ -1,5 +1,7 @@
 data/
 postgres_data/
+.env
+ssl/
 
 # Logs
 *.log

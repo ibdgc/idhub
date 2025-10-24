@@ -1,11 +1,12 @@
+# redcap-pipeline/services/data_processor.py
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, Optional
 
-from core.config import settings
-from core.database import db_manager
+import psycopg2
+from core.database import get_db_connection, get_db_cursor
 
-from .center_resolver import CenterResolver
-from .gsid_client import GSIDClient
+from services.center_resolver import CenterResolver
+from services.gsid_client import GSIDClient
 
 logger = logging.getLogger(__name__)
 
@@ -14,110 +15,98 @@ class DataProcessor:
     def __init__(self, center_resolver: CenterResolver, gsid_client: GSIDClient):
         self.center_resolver = center_resolver
         self.gsid_client = gsid_client
-        self.field_mappings = settings.load_field_mappings()
 
-    def process_records(self, records: List[Dict[str, Any]]):
-        """Process REDCap records"""
-        for record in records:
-            # Get center - use get_or_create_center to match original behavior
-            center_name = record.get("redcap_data_access_group")
-            center_id = self.center_resolver.get_or_create_center(
-                center_name or "Unknown"
+    def process_records(self, records: list[Dict[str, Any]]) -> None:
+        """Process REDCap records and insert into database"""
+        with get_db_connection() as conn:
+            with get_db_cursor(conn) as cursor:
+                for record in records:
+                    try:
+                        self._process_record(cursor, record)
+                    except Exception as e:
+                        logger.error(
+                            f"Error processing record {record.get('record_id')}: {e}"
+                        )
+                        raise
+
+    def _process_record(self, cursor, record: Dict[str, Any]) -> None:
+        """Process a single record"""
+        # Resolve center
+        center_name = record.get("redcap_data_access_group", "")
+        center_id = self.center_resolver.resolve_center(center_name)
+
+        # Get or create subject
+        global_subject_id = self._get_or_create_subject(cursor, record, center_id)
+
+        logger.info(
+            f"Processed record {record.get('record_id')} -> GSID: {global_subject_id}"
+        )
+
+    def _get_or_create_subject(
+        self, cursor, record: Dict[str, Any], center_id: int
+    ) -> str:
+        """Get existing subject or create new one with GSID"""
+        consortium_id = record.get("consortium_id")
+        local_id = record.get("local_patient_id")
+
+        # Try to find existing subject by identifiers
+        if consortium_id:
+            cursor.execute(
+                "SELECT global_subject_id FROM subjects WHERE consortium_id = %s",
+                (consortium_id,),
             )
+            result = cursor.fetchone()
+            if result:
+                return result["global_subject_id"]
 
-            if not center_id:
-                logger.warning(
-                    f"Skipping record - no center: {record.get('record_id')}"
+        if local_id and center_id:
+            cursor.execute(
+                "SELECT global_subject_id FROM subjects WHERE local_id = %s AND center_id = %s",
+                (local_id, center_id),
+            )
+            result = cursor.fetchone()
+            if result:
+                return result["global_subject_id"]
+
+        # Subject doesn't exist, generate new GSID
+        gsids = self.gsid_client.generate_gsids(1)
+        gsid = gsids[0]
+
+        # Update the reserved GSID record with actual subject data
+        cursor.execute(
+            """
+            UPDATE subjects
+            SET 
+                center_id = %s,
+                consortium_id = %s,
+                local_id = %s,
+                updated_at = NOW()
+            WHERE global_subject_id = %s
+            RETURNING global_subject_id
+            """,
+            (center_id, consortium_id, local_id, gsid),
+        )
+        result = cursor.fetchone()
+
+        if result:
+            return result["global_subject_id"]
+        else:
+            # Fallback: if UPDATE didn't find the record, INSERT it
+            # This shouldn't happen but handles edge cases
+            cursor.execute(
+                """
+                INSERT INTO subjects (
+                    global_subject_id, 
+                    center_id, 
+                    consortium_id, 
+                    local_id,
+                    created_at,
+                    updated_at
                 )
-                continue
-
-            # Check if subject exists
-            global_subject_id = self._get_or_create_subject(record, center_id)
-
-            # Process specimens
-            self._process_specimens(record, global_subject_id)
-
-    def _get_or_create_subject(self, record: Dict[str, Any], center_id: int) -> str:
-        """Get existing subject or create new one"""
-        record_id = record.get("record_id")
-
-        with db_manager.get_connection() as conn:
-            with db_manager.get_cursor(conn) as cursor:
-                # Check if subject exists via local_subject_ids table
-                cursor.execute(
-                    """
-                    SELECT global_subject_id 
-                    FROM local_subject_ids 
-                    WHERE center_id = %s AND local_subject_id = %s
-                    """,
-                    (center_id, record_id),
-                )
-                result = cursor.fetchone()
-
-                if result:
-                    return result["global_subject_id"]
-
-                # Generate new GSID
-                gsids = self.gsid_client.generate_gsids(1)
-                global_subject_id = gsids[0]
-
-                # Create new subject
-                cursor.execute(
-                    """
-                    INSERT INTO subjects (global_subject_id, center_id, control)
-                    VALUES (%s, %s, %s)
-                    """,
-                    (global_subject_id, center_id, record.get("control", False)),
-                )
-
-                # Create local_subject_id mapping
-                cursor.execute(
-                    """
-                    INSERT INTO local_subject_ids (center_id, local_subject_id, identifier_type, global_subject_id)
-                    VALUES (%s, %s, %s, %s)
-                    """,
-                    (center_id, record_id, "primary", global_subject_id),
-                )
-
-                conn.commit()
-                logger.info(
-                    f"Created new subject {global_subject_id} for record {record_id}"
-                )
-                return global_subject_id
-
-    def _process_specimens(self, record: Dict[str, Any], global_subject_id: str):
-        """Process specimen data from record"""
-        specimen_mappings = [
-            m
-            for m in self.field_mappings["mappings"]
-            if m.get("target_table") == "specimen"
-        ]
-
-        with db_manager.get_connection() as conn:
-            with db_manager.get_cursor(conn) as cursor:
-                for mapping in specimen_mappings:
-                    source_field = mapping["source_field"]
-                    sample_id = record.get(source_field)
-
-                    if not sample_id:
-                        continue
-
-                    sample_type = mapping.get("sample_type", "unknown")
-
-                    # Check if specimen exists
-                    cursor.execute(
-                        "SELECT 1 FROM specimen WHERE global_subject_id = %s AND sample_id = %s",
-                        (global_subject_id, sample_id),
-                    )
-
-                    if not cursor.fetchone():
-                        cursor.execute(
-                            """
-                            INSERT INTO specimen (global_subject_id, sample_id, sample_type, created_at)
-                            VALUES (%s, %s, %s, NOW())
-                            """,
-                            (global_subject_id, sample_id, sample_type),
-                        )
-                        logger.debug(
-                            f"Created specimen {sample_id} for subject {global_subject_id}"
-                        )
+                VALUES (%s, %s, %s, %s, NOW(), NOW())
+                RETURNING global_subject_id
+                """,
+                (gsid, center_id, consortium_id, local_id),
+            )
+            result = cursor.fetchone()
+            return result["global_subject_id"]
