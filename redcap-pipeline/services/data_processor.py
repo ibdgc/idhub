@@ -3,7 +3,8 @@ from datetime import datetime
 from typing import Any, Dict, List
 
 from core.config import settings
-from core.database import db_manager
+from core.database import get_db_connection, return_db_connection
+from psycopg2.extras import RealDictCursor
 from services.center_resolver import CenterResolver
 from services.gsid_client import GSIDClient
 
@@ -14,7 +15,6 @@ class DataProcessor:
     def __init__(self, gsid_client: GSIDClient, center_resolver: CenterResolver):
         self.gsid_client = gsid_client
         self.center_resolver = center_resolver
-        self.field_mappings = settings.FIELD_MAPPINGS
 
     def extract_local_ids(self, record: Dict[str, Any], center_id: int) -> List[Dict]:
         """Extract all available local identifiers from record"""
@@ -62,8 +62,9 @@ class DataProcessor:
 
     def register_all_local_ids(self, gsid: str, identifiers: List[Dict]):
         """Register all local IDs for a subject, flag conflicts for review"""
-        with db_manager.get_connection() as conn:
-            with db_manager.get_cursor(conn) as cursor:
+        conn = get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                 for identifier in identifiers:
                     # Check if this local_id already exists with a different GSID
                     cursor.execute(
@@ -148,11 +149,19 @@ class DataProcessor:
                     logger.info(
                         f"Linked {identifier['identifier_type']}={identifier['local_subject_id']} -> {gsid}"
                     )
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error registering local IDs for {gsid}: {e}")
+            raise
+        finally:
+            return_db_connection(conn)
 
     def transform_value(self, field_name: str, value: Any) -> Any:
         """Apply transformations to field values"""
-        transformations = self.field_mappings.get("transformations", {})
-        
+        field_mappings = settings.load_field_mappings()
+        transformations = field_mappings.get("transformations", {})
+
         if field_name not in transformations:
             return value
 
@@ -204,10 +213,12 @@ class DataProcessor:
 
     def _process_specimens(self, record: Dict[str, Any], gsid: str):
         """Process and insert specimen records using field mappings"""
-        with db_manager.get_connection() as conn:
-            with db_manager.get_cursor(conn) as cursor:
+        field_mappings = settings.load_field_mappings()
+        conn = get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                 # Process all specimen mappings from config
-                for mapping in self.field_mappings.get("mappings", []):
+                for mapping in field_mappings.get("mappings", []):
                     if mapping.get("target_table") == "specimen":
                         source_field = mapping["source_field"]
                         sample_type = mapping.get("sample_type")
@@ -252,6 +263,13 @@ class DataProcessor:
                     )
 
                 logger.info(f"Inserted samples for GSID {gsid}")
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error inserting samples for {gsid}: {e}")
+            raise
+        finally:
+            return_db_connection(conn)
 
     def process_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
         """Process single REDCap record with conflict detection"""
@@ -284,4 +302,3 @@ class DataProcessor:
             result = self.process_record(record)
             results.append(result)
         return results
-

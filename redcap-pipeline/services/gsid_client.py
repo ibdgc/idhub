@@ -1,6 +1,6 @@
 # redcap-pipeline/services/gsid_client.py
 import logging
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
 from core.config import settings
@@ -10,104 +10,59 @@ logger = logging.getLogger(__name__)
 
 class GSIDClient:
     def __init__(self):
-        self.service_url = settings.GSID_SERVICE_URL
+        self.base_url = settings.GSID_SERVICE_URL
         self.api_key = settings.GSID_API_KEY
-
-    def generate_gsids(self, count: int) -> List[str]:
-        """Request GSIDs from GSID service"""
-        if not self.api_key:
-            raise ValueError(
-                "GSID_API_KEY environment variable is not set. "
-                "Please configure the API key to authenticate with the GSID service."
-            )
-
-        headers = {"x-api-key": self.api_key}
-        payload = {"count": count}
-        url = f"{self.service_url}/generate"
-
-        try:
-            logger.info(f"Requesting {count} GSIDs from {url}")
-            response = requests.post(
-                url,
-                json=payload,
-                headers=headers,
-                timeout=30,
-            )
-            response.raise_for_status()
-            data = response.json()
-
-            if "gsids" not in data:
-                raise ValueError(f"Unexpected response format: {data}")
-
-            logger.info(f"Successfully generated {len(data['gsids'])} GSIDs")
-            return data["gsids"]
-
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 403:
-                logger.error(
-                    "Authentication failed: Invalid API key. "
-                    "Please check that GSID_API_KEY matches the service configuration."
-                )
-            elif e.response.status_code == 500:
-                logger.error(f"GSID service error: {e.response.text}")
-            else:
-                logger.error(f"HTTP {e.response.status_code}: {e.response.text}")
-            raise
-        except Exception as e:
-            logger.error(f"Error generating GSIDs: {e}")
-            raise
+        self.session = requests.Session()
+        self.session.headers.update(
+            {"x-api-key": self.api_key, "Content-Type": "application/json"}
+        )
 
     def register_subject(
         self,
         center_id: int,
         local_subject_id: str,
-        registration_year: str = None,
+        identifier_type: str = "primary",
+        registration_year: Optional[int] = None,
         control: bool = False,
-    ) -> Dict[str, str]:
-        """Register subject with GSID service
-        
-        Returns:
-            dict: {"gsid": "...", "action": "created|existing"}
-        """
-        if not self.api_key:
-            raise ValueError(
-                "GSID_API_KEY environment variable is not set. "
-                "Please configure the API key to authenticate with the GSID service."
-            )
-
-        headers = {"x-api-key": self.api_key}
+    ) -> Dict[str, Any]:
+        """Register subject with GSID service"""
         payload = {
             "center_id": center_id,
             "local_subject_id": local_subject_id,
+            "identifier_type": identifier_type,
             "registration_year": registration_year,
             "control": control,
             "created_by": "redcap_pipeline",
         }
-        url = f"{self.service_url}/register"
 
         try:
-            logger.debug(
-                f"Registering subject: center_id={center_id}, "
-                f"local_subject_id={local_subject_id}"
-            )
-            response = requests.post(
-                url,
-                json=payload,
-                headers=headers,
-                timeout=30,
+            response = self.session.post(
+                f"{self.base_url}/register", json=payload, timeout=30
             )
             response.raise_for_status()
-            data = response.json()
+            result = response.json()
 
-            logger.debug(f"Registration response: {data}")
-            return data
-
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 403:
-                logger.error("Authentication failed: Invalid API key")
-            else:
-                logger.error(f"HTTP {e.response.status_code}: {e.response.text}")
+            logger.info(
+                f"Registered {local_subject_id} ({identifier_type}) -> "
+                f"GSID {result['gsid']} ({result['action']})"
+            )
+            return result
+        except requests.exceptions.RequestException as e:
+            logger.error(f"GSID registration failed: {e}")
             raise
-        except Exception as e:
-            logger.error(f"Error registering subject: {e}")
+
+    def register_batch(
+        self, subjects: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Register multiple subjects in batch"""
+        payload = {"requests": subjects}
+
+        try:
+            response = self.session.post(
+                f"{self.base_url}/register/batch", json=payload, timeout=60
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Batch registration failed: {e}")
             raise

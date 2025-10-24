@@ -1,6 +1,7 @@
 # redcap-pipeline/core/config.py
 import json
 import os
+from functools import lru_cache
 from pathlib import Path
 
 
@@ -27,13 +28,6 @@ class Settings:
     AWS_DEFAULT_REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
     S3_BUCKET = os.getenv("S3_BUCKET", "idhub-curated-fragments")
 
-    # Field Mappings
-    @staticmethod
-    def load_field_mappings():
-        config_path = Path(__file__).parent.parent / "config" / "field_mappings.json"
-        with open(config_path) as f:
-            return json.load(f)
-
     # Center Aliases
     CENTER_ALIASES = {
         "mount_sinai": "MSSM",
@@ -48,7 +42,18 @@ class Settings:
         "johns_hopkins": "Johns Hopkins",
         "jhu": "Johns Hopkins",
         "mass_general": "Massachusetts General Hospital",
+        "mgh": "Massachusetts General Hospital",
+        "pitt": "Pittsburgh",
+        "upitt": "Pittsburgh",
+        "university_of_pittsburgh": "Pittsburgh",
     }
+
+    @staticmethod
+    @lru_cache(maxsize=None)
+    def load_field_mappings():
+        config_path = Path(__file__).parent.parent / "config" / "field_mappings.json"
+        with open(config_path) as f:
+            return json.load(f)
 
 
 settings = Settings()

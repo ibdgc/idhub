@@ -53,6 +53,15 @@ class REDCapClient:
             logger.error(f"Error fetching REDCap records: {e}")
             raise
 
+    def fetch_records_batch(
+        self, batch_size: int = 100, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Fetch records in batches"""
+        logger.info(f"Fetching batch: offset={offset}, limit={batch_size}")
+
+        all_records = self.fetch_records()
+        return all_records[offset : offset + batch_size]
+
     def fetch_metadata(self) -> List[Dict[str, Any]]:
         """Fetch field metadata from REDCap"""
         payload = {

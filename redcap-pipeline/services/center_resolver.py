@@ -3,7 +3,8 @@ from difflib import SequenceMatcher
 from typing import Dict, Optional
 
 from core.config import settings
-from core.database import db_manager
+from core.database import get_db_connection, return_db_connection
+from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
 
@@ -16,27 +17,30 @@ class CenterResolver:
 
     def _load_centers(self):
         """Load centers from database into cache"""
-        with db_manager.get_connection() as conn:
-            with db_manager.get_cursor(conn) as cursor:
+        conn = get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                 cursor.execute("SELECT center_id, name FROM centers")
                 for row in cursor.fetchall():
                     self.center_cache[row["name"].lower()] = row["center_id"]
                     self.center_names[row["center_id"]] = row["name"]
-        logger.info(f"Loaded {len(self.center_cache)} centers into cache")
+            logger.info(f"Loaded {len(self.center_cache)} centers into cache")
+        finally:
+            return_db_connection(conn)
 
     def normalize_center_name(self, raw_name: str) -> str:
         """Normalize center name using aliases"""
         if not raw_name:
             return "Unknown"
-        
+
         normalized = raw_name.lower().strip().replace(" ", "_").replace("-", "_")
-        
+
         # Check aliases
         if normalized in settings.CENTER_ALIASES:
             canonical = settings.CENTER_ALIASES[normalized]
             logger.info(f"Alias matched '{raw_name}' -> '{canonical}'")
             return canonical
-        
+
         return raw_name
 
     def _fuzzy_match_center(
@@ -51,17 +55,17 @@ class CenterResolver:
 
         # Normalize input
         input_normalized = input_name.lower().replace("_", "-").replace(" ", "-")
-        
+
         best_match_id = None
         best_match_name = None
         best_score = 0.0
 
         for center_name_db, center_id in self.center_cache.items():
             center_normalized = center_name_db.replace("_", "-").replace(" ", "-")
-            
+
             # Calculate similarity ratio
             score = SequenceMatcher(None, input_normalized, center_normalized).ratio()
-            
+
             if score > best_score:
                 best_score = score
                 best_match_id = center_id
@@ -109,8 +113,9 @@ class CenterResolver:
         normalized = self.normalize_center_name(center_name)
         logger.warning(f"Creating new center: '{normalized}'")
 
-        with db_manager.get_connection() as conn:
-            with db_manager.get_cursor(conn) as cursor:
+        conn = get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                 cursor.execute(
                     """
                     INSERT INTO centers (name, investigator, country, consortium)
@@ -121,10 +126,12 @@ class CenterResolver:
                 )
                 result = cursor.fetchone()
                 center_id = result["center_id"]
-                
+
                 # Update cache
                 self.center_cache[normalized.lower()] = center_id
                 self.center_names[center_id] = normalized
-                
-                return center_id
 
+                conn.commit()
+                return center_id
+        finally:
+            return_db_connection(conn)

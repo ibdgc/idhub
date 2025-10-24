@@ -34,7 +34,8 @@ class S3Uploader:
 
         # Group specimens by type from mappings
         specimen_types = {}
-        for mapping in settings.FIELD_MAPPINGS.get("mappings", []):
+        field_mappings = settings.load_field_mappings()
+        for mapping in field_mappings.get("mappings", []):
             if mapping.get("target_table") == "specimen":
                 source_field = mapping["source_field"]
                 sample_type = mapping.get("sample_type")
