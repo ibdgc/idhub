@@ -28,7 +28,6 @@ def resolve_identity(
     conn, center_id: int, local_subject_id: str, identifier_type: str = "primary"
 ) -> dict:
     """Core identity resolution logic with identifier_type support"""
-    # Use RealDictCursor to return dictionaries instead of tuples
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
     try:
@@ -115,21 +114,32 @@ def log_resolution(conn, resolution: Dict[str, Any], request: Any):
             if hasattr(request, "center_id")
             else request.get("center_id")
         )
+        local_id = (
+            request.local_subject_id
+            if hasattr(request, "local_subject_id")
+            else request.get("local_subject_id")
+        )
+
+        # Determine if review is required
+        requires_review = resolution.get("action") == "review_required"
 
         cur.execute(
             """
             INSERT INTO identity_resolutions 
-            (gsid, center_id, resolution_type, matched_on, created_at)
-            VALUES (%s, %s, %s, %s, NOW())
+            (input_center_id, input_local_id, matched_gsid, action, match_strategy, 
+             confidence_score, requires_review, review_reason, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
             RETURNING resolution_id
             """,
             (
-                resolution.get("gsid"),
                 center_id,
-                resolution.get(
-                    "match_strategy"
-                ),  # Changed from "type" to "match_strategy"
-                resolution.get("match_strategy"),  # Changed from "matched_on"
+                local_id,
+                resolution.get("gsid"),
+                resolution.get("action"),
+                resolution.get("match_strategy"),
+                resolution.get("confidence"),
+                requires_review,
+                resolution.get("review_reason"),
             ),
         )
         result = cur.fetchone()
