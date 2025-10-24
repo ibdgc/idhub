@@ -62,3 +62,4 @@ def reserve_gsids(gsids: List[str]) -> None:
                     """,
                     (gsid,),
                 )
+            conn.commit()  # Commit all reservations
