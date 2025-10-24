@@ -1,65 +1,86 @@
-# gsid-service/services/gsid_generator.py
 import logging
-import secrets
-import time
-from typing import List
+from typing import Any, Dict, List, Optional
 
-from core.database import get_db_connection, get_db_cursor
+import requests
+
+from core.config import settings
 
 logger = logging.getLogger(__name__)
 
-BASE32_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
+class GSIDClient:
+    def __init__(self):
+        self.base_url = settings.GSID_SERVICE_URL
+        self.api_key = settings.GSID_API_KEY
+        self.session = requests.Session()
+        self.session.headers.update({
+            "x-api-key": self.api_key,
+            "Content-Type": "application/json"
+        })
 
-def generate_gsid() -> str:
-    """Generate 12-character GSID (6 chars timestamp + 6 chars random)"""
-    timestamp_ms = int(time.time() * 1000)
-    timestamp_b32 = ""
-    for _ in range(6):
-        timestamp_b32 = BASE32_ALPHABET[timestamp_ms % 32] + timestamp_b32
-        timestamp_ms //= 32
+    def register_subject(
+        self,
+        center_id: int,
+        local_subject_id: str,
+        identifier_type: str = "primary",
+        registration_year: Optional[int] = None,
+        control: bool = False,
+    ) -> Dict[str, Any]:
+        """Register subject with GSID service"""
+        payload = {
+            "center_id": center_id,
+            "local_subject_id": local_subject_id,
+            "identifier_type": identifier_type,
+            "registration_year": registration_year,
+            "control": control,
+            "created_by": "redcap_pipeline",
+        }
 
-    random_b32 = "".join(secrets.choice(BASE32_ALPHABET) for _ in range(6))
-    return timestamp_b32 + random_b32
+        try:
+            response = self.session.post(
+                f"{self.base_url}/register",
+                json=payload,
+                timeout=30
+            )
+            response.raise_for_status()
+            result = response.json()
+            
+            logger.info(
+                f"Registered {local_subject_id} ({identifier_type}) -> "
+                f"GSID {result['gsid']} ({result['action']})"
+            )
+            return result
+        except requests.exceptions.RequestException as e:
+            logger.error(f"GSID registration failed: {e}")
+            raise
 
+    def register_batch(
+        self, subjects: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Register multiple subjects in batch"""
+        payload = {"requests": subjects}
 
-def generate_unique_gsids(count: int) -> List[str]:
-    """Generate multiple unique GSIDs"""
-    gsids = []
-    max_attempts = count * 10
-    attempts = 0
+        try:
+            response = self.session.post(
+                f"{self.base_url}/register/batch",
+                json=payload,
+                timeout=60
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Batch registration failed: {e}")
+            raise
 
-    with get_db_connection() as conn:
-        with get_db_cursor(conn) as cursor:
-            while len(gsids) < count and attempts < max_attempts:
-                gsid = generate_gsid()
-                cursor.execute(
-                    "SELECT 1 FROM subjects WHERE global_subject_id = %s", (gsid,)
-                )
-                if not cursor.fetchone():
-                    gsids.append(gsid)
-                attempts += 1
-
-    if len(gsids) < count:
-        raise Exception(
-            f"Could not generate {count} unique GSIDs after {max_attempts} attempts"
-        )
-
-    return gsids
-
-
-def reserve_gsids(gsids: List[str]) -> None:
-    """Reserve GSIDs in the database by creating placeholder subject records"""
-    with get_db_connection() as conn:
-        with get_db_cursor(conn) as cursor:
-            for gsid in gsids:
-                # Insert placeholder - center_id=0 means "reserved but not yet assigned"
-                cursor.execute(
-                    """
-                    INSERT INTO subjects (global_subject_id, center_id, created_at)
-                    VALUES (%s, 0, NOW())
-                    ON CONFLICT (global_subject_id) DO NOTHING
-                    """,
-                    (gsid,),
-                )
-            conn.commit()  # Commit all reservations
+    def get_review_queue(self) -> List[Dict[str, Any]]:
+        """Get subjects flagged for review"""
+        try:
+            response = self.session.get(
+                f"{self.base_url}/review-queue",
+                timeout=30
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to fetch review queue: {e}")
+            raise

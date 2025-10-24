@@ -1,10 +1,11 @@
-# redcap-pipeline/services/s3_uploader.py
 import json
 import logging
 from datetime import datetime
 from typing import Any, Dict, List
 
 import boto3
+from botocore.exceptions import ClientError
+
 from core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -12,22 +13,96 @@ logger = logging.getLogger(__name__)
 
 class S3Uploader:
     def __init__(self):
-        self.s3_client = boto3.client("s3")
+        self.s3_client = boto3.client("s3", region_name=settings.AWS_REGION)
         self.bucket = settings.S3_BUCKET
 
-    def upload_fragment(self, data: List[Dict[str, Any]], fragment_name: str):
-        """Upload data fragment to S3"""
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        key = f"redcap/{fragment_name}_{timestamp}.json"
+    def create_curated_fragment(
+        self, record: Dict[str, Any], gsid: str, center_id: int
+    ) -> Dict[str, Any]:
+        """Create curated data fragment (PHI-free)"""
+        fragment = {
+            "gsid": gsid,
+            "center_id": center_id,
+            "samples": {},
+            "family": {},
+            "metadata": {
+                "source": "redcap",
+                "pipeline_version": "1.0",
+                "processed_at": datetime.utcnow().isoformat(),
+            },
+        }
+
+        # Group specimens by type from mappings
+        specimen_types = {}
+        for mapping in settings.FIELD_MAPPINGS.get("mappings", []):
+            if mapping.get("target_table") == "specimen":
+                source_field = mapping["source_field"]
+                sample_type = mapping.get("sample_type")
+                if record.get(source_field):
+                    if sample_type not in specimen_types:
+                        specimen_types[sample_type] = []
+                    specimen_types[sample_type].append(record[source_field])
+
+        # Add to fragment
+        for sample_type, sample_ids in specimen_types.items():
+            if len(sample_ids) == 1:
+                fragment["samples"][sample_type] = sample_ids[0]
+            else:
+                fragment["samples"][sample_type] = sample_ids
+
+        if record.get("family_id"):
+            fragment["family"]["family_id"] = record["family_id"]
+
+        return fragment
+
+    def upload_fragment(
+        self, record: Dict[str, Any], gsid: str, center_id: int
+    ) -> str:
+        """Create and upload curated fragment to S3"""
+        fragment = self.create_curated_fragment(record, gsid, center_id)
+        
+        key = f"subjects/{gsid}/{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
 
         try:
             self.s3_client.put_object(
                 Bucket=self.bucket,
                 Key=key,
-                Body=json.dumps(data, indent=2),
+                Body=json.dumps(fragment, indent=2),
                 ContentType="application/json",
+                ServerSideEncryption="AES256",
             )
             logger.info(f"Uploaded fragment to s3://{self.bucket}/{key}")
-        except Exception as e:
-            logger.error(f"Error uploading to S3: {e}")
+            return key
+        except ClientError as e:
+            logger.error(f"Failed to upload fragment to S3: {e}")
             raise
+
+    def upload_batch_summary(
+        self, results: List[Dict[str, Any]], batch_id: str
+    ) -> str:
+        """Upload batch processing summary"""
+        key = f"batches/{batch_id}/summary.json"
+
+        summary = {
+            "batch_id": batch_id,
+            "processed_at": datetime.utcnow().isoformat(),
+            "total_records": len(results),
+            "successful": sum(1 for r in results if r["status"] == "success"),
+            "failed": sum(1 for r in results if r["status"] == "error"),
+            "results": results,
+        }
+
+        try:
+            self.s3_client.put_object(
+                Bucket=self.bucket,
+                Key=key,
+                Body=json.dumps(summary, indent=2),
+                ContentType="application/json",
+                ServerSideEncryption="AES256",
+            )
+            logger.info(f"Uploaded batch summary to s3://{self.bucket}/{key}")
+            return key
+        except ClientError as e:
+            logger.error(f"Failed to upload batch summary: {e}")
+            raise
+
