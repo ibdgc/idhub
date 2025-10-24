@@ -4,7 +4,6 @@ import secrets
 import time
 from typing import Any, Dict
 
-from api.models import SubjectRequest
 from core.database import get_db_cursor
 from psycopg2.extras import RealDictCursor
 
@@ -100,9 +99,23 @@ def resolve_identity(
         cur.close()
 
 
-def log_resolution(conn, resolution: Dict[str, Any], request: Dict[str, Any]):
-    """Log identity resolution result"""
+def log_resolution(conn, resolution: Dict[str, Any], request: Any):
+    """
+    Log identity resolution result
+
+    Args:
+        conn: Database connection
+        resolution: Resolution result dictionary
+        request: SubjectRequest Pydantic model or dict
+    """
     with get_db_cursor(conn, cursor_factory=RealDictCursor) as cur:
+        # Handle both Pydantic models and dicts
+        center_id = (
+            request.center_id
+            if hasattr(request, "center_id")
+            else request.get("center_id")
+        )
+
         cur.execute(
             """
             INSERT INTO identity_resolutions 
@@ -112,11 +125,12 @@ def log_resolution(conn, resolution: Dict[str, Any], request: Dict[str, Any]):
             """,
             (
                 resolution.get("gsid"),
-                request.get("center_id"),
-                resolution.get("type"),
-                resolution.get("matched_on"),
+                center_id,
+                resolution.get(
+                    "match_strategy"
+                ),  # Changed from "type" to "match_strategy"
+                resolution.get("match_strategy"),  # Changed from "matched_on"
             ),
         )
         result = cur.fetchone()
         return result["resolution_id"]
-
