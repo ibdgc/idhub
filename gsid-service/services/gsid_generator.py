@@ -31,17 +31,20 @@ def encode_base32(num: int, length: int) -> str:
 
 def generate_gsid() -> str:
     """
-    Generate a single GSID in format: GSID-XXXXXXXXXXXX (12 characters)
+    Generate a single GSID in format: GSID-XXXXXXXXXXXXXXXX (21 characters total)
 
     Structure:
-    - First 5 characters: Timestamp (milliseconds since epoch, base32)
+    - Prefix: "GSID-" (5 characters)
+    - Timestamp part: 5 base32 characters (milliseconds since epoch)
       - Provides lexicographic sorting by creation time
-      - ~41 bits = covers timestamps until year ~2084
-    - Last 7 characters: Random component (base32)
-      - ~35 bits of randomness = 34 billion combinations per millisecond
+      - ~25 bits = covers timestamps until year ~2084
+    - Random part: 11 base32 characters
+      - ~55 bits of randomness = 36 quadrillion combinations per millisecond
 
-    Total: 76 bits of uniqueness
+    Total: 16-character ID (80 bits of uniqueness)
+    Format: GSID-TTTTTRRRRRRRRRRR
     """
+
     # Get current timestamp in milliseconds
     timestamp_ms = int(time.time() * 1000)
 

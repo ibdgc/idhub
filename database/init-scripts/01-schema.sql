@@ -19,7 +19,7 @@ CREATE TABLE family (
 );
 
 CREATE TABLE subjects (
-    global_subject_id VARCHAR(12) PRIMARY KEY,
+    global_subject_id VARCHAR(21) PRIMARY KEY,
     center_id INT NOT NULL REFERENCES centers(center_id),
     registration_year INTEGER,
     control BOOLEAN DEFAULT FALSE,
@@ -35,28 +35,28 @@ CREATE TABLE local_subject_ids (
     center_id INT,
     local_subject_id VARCHAR,
     identifier_type VARCHAR DEFAULT 'primary',
-    global_subject_id VARCHAR(12) REFERENCES subjects(global_subject_id),
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (center_id, local_subject_id, identifier_type)
 );
 
 CREATE TABLE subject_alias (
     alias VARCHAR(14) NOT NULL,
-    global_subject_id VARCHAR(12) REFERENCES subjects(global_subject_id),
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE lcl (
     niddk_no INT PRIMARY KEY,
     knumber VARCHAR(7),
-    global_subject_id VARCHAR(12) REFERENCES subjects(global_subject_id),
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
     date_collected DATE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE specimen (
     sample_id VARCHAR PRIMARY KEY,
-    global_subject_id VARCHAR(12) REFERENCES subjects(global_subject_id),
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
     sample_type VARCHAR,
     year_collected INTEGER,
     redcap_event VARCHAR,
@@ -68,55 +68,55 @@ CREATE TABLE specimen (
 
 CREATE TABLE wgs (
     sample_id VARCHAR PRIMARY KEY,
-    global_subject_id VARCHAR(12) REFERENCES subjects(global_subject_id),
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE immunochip (
     sample_id VARCHAR PRIMARY KEY,
-    global_subject_id VARCHAR(12) REFERENCES subjects(global_subject_id),
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE bge (
     sample_id VARCHAR PRIMARY KEY,
-    global_subject_id VARCHAR(12) REFERENCES subjects(global_subject_id),
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE exomechip (
     sample_id VARCHAR PRIMARY KEY,
-    global_subject_id VARCHAR(12) REFERENCES subjects(global_subject_id),
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE gwas2 (
     sample_id VARCHAR PRIMARY KEY,
-    global_subject_id VARCHAR(12) REFERENCES subjects(global_subject_id),
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE enteroid (
     sample_id VARCHAR PRIMARY KEY,
-    global_subject_id VARCHAR(12) REFERENCES subjects(global_subject_id),
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE olink (
     sample_id VARCHAR PRIMARY KEY,
-    global_subject_id VARCHAR(12) REFERENCES subjects(global_subject_id),
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE rnaseq (
     sample_id VARCHAR PRIMARY KEY,
-    global_subject_id VARCHAR(12) REFERENCES subjects(global_subject_id),
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE wes (
     seq_id TEXT PRIMARY KEY,
-    global_subject_id VARCHAR(12) REFERENCES subjects(global_subject_id),
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
     batch TEXT,
     vcf_sample_id VARCHAR,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -124,7 +124,7 @@ CREATE TABLE wes (
 
 CREATE TABLE genotyping (
     genotype_id TEXT PRIMARY KEY,
-    global_subject_id VARCHAR(12) REFERENCES subjects(global_subject_id),
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
     genotyping_project TEXT,
     genotyping_barcode TEXT,
     batch TEXT,
@@ -135,7 +135,7 @@ CREATE TABLE identity_resolutions (
     resolution_id SERIAL PRIMARY KEY,
     input_center_id INT NOT NULL,
     input_local_id VARCHAR NOT NULL,
-    matched_gsid VARCHAR(12) REFERENCES subjects(global_subject_id),
+    matched_gsid VARCHAR(21) REFERENCES subjects(global_subject_id),
     action VARCHAR NOT NULL,
     match_strategy VARCHAR NOT NULL,
     confidence_score DECIMAL(3,2) NOT NULL,

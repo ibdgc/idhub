@@ -68,9 +68,9 @@ def test_client(mock_db_pool):
 
 @pytest.fixture
 def mock_generate_gsid():
-    """Mock GSID generation - returns 17-char format"""
+    """Mock GSID generation - returns 21-char format"""
     with patch("services.gsid_generator.generate_gsid") as mock:
-        mock.return_value = "GSID-01HQXYZ123AB"  # 17 chars: prefix(5) + id(12)
+        mock.return_value = "GSID-01HQXYZ123ABCDEF"  # 21 chars: prefix(5) + id(16)
         yield mock
 
 
