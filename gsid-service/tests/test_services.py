@@ -23,8 +23,8 @@ class TestGSIDService:
 
         # All should be valid strings
         assert all(isinstance(gsid, str) for gsid in gsids)
-        # Updated: Match actual format (21 chars with GSID- prefix)
-        assert all(len(gsid) == 21 for gsid in gsids)
+        # Format: GSID-XXXXXXXXXXXX (17 chars total)
+        assert all(len(gsid) == 17 for gsid in gsids)
         assert all(gsid.startswith("GSID-") for gsid in gsids)
         assert len(set(gsids)) == count  # All unique
 
@@ -34,8 +34,12 @@ class TestGSIDService:
 
         gsid = generate_gsid()
 
-        # Updated: Extract only the ID part (after "GSID-" prefix)
-        gsid_id_part = gsid.split("GSID-")[1] if gsid.startswith("GSID-") else gsid
+        # Should start with prefix
+        assert gsid.startswith("GSID-")
+
+        # Extract only the ID part (after "GSID-" prefix)
+        gsid_id_part = gsid[5:]
+        assert len(gsid_id_part) == 12
 
         # All characters in ID part should be in BASE32_ALPHABET
         assert all(c in BASE32_ALPHABET for c in gsid_id_part)
@@ -54,7 +58,7 @@ class TestDatabaseService:
     def test_database_module_import(self, mock_pool):
         """Test database module can be imported"""
         try:
-            from services import database
+            from core import database
 
             assert hasattr(database, "get_db_connection")
             assert hasattr(database, "get_db_cursor")

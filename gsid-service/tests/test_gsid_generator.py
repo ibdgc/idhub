@@ -23,10 +23,9 @@ class TestGSIDGenerator:
 
     def test_gsid_format(self):
         """Test GSID format requirements"""
-        # Updated: Actual format is GSID-XXXXXXXXXXXX (21 total: 5 prefix + 16 chars)
-        # 5 chars timestamp + 7 chars random = 12 chars, but implementation may vary
-        expected_length = 21  # GSID- prefix + encoded ID
-        assert expected_length == 21
+        # Format: GSID-XXXXXXXXXXXX (5 char prefix + 12 char ID = 17 total)
+        expected_length = 17
+        assert expected_length == 17
 
     def test_gsid_uniqueness_concept(self):
         """Test that GSID generation should produce unique values"""

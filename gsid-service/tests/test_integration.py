@@ -49,25 +49,26 @@ class TestGSIDIntegration:
         gsid = generate_gsid()
         assert gsid is not None
         assert isinstance(gsid, str)
-        # Updated: GSID format is "GSID-XXXXXXXXXXXX" (5 prefix + 16 chars = 21 total)
-        assert len(gsid) == 21
+        # Format: GSID-XXXXXXXXXXXX (5 prefix + 12 chars = 17 total)
+        assert len(gsid) == 17
         assert gsid.startswith("GSID-")
+        # Verify the ID part (after prefix) is 12 characters
+        gsid_id = gsid[5:]  # Remove "GSID-" prefix
+        assert len(gsid_id) == 12
 
     def test_api_models_import(self):
         """Test that API models can be imported"""
         try:
-            # Updated: Import actual model names from api/models.py
             from api.models import (
-                GenerateRequest,
-                GenerateResponse,
+                BatchSubjectRequest,
                 HealthResponse,
-                RegisterRequest,
-                RegisterResponse,
+                ResolutionResponse,
+                SubjectRequest,
             )
 
-            assert GenerateRequest is not None
-            assert GenerateResponse is not None
-            assert RegisterResponse is not None
+            assert SubjectRequest is not None
+            assert ResolutionResponse is not None
+            assert BatchSubjectRequest is not None
             assert HealthResponse is not None
         except Exception as e:
             pytest.fail(f"Failed to import models: {e}")
@@ -79,6 +80,21 @@ class TestGSIDIntegration:
         gsid = generate_gsid()
         assert gsid is not None
         assert isinstance(gsid, str)
-        # Updated: Match actual format
-        assert len(gsid) == 21
+        # Format: GSID-XXXXXXXXXXXX (17 chars total)
+        assert len(gsid) == 17
         assert gsid.startswith("GSID-")
+
+    def test_gsid_format_components(self):
+        """Test GSID format structure"""
+        from services.gsid_generator import BASE32_ALPHABET, generate_gsid
+
+        gsid = generate_gsid()
+
+        # Check format: GSID-TTTTTRRRRRRR (prefix + 5 timestamp + 7 random)
+        assert gsid.startswith("GSID-")
+        gsid_id = gsid[5:]  # Remove prefix
+        assert len(gsid_id) == 12
+
+        # All characters should be valid base32
+        for char in gsid_id:
+            assert char in BASE32_ALPHABET
