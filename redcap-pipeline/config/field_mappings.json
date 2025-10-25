@@ -9,37 +9,37 @@
       "source_field": "sample_id",
       "target_table": "specimen",
       "target_field": "sample_id",
-      "sample_type": "dna"
+      "sample_type": "dna_local"
     },
     {
       "source_field": "dna_id",
       "target_table": "specimen",
       "target_field": "sample_id",
-      "sample_type": "dna"
+      "sample_type": "dna_feinstein"
     },
     {
       "source_field": "dna_blood_id",
       "target_table": "specimen",
       "target_field": "sample_id",
-      "sample_type": "blood_dna"
+      "sample_type": "dna_blood"
     },
     {
       "source_field": "blood_dna_id",
       "target_table": "specimen",
       "target_field": "sample_id",
-      "sample_type": "blood_dna"
+      "sample_type": "dna_blood"
     },
     {
       "source_field": "dna_saliva_id",
       "target_table": "specimen",
       "target_field": "sample_id",
-      "sample_type": "saliva_dna"
+      "sample_type": "dna_saliva"
     },
     {
       "source_field": "saliva_dna_id",
       "target_table": "specimen",
       "target_field": "sample_id",
-      "sample_type": "saliva_dna"
+      "sample_type": "dna_saliva"
     },
     {
       "source_field": "plasma_1",
