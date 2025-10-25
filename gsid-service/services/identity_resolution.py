@@ -12,33 +12,29 @@ logger = logging.getLogger(__name__)
 BASE32_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 
-def generate_gsid() -> str:
-    """Generate 12-character GSID"""
-    timestamp_ms = int(time.time() * 1000)
-    timestamp_b32 = ""
-    for _ in range(6):
-        timestamp_b32 = BASE32_ALPHABET[timestamp_ms % 32] + timestamp_b32
-        timestamp_ms //= 32
-
-    random_b32 = "".join(secrets.choice(BASE32_ALPHABET) for _ in range(6))
-    return timestamp_b32 + random_b32
-
-
 def resolve_identity(
     conn, center_id: int, local_subject_id: str, identifier_type: str = "primary"
 ) -> dict:
-    """Core identity resolution logic with identifier_type support"""
+    """
+    Core identity resolution logic - finds existing GSID regardless of identifier_type
+
+    The same local_subject_id for a given center should ALWAYS map to the same GSID,
+    regardless of what identifier_type it was originally registered with.
+    """
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
     try:
+        # First: Check if this local_subject_id exists for this center (ANY identifier_type)
         cur.execute(
             """
-            SELECT s.global_subject_id, s.withdrawn 
+            SELECT s.global_subject_id, s.withdrawn, l.identifier_type
             FROM local_subject_ids l
             JOIN subjects s ON l.global_subject_id = s.global_subject_id
-            WHERE l.center_id = %s AND l.local_subject_id = %s AND l.identifier_type = %s
+            WHERE l.center_id = %s AND l.local_subject_id = %s
+            ORDER BY l.created_at ASC
+            LIMIT 1
             """,
-            (center_id, local_subject_id, identifier_type),
+            (center_id, local_subject_id),
         )
         exact = cur.fetchone()
 
@@ -47,18 +43,19 @@ def resolve_identity(
                 return {
                     "action": "review_required",
                     "gsid": exact["global_subject_id"],
-                    "match_strategy": "exact_withdrawn",
+                    "match_strategy": f"exact_withdrawn (original type: {exact['identifier_type']})",
                     "confidence": 1.0,
                     "review_reason": "Subject previously withdrawn",
                 }
             return {
                 "action": "link_existing",
                 "gsid": exact["global_subject_id"],
-                "match_strategy": "exact",
+                "match_strategy": f"exact (original type: {exact['identifier_type']})",
                 "confidence": 1.0,
                 "review_reason": None,
             }
 
+        # Second: Check subject_alias table
         cur.execute(
             """
             SELECT s.global_subject_id, s.withdrawn
@@ -87,6 +84,7 @@ def resolve_identity(
                 "review_reason": None,
             }
 
+        # No match found - create new
         return {
             "action": "create_new",
             "gsid": None,

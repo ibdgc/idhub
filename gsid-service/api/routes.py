@@ -5,8 +5,8 @@ from typing import List
 from core.database import get_db_connection
 from core.security import verify_api_key
 from fastapi import APIRouter, Depends, HTTPException
+from services.gsid_generator import generate_gsid
 from services.identity_resolution import (
-    generate_gsid,
     log_resolution,
     resolve_identity,
 )
@@ -303,4 +303,3 @@ async def health():
     finally:
         if conn:
             conn.close()
-
