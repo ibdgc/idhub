@@ -23,8 +23,8 @@ class TestGSIDService:
 
         # All should be valid strings
         assert all(isinstance(gsid, str) for gsid in gsids)
-        # Format: GSID-XXXXXXXXXXXX (17 chars total)
-        assert all(len(gsid) == 17 for gsid in gsids)
+        # Format: GSID-XXXXXXXXXXXXXXXX (21 chars total)
+        assert all(len(gsid) == 21 for gsid in gsids)
         assert all(gsid.startswith("GSID-") for gsid in gsids)
         assert len(set(gsids)) == count  # All unique
 
@@ -39,7 +39,7 @@ class TestGSIDService:
 
         # Extract only the ID part (after "GSID-" prefix)
         gsid_id_part = gsid[5:]
-        assert len(gsid_id_part) == 12
+        assert len(gsid_id_part) == 16
 
         # All characters in ID part should be in BASE32_ALPHABET
         assert all(c in BASE32_ALPHABET for c in gsid_id_part)

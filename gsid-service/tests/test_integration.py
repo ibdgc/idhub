@@ -49,12 +49,12 @@ class TestGSIDIntegration:
         gsid = generate_gsid()
         assert gsid is not None
         assert isinstance(gsid, str)
-        # Format: GSID-XXXXXXXXXXXX (5 prefix + 12 chars = 17 total)
-        assert len(gsid) == 17
+        # Format: GSID-XXXXXXXXXXXXXXXX (5 prefix + 16 chars = 21 total)
+        assert len(gsid) == 21
         assert gsid.startswith("GSID-")
-        # Verify the ID part (after prefix) is 12 characters
+        # Verify the ID part (after prefix) is 16 characters
         gsid_id = gsid[5:]  # Remove "GSID-" prefix
-        assert len(gsid_id) == 12
+        assert len(gsid_id) == 16
 
     def test_api_models_import(self):
         """Test that API models can be imported"""
@@ -80,8 +80,8 @@ class TestGSIDIntegration:
         gsid = generate_gsid()
         assert gsid is not None
         assert isinstance(gsid, str)
-        # Format: GSID-XXXXXXXXXXXX (17 chars total)
-        assert len(gsid) == 17
+        # Format: GSID-XXXXXXXXXXXXXXXX (21 chars total)
+        assert len(gsid) == 21
         assert gsid.startswith("GSID-")
 
     def test_gsid_format_components(self):
@@ -90,10 +90,10 @@ class TestGSIDIntegration:
 
         gsid = generate_gsid()
 
-        # Check format: GSID-TTTTTRRRRRRR (prefix + 5 timestamp + 7 random)
+        # Check format: GSID-XXXXXXXXXXXXXXXX (prefix + 16 chars)
         assert gsid.startswith("GSID-")
         gsid_id = gsid[5:]  # Remove prefix
-        assert len(gsid_id) == 12
+        assert len(gsid_id) == 16
 
         # All characters should be valid base32
         for char in gsid_id:

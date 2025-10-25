@@ -16,8 +16,8 @@ class TestGSIDFormat:
         from services.gsid_generator import generate_gsid
 
         gsid = generate_gsid()
-        # Format: GSID-XXXXXXXXXXXX (5 + 12 = 17)
-        assert len(gsid) == 17, f"Expected length 17, got {len(gsid)}"
+        # Format: GSID-XXXXXXXXXXXXXXXX (5 + 16 = 21)
+        assert len(gsid) == 21, f"Expected length 21, got {len(gsid)}"
 
     def test_gsid_prefix(self):
         """Test GSID has correct prefix"""
@@ -32,8 +32,7 @@ class TestGSIDFormat:
 
         gsid = generate_gsid()
         id_part = gsid[5:]  # Remove "GSID-" prefix
-        # 5 chars timestamp + 7 chars random = 12 total
-        assert len(id_part) == 12, f"Expected ID part length 12, got {len(id_part)}"
+        assert len(id_part) == 16, f"Expected ID part length 16, got {len(id_part)}"
 
     def test_gsid_character_set(self):
         """Test GSID uses only valid base32 characters"""
@@ -65,8 +64,8 @@ class TestGSIDFormat:
         """Test GSID matches expected regex pattern"""
         from services.gsid_generator import generate_gsid
 
-        # Pattern: GSID- followed by 12 base32 characters
-        pattern = r"^GSID-[0-9A-HJ-NP-Z]{12}$"
+        # Pattern: GSID- followed by 16 base32 characters
+        pattern = r"^GSID-[0-9A-HJ-NP-Z]{16}$"
 
         gsids = [generate_gsid() for _ in range(10)]
         for gsid in gsids:
@@ -85,9 +84,9 @@ class TestGSIDFormat:
         timestamp_part = id_part[:5]
         assert len(timestamp_part) == 5
 
-        # Last 7 chars: random part
+        # Remaining chars: random part (16 - 5 = 11)
         random_part = id_part[5:]
-        assert len(random_part) == 7
+        assert len(random_part) == 11
 
     def test_gsid_sortability(self):
         """Test GSIDs are lexicographically sortable by creation time"""
