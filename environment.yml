@@ -1,0 +1,87 @@
+---
+# /environment.yml
+# Unified conda environment for idhub local development
+# Supports all services: gsid-service, redcap-pipeline, fragment-validator, table-loader
+#
+# Usage:
+#   conda env create -f environment.yml
+#   conda activate idhub-dev
+#
+# Update existing environment:
+#   conda env update -f environment.yml --prune
+name: idhub-dev
+channels: [conda-forge, defaults]
+dependencies:
+  # Python version
+  - python=3.11
+
+  # Core System Dependencies (for psycopg2)
+  - postgresql
+  - libpq
+
+  # Web Framework (gsid-service)
+  - pip
+
+  # Install everything via pip for version consistency
+  - pip:
+      # ============================================
+      # PRODUCTION DEPENDENCIES
+      # ============================================
+
+      # Web Framework (gsid-service)
+      - fastapi==0.104.1
+      - uvicorn[standard]==0.24.0
+      - pydantic==2.5.0
+      - pydantic-settings==2.1.0
+
+      # Database
+      - psycopg2-binary==2.9.9
+
+      # AWS Integration
+      - boto3==1.34.0
+
+      # HTTP & API Clients
+      - requests==2.31.0
+
+      # Data Processing
+      - pandas==2.1.4
+
+      # Configuration Management
+      - python-dotenv==1.0.0
+
+      # ============================================
+      # TESTING & DEVELOPMENT DEPENDENCIES
+      # ============================================
+
+      # Core Testing
+      - pytest==7.4.3
+      - pytest-cov==4.1.0
+      - pytest-mock==3.12.0
+      - pytest-asyncio==0.21.1
+      - pytest-html==4.1.1
+
+      # HTTP Testing (for FastAPI)
+      - httpx==0.25.2
+
+      # AWS Mocking
+      - moto[s3]==4.2.9
+
+      # ============================================
+      # OPTIONAL: CODE QUALITY TOOLS
+      # ============================================
+
+      # Code Formatting & Linting (uncomment to enable)
+      # - black==23.12.1
+      # - ruff==0.1.9
+      # - isort==5.13.2
+
+      # Type Checking (uncomment to enable)
+      # - mypy==1.8.0
+      # - types-requests==2.31.0.10
+
+      # Pre-commit Hooks (uncomment to enable)
+      # - pre-commit==3.6.0
+
+      # Jupyter for exploration (uncomment to enable)
+      # - jupyter==1.0.0
+      # - ipython==8.18.1
