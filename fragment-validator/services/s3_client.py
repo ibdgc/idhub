@@ -1,46 +1,39 @@
 # fragment-validator/services/s3_client.py
 import json
 import logging
-from typing import Any, Dict
+from typing import Any
 
 import boto3
-from core.config import settings
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 
 class S3Client:
-    def __init__(self):
-        self.s3_client = boto3.client("s3")
-        self.bucket = settings.S3_BUCKET
+    """S3 operations client"""
 
-    def download_fragment(self, batch_id: str, table: str) -> Dict[str, Any]:
-        """Download fragment from S3"""
-        key = f"curated/{table}/{batch_id}.json"
+    def __init__(self, bucket: str):
+        self.bucket = bucket
+        self.client = boto3.client("s3")
 
-        try:
-            response = self.s3_client.get_object(Bucket=self.bucket, Key=key)
-            data = json.loads(response["Body"].read())
-            logger.info(f"Downloaded fragment from s3://{self.bucket}/{key}")
-            return data
-        except Exception as e:
-            logger.error(f"Error downloading fragment: {e}")
-            raise
+    def upload_dataframe(self, df: pd.DataFrame, key: str):
+        """Upload DataFrame as CSV to S3"""
+        csv_data = df.to_csv(index=False)
+        self.client.put_object(Bucket=self.bucket, Key=key, Body=csv_data)
+        logger.info(f"Uploaded to s3://{self.bucket}/{key}")
 
-    def upload_validation_report(
-        self, batch_id: str, table: str, report: Dict[str, Any]
-    ):
-        """Upload validation report to S3"""
-        key = f"validation/{table}/{batch_id}_report.json"
+    def upload_json(self, data: dict, key: str):
+        """Upload JSON data to S3"""
+        json_data = json.dumps(data, indent=2)
+        self.client.put_object(Bucket=self.bucket, Key=key, Body=json_data)
+        logger.info(f"Uploaded JSON to s3://{self.bucket}/{key}")
 
-        try:
-            self.s3_client.put_object(
-                Bucket=self.bucket,
-                Key=key,
-                Body=json.dumps(report, indent=2),
-                ContentType="application/json",
-            )
-            logger.info(f"Uploaded validation report to s3://{self.bucket}/{key}")
-        except Exception as e:
-            logger.error(f"Error uploading report: {e}")
-            raise
+    def download_dataframe(self, key: str) -> pd.DataFrame:
+        """Download CSV from S3 as DataFrame"""
+        obj = self.client.get_object(Bucket=self.bucket, Key=key)
+        return pd.read_csv(obj["Body"])
+
+    def list_objects(self, prefix: str) -> list:
+        """List objects with given prefix"""
+        response = self.client.list_objects_v2(Bucket=self.bucket, Prefix=prefix)
+        return response.get("Contents", [])
