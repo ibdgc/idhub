@@ -69,15 +69,17 @@ class TestTableLoader:
         with pytest.raises(ValueError, match="No table fragments found"):
             loader.preview_load(batch_id)
 
-    @patch("core.database.db_manager")
+    @patch("services.load_strategy.db_manager")  # Patch where load_strategy imports it
     def test_execute_load(
-        self, mock_db_manager, s3_with_fragments, sample_fragment_data
+        self, mock_db_manager, s3_with_fragments, mock_db_connection
     ):
         """Test execute load"""
         batch_id = "batch_20240115_120000"
+        conn, cursor = mock_db_connection
 
-        mock_conn = MagicMock()
-        mock_db_manager.get_connection.return_value.__enter__.return_value = mock_conn
+        # Configure db_manager mock
+        mock_db_manager.get_connection.return_value.__enter__.return_value = conn
+        mock_db_manager.get_connection.return_value.__exit__.return_value = False
 
         loader = TableLoader()
 
@@ -88,16 +90,20 @@ class TestTableLoader:
             assert "blood" in results["tables"]
             assert results["tables"]["blood"]["status"] == "success"
 
-    @patch("core.database.db_manager")
+            # Should call bulk_insert (StandardLoadStrategy uses this)
+            mock_db_manager.bulk_insert.assert_called()
+
+    @patch("services.load_strategy.db_manager")  # Patch where it's imported
     def test_execute_load_stops_on_error(self, mock_db_manager, s3_with_fragments):
         """Test that execute_load stops on first error"""
         batch_id = "batch_20240115_120000"
 
-        # Mock database to raise error
-        mock_db_manager.bulk_insert.side_effect = Exception("Database error")
+        # Mock db_manager to raise error
+        mock_db_manager.get_connection.side_effect = Exception("Database error")
 
         loader = TableLoader()
 
         with patch.object(loader, "_get_exclude_fields", return_value=set()):
+            # Should raise exception and stop
             with pytest.raises(Exception, match="Database error"):
                 loader.execute_load(batch_id)

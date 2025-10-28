@@ -45,6 +45,9 @@ def mock_db_connection():
     cursor.rowcount = 0
     cursor.description = None
 
+    # Mock connection encoding for psycopg2.extras.execute_values
+    cursor.connection.encoding = "UTF8"
+
     # Context manager support
     cursor.__enter__ = MagicMock(return_value=cursor)
     cursor.__exit__ = MagicMock(return_value=False)
@@ -62,7 +65,10 @@ def mock_db_manager(mock_db_connection):
     """Mock DatabaseManager with connection pool"""
     conn, cursor = mock_db_connection
 
-    with patch("core.database.db_manager") as mock_manager:
+    with patch("core.database.DatabaseManager.get_instance") as mock_get_instance:
+        mock_manager = MagicMock()
+        mock_get_instance.return_value = mock_manager
+
         # Mock get_connection context manager
         mock_manager.get_connection.return_value.__enter__.return_value = conn
         mock_manager.get_connection.return_value.__exit__.return_value = False
@@ -71,10 +77,18 @@ def mock_db_manager(mock_db_connection):
         mock_manager.get_cursor.return_value.__enter__.return_value = cursor
         mock_manager.get_cursor.return_value.__exit__.return_value = False
 
-        # Mock bulk_insert
-        mock_manager.bulk_insert.return_value = None
+        # Mock bulk_insert to avoid actual psycopg2 calls
+        mock_manager.bulk_insert = MagicMock(return_value=None)
 
         yield mock_manager
+
+
+@pytest.fixture
+def mock_execute_values():
+    """Mock psycopg2.extras.execute_values"""
+    with patch("psycopg2.extras.execute_values") as mock:
+        mock.return_value = None
+        yield mock
 
 
 # ============================================================================
@@ -182,13 +196,14 @@ def s3_with_fragments(mock_s3_client, sample_fragment_data, sample_validation_re
 
     # Mock get_object for CSV fragment
     csv_data = pd.DataFrame(sample_fragment_data["records"]).to_csv(index=False)
-    mock_s3_client.get_object.side_effect = lambda Bucket, Key: {
-        "Body": BytesIO(
-            json.dumps(sample_validation_report).encode()
-            if "validation_report.json" in Key
-            else csv_data.encode()
-        )
-    }
+
+    def mock_get_object(Bucket, Key):
+        if "validation_report.json" in Key:
+            return {"Body": BytesIO(json.dumps(sample_validation_report).encode())}
+        else:
+            return {"Body": BytesIO(csv_data.encode())}
+
+    mock_s3_client.get_object.side_effect = mock_get_object
 
     return mock_s3_client
 

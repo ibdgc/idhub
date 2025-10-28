@@ -75,16 +75,21 @@ class TestDatabaseManager:
         conn, cursor = mock_db_connection
         manager = DatabaseManager()
 
-        # Simulate error during cursor operation
-        cursor.__enter__.side_effect = Exception("Test error")
+        # Create a new cursor that raises on execute
+        error_cursor = MagicMock()
+        error_cursor.close = MagicMock()
+        conn.cursor.return_value = error_cursor
 
+        # Simulate error during operation (not during __enter__)
         with pytest.raises(Exception, match="Test error"):
             with manager.get_cursor(conn) as cur:
-                pass
+                raise Exception("Test error")
 
         conn.rollback.assert_called_once()
+        error_cursor.close.assert_called_once()
 
-    def test_bulk_insert(self, mock_db_connection):
+    @patch("core.database.execute_values")  # Patch where it's imported
+    def test_bulk_insert(self, mock_execute_values, mock_db_connection):
         """Test bulk_insert method"""
         conn, cursor = mock_db_connection
         manager = DatabaseManager()
@@ -93,20 +98,22 @@ class TestDatabaseManager:
         columns = ["col1", "col2"]
         values = [("val1", "val2"), ("val3", "val4")]
 
-        with patch("core.database.execute_values") as mock_execute:
-            manager.bulk_insert(conn, table, columns, values)
+        manager.bulk_insert(conn, table, columns, values)
 
-            # Should call execute_values
-            mock_execute.assert_called_once()
-            call_args = mock_execute.call_args
-            assert "INSERT INTO test_table" in call_args[0][1]
+        # Should call execute_values
+        mock_execute_values.assert_called_once()
+        call_args = mock_execute_values.call_args
+        assert call_args[0][0] is cursor  # First arg is cursor
+        assert "INSERT INTO test_table" in call_args[0][1]  # Second arg is query
+        assert call_args[0][2] == values  # Third arg is values
 
     def test_close_pool(self):
         """Test closing connection pool"""
         manager = DatabaseManager()
-        manager.pool = MagicMock()
+        mock_pool = MagicMock()
+        manager.pool = mock_pool
 
         manager.close()
 
-        manager.pool.closeall.assert_called_once()
+        mock_pool.closeall.assert_called_once()
         assert manager.pool is None
