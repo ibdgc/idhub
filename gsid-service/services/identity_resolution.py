@@ -1,7 +1,5 @@
 # gsid-service/services/identity_resolution.py
 import logging
-import secrets
-import time
 from typing import Any, Dict
 
 from core.database import get_db_cursor
@@ -9,20 +7,16 @@ from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
 
-BASE32_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
-
 
 def resolve_identity(
     conn, center_id: int, local_subject_id: str, identifier_type: str = "primary"
 ) -> dict:
     """
     Core identity resolution logic - finds existing GSID regardless of identifier_type
-
     The same local_subject_id for a given center should ALWAYS map to the same GSID,
     regardless of what identifier_type it was originally registered with.
     """
     cur = conn.cursor(cursor_factory=RealDictCursor)
-
     try:
         # First: Check if this local_subject_id exists for this center (ANY identifier_type)
         cur.execute(
@@ -124,7 +118,7 @@ def log_resolution(conn, resolution: Dict[str, Any], request: Any):
         cur.execute(
             """
             INSERT INTO identity_resolutions 
-            (input_center_id, input_local_id, matched_gsid, action, match_strategy, 
+            (input_center_id, input_local_id, matched_gsid, action, match_strategy,
              confidence_score, requires_review, review_reason, created_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
             RETURNING resolution_id

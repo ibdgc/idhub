@@ -44,20 +44,18 @@ def generate_gsid() -> str:
     Total: 16-character ID (80 bits of uniqueness)
     Format: GSID-TTTTTRRRRRRRRRRR
     """
-
     # Get current timestamp in milliseconds
     timestamp_ms = int(time.time() * 1000)
 
-    # Encode timestamp as 5 base32 characters (can represent up to 2^25 ms ~ 41 bits)
-    # This gives us timestamps until ~2084
-    timestamp_part = encode_base32(timestamp_ms, length=5)
+    # Encode timestamp as 5 base32 characters
+    # Limit to 5 chars by taking modulo 32^5 = 33,554,432
+    timestamp_part = encode_base32(timestamp_ms % (32**5), length=5)
 
-    # Generate 7 characters of randomness (~35 bits)
-    random_bytes = secrets.token_bytes(5)  # 40 bits, we'll use 35
-    random_int = (
-        int.from_bytes(random_bytes, byteorder="big") & 0x7FFFFFFFF
-    )  # Mask to 35 bits
-    random_part = encode_base32(random_int, length=7)
+    # Generate 11 characters of randomness
+    # 11 base32 chars = 55 bits, so generate random number < 32^11
+    max_random = 32**11  # 2^55 = 36,028,797,018,963,968
+    random_int = secrets.randbelow(max_random)
+    random_part = encode_base32(random_int, length=11)
 
     return f"GSID-{timestamp_part}{random_part}"
 
@@ -148,7 +146,6 @@ def reserve_gsids(gsids: List[str]) -> None:
                     """,
                     (gsid,),
                 )
-
             conn.commit()
             logger.info(f"Reserved {len(gsids)} GSIDs")
 
