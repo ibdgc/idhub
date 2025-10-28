@@ -53,23 +53,39 @@ class S3Client:
             raise
 
     def download_fragment(self, batch_id: str, table: str) -> Dict[str, Any]:
-        """Download validated fragment from S3"""
-        # Updated to match actual S3 structure
-        key = f"staging/validated/{batch_id}/{table}.json"
+        """Download a table fragment from S3"""
+        # Updated to download CSV files, not JSON
+        key = f"staging/validated/{batch_id}/{table}.csv"
 
         try:
             logger.info(f"Downloading fragment from s3://{self.bucket}/{key}")
+
             response = self.s3_client.get_object(Bucket=self.bucket, Key=key)
-            data = json.loads(response["Body"].read())
-            logger.info(
-                f"✓ Downloaded fragment: {table} ({len(data.get('records', []))} records)"
-            )
-            return data
+
+            # Read CSV data
+            import io
+
+            import pandas as pd
+
+            csv_data = response["Body"].read().decode("utf-8")
+            df = pd.read_csv(io.StringIO(csv_data))
+
+            # Convert DataFrame to records format expected by transformer
+            records = df.to_dict("records")
+
+            logger.info(f"✓ Downloaded fragment: {table} ({len(records)} records)")
+
+            return {
+                "table": table,
+                "records": records,
+                "metadata": {"batch_id": batch_id, "row_count": len(records)},
+            }
+
         except self.s3_client.exceptions.NoSuchKey:
             logger.error(f"Fragment not found: s3://{self.bucket}/{key}")
             raise FileNotFoundError(f"Fragment not found: {table}")
         except Exception as e:
-            logger.error(f"Error downloading fragment: {e}")
+            logger.error(f"Error downloading fragment {table}: {e}")
             raise
 
     def mark_batch_loaded(self, batch_id: str, table: str):
