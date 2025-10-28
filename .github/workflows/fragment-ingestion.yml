@@ -145,6 +145,12 @@ jobs:
             echo "Validation report: $([ "$REPORT_EXISTS" -eq "1" ] && echo "✓ Found" || echo "✗ Missing")"
             echo "Local subject IDs: $([ "$LOCAL_IDS_EXISTS" -eq "1" ] && echo "✓ Found" || echo "✗ Missing")"
             echo ""
+            # Show validation report contents for debugging (optional)
+            if [ "$REPORT_EXISTS" -eq "1" ]; then
+              echo "Validation report preview:"
+              aws s3 cp "s3://$S3_BUCKET/$PREFIX/validation_report.json" - | jq -r '.subject_id_candidates, .center_id_field, .exclude_from_load' 2>/dev/null || echo "Could not parse report"
+              echo ""
+            fi
             if [ "$TABLE_COUNT" -eq "0" ]; then
               echo "::error::No table CSV fragments found in batch"
               exit 1
