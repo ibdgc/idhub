@@ -52,7 +52,6 @@ jobs:
           SSH_USER: ${{ secrets.SSH_USER }}
         run: |
           echo "::group::Setting up SSH tunnel"
-
           # Configure SSH
           mkdir -p ~/.ssh
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
@@ -86,7 +85,6 @@ jobs:
           PGPASSWORD: ${{ secrets.DB_PASSWORD }}
         run: |
           echo "::group::Testing database connection"
-
           # Install PostgreSQL client
           sudo apt-get update -qq
           sudo apt-get install -y postgresql-client
@@ -98,7 +96,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
           cache: pip
           cache-dependency-path: table-loader/requirements.txt
       - name: Install dependencies
@@ -125,8 +123,6 @@ jobs:
           echo "::group::Verifying S3 batch exists"
           pip install awscli
           BATCH_ID="${{ github.event.inputs.batch_id }}"
-
-          # Updated to match actual S3 structure
           PREFIX="staging/validated/${BATCH_ID}/"
           echo "Searching for batch at: s3://$S3_BUCKET/$PREFIX"
           echo ""
@@ -135,14 +131,26 @@ jobs:
           if aws s3 ls "s3://$S3_BUCKET/$PREFIX" 2>/dev/null; then
             echo ""
             echo "✓ Found batch: $BATCH_ID"
-            
-            # Count fragments
-            FRAGMENT_COUNT=$(aws s3 ls "s3://$S3_BUCKET/$PREFIX" | grep -c '.json' || echo "0")
-            echo "Total fragments: $FRAGMENT_COUNT"
-            
-            if [ "$FRAGMENT_COUNT" -eq "0" ]; then
-              echo "::error::No JSON fragments found in batch"
+            echo ""
+            # List all files in batch
+            echo "Files in batch:"
+            aws s3 ls "s3://$S3_BUCKET/$PREFIX"
+            echo ""
+            # Count CSV table fragments (exclude metadata files)
+            TABLE_COUNT=$(aws s3 ls "s3://$S3_BUCKET/$PREFIX" | grep '\.csv$' | grep -v 'local_subject_ids.csv' | wc -l || echo "0")
+            echo "Table fragments (CSV): $TABLE_COUNT"
+            # Check for required files
+            REPORT_EXISTS=$(aws s3 ls "s3://$S3_BUCKET/$PREFIX" | grep -c 'validation_report.json' || echo "0")
+            LOCAL_IDS_EXISTS=$(aws s3 ls "s3://$S3_BUCKET/$PREFIX" | grep -c 'local_subject_ids.csv' || echo "0")
+            echo "Validation report: $([ "$REPORT_EXISTS" -eq "1" ] && echo "✓ Found" || echo "✗ Missing")"
+            echo "Local subject IDs: $([ "$LOCAL_IDS_EXISTS" -eq "1" ] && echo "✓ Found" || echo "✗ Missing")"
+            echo ""
+            if [ "$TABLE_COUNT" -eq "0" ]; then
+              echo "::error::No table CSV fragments found in batch"
               exit 1
+            fi
+            if [ "$REPORT_EXISTS" -eq "0" ]; then
+              echo "::warning::validation_report.json not found - will use default exclusions"
             fi
           else
             echo "::error::Batch not found: $BATCH_ID"
@@ -194,14 +202,11 @@ jobs:
         run: |
           if [ -f table-loader/loader_output.log ]; then
             echo "::group::Load Summary"
-            
             # Extract key metrics from logs
             grep -E "(Loaded|Processing|Error|Success|Failed)" table-loader/loader_output.log || true
-            
             # Count operations
             RECORDS=$(grep -oP "Loaded \K\d+" table-loader/loader_output.log | tail -1 || echo "0")
             echo "Records processed: $RECORDS"
-            
             echo "::endgroup::"
           fi
       - name: Upload logs
