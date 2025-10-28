@@ -4,6 +4,7 @@ import logging
 from typing import Any, Dict, List
 
 import boto3
+import pandas as pd
 from core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -16,6 +17,7 @@ class S3Client:
 
     def list_batch_fragments(self, batch_id: str) -> List[str]:
         """List all table fragments for a batch"""
+        # Updated to match actual S3 structure
         prefix = f"staging/validated/{batch_id}/"
 
         try:
@@ -33,15 +35,14 @@ class S3Client:
             fragments = []
             for obj in response["Contents"]:
                 key = obj["Key"]
-                filename = key.split("/")[-1]
-
-                # Skip metadata files - only process actual table CSVs
-                if filename in ["validation_report.json", "local_subject_ids.csv"]:
+                # Skip metadata files
+                if key.endswith("validation_report.json") or key.endswith(
+                    "local_subject_ids.csv"
+                ):
                     continue
-
                 # Extract table name from CSV files
-                if filename.endswith(".csv"):
-                    table_name = filename.replace(".csv", "")
+                if key.endswith(".csv"):
+                    table_name = key.split("/")[-1].replace(".csv", "")
                     fragments.append(table_name)
                     logger.info(f"Found table fragment: {table_name}")
 
@@ -53,39 +54,27 @@ class S3Client:
             raise
 
     def download_fragment(self, batch_id: str, table: str) -> Dict[str, Any]:
-        """Download a table fragment from S3"""
-        # Updated to download CSV files, not JSON
+        """Download a table fragment as a dictionary with records"""
         key = f"staging/validated/{batch_id}/{table}.csv"
 
         try:
             logger.info(f"Downloading fragment from s3://{self.bucket}/{key}")
 
             response = self.s3_client.get_object(Bucket=self.bucket, Key=key)
+            df = pd.read_csv(response["Body"])
 
-            # Read CSV data
-            import io
-
-            import pandas as pd
-
-            csv_data = response["Body"].read().decode("utf-8")
-            df = pd.read_csv(io.StringIO(csv_data))
-
-            # Convert DataFrame to records format expected by transformer
+            # Convert DataFrame to list of dicts
             records = df.to_dict("records")
 
             logger.info(f"✓ Downloaded fragment: {table} ({len(records)} records)")
 
-            return {
-                "table": table,
-                "records": records,
-                "metadata": {"batch_id": batch_id, "row_count": len(records)},
-            }
+            return {"table": table, "records": records}
 
         except self.s3_client.exceptions.NoSuchKey:
             logger.error(f"Fragment not found: s3://{self.bucket}/{key}")
-            raise FileNotFoundError(f"Fragment not found: {table}")
+            raise
         except Exception as e:
-            logger.error(f"Error downloading fragment {table}: {e}")
+            logger.error(f"Error downloading fragment: {e}")
             raise
 
     def download_validation_report(self, batch_id: str) -> Dict[str, Any]:
@@ -108,23 +97,39 @@ class S3Client:
             logger.error(f"Error downloading validation report: {e}")
             return {}
 
-    def mark_batch_loaded(self, batch_id: str, table: str):
-        """Mark a fragment as loaded by moving it to processed/"""
-        source_key = f"staging/validated/{batch_id}/{table}.json"
-        dest_key = f"staging/processed/{batch_id}/{table}.json"
+    def mark_fragment_loaded(self, batch_id: str, table: str):
+        """Mark a fragment as loaded by moving it to processed folder"""
+        source_prefix = f"staging/validated/{batch_id}"
+        dest_prefix = f"staging/processed/{batch_id}"
 
         try:
-            # Copy to processed
-            self.s3_client.copy_object(
-                Bucket=self.bucket,
-                CopySource={"Bucket": self.bucket, "Key": source_key},
-                Key=dest_key,
+            # List all files for this batch
+            response = self.s3_client.list_objects_v2(
+                Bucket=self.bucket, Prefix=source_prefix
             )
 
-            # Delete from validated
-            self.s3_client.delete_object(Bucket=self.bucket, Key=source_key)
+            if "Contents" not in response:
+                logger.warning(f"No files found to move for batch {batch_id}")
+                return
 
-            logger.info(f"✓ Moved fragment to processed: {table}")
+            # Move all files from validated to processed
+            for obj in response["Contents"]:
+                source_key = obj["Key"]
+                # Create destination key by replacing validated with processed
+                dest_key = source_key.replace("staging/validated", "staging/processed")
+
+                # Copy to processed
+                self.s3_client.copy_object(
+                    Bucket=self.bucket,
+                    CopySource={"Bucket": self.bucket, "Key": source_key},
+                    Key=dest_key,
+                )
+
+                # Delete from validated
+                self.s3_client.delete_object(Bucket=self.bucket, Key=source_key)
+
+            logger.info(f"✓ Moved batch {batch_id} to processed folder")
+
         except Exception as e:
-            logger.warning(f"Could not mark fragment as loaded: {e}")
+            logger.warning(f"Could not mark batch as loaded: {e}")
             # Don't fail on this - it's just housekeeping
