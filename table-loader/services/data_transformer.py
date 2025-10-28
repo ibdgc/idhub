@@ -1,9 +1,6 @@
 # table-loader/services/data_transformer.py
 import logging
-from datetime import datetime
-from typing import Any, Dict, List, Tuple
-
-import pandas as pd
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -13,50 +10,42 @@ class DataTransformer:
 
     def __init__(self, table_name: str):
         self.table_name = table_name
+        logger.debug(f"DataTransformer initialized for table: {table_name}")
 
-    def prepare_rows(self, df: pd.DataFrame) -> Tuple[List[str], List[Tuple]]:
-        """Prepare DataFrame rows for bulk insert"""
-        # Add metadata columns
-        df["loaded_at"] = datetime.utcnow()
-        df["loaded_by"] = "table-loader"
+    def transform_records(self, fragment: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Transform fragment records for the target table
 
-        # Handle NaN values
-        df = df.where(pd.notnull(df), None)
+        Args:
+            fragment: Fragment data from S3 with 'records' key
 
-        columns = df.columns.tolist()
-        values = [tuple(row) for row in df.values]
+        Returns:
+            List of transformed records ready for database insertion
+        """
+        records = fragment.get("records", [])
 
-        logger.info(f"Prepared {len(values)} rows with {len(columns)} columns")
-        return columns, values
+        if not records:
+            logger.warning(f"No records found in fragment for {self.table_name}")
+            return []
 
-    def validate_foreign_keys(
-        self, df: pd.DataFrame, fk_config: Dict[str, Any]
-    ) -> List[str]:
-        """Validate foreign key constraints"""
-        errors = []
+        logger.info(f"Transforming {len(records)} records for {self.table_name}")
 
-        for fk_col, ref_info in fk_config.items():
-            if fk_col not in df.columns:
-                continue
+        # Apply table-specific transformations
+        transformed = []
+        for record in records:
+            try:
+                transformed_record = self._transform_record(record)
+                if transformed_record:
+                    transformed.append(transformed_record)
+            except Exception as e:
+                logger.error(f"Failed to transform record: {e}")
+                # Continue processing other records
 
-            ref_table = ref_info["table"]
-            ref_column = ref_info["column"]
+        logger.info(f"Transformed {len(transformed)}/{len(records)} records")
+        return transformed
 
-            # Check for null values in required FK columns
-            if ref_info.get("required", False):
-                null_count = df[fk_col].isnull().sum()
-                if null_count > 0:
-                    errors.append(f"{fk_col}: {null_count} null values in required FK")
-
-        return errors
-
-    def deduplicate(self, df: pd.DataFrame, key_columns: List[str]) -> pd.DataFrame:
-        """Remove duplicate rows based on key columns"""
-        initial_count = len(df)
-        df = df.drop_duplicates(subset=key_columns, keep="first")
-        final_count = len(df)
-
-        if initial_count != final_count:
-            logger.warning(f"Removed {initial_count - final_count} duplicate rows")
-
-        return df
+    def _transform_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        """Transform a single record"""
+        # For now, pass through as-is
+        # Add table-specific transformations here as needed
+        return record

@@ -13,7 +13,7 @@ class LoaderService:
     def __init__(self, s3_client: S3Client, db_client: DatabaseClient):
         self.s3_client = s3_client
         self.db_client = db_client
-        self.transformer = DataTransformer()
+        # Don't initialize transformer here - create per table
 
     def load_batch(self, batch_id: str, dry_run: bool = True):
         """Load all fragments for a batch"""
@@ -25,7 +25,7 @@ class LoaderService:
 
             if not tables:
                 logger.error(f"No fragments found for batch {batch_id}")
-                return
+                raise ValueError(f"No fragments found for batch {batch_id}")
 
             logger.info(f"Found {len(tables)} table(s) to load: {tables}")
 
@@ -42,9 +42,8 @@ class LoaderService:
                         self.s3_client.mark_batch_loaded(batch_id, table)
 
                 except Exception as e:
-                    logger.error(f"Failed to load table {table}: {e}")
-                    if not dry_run:
-                        raise  # Fail fast on actual loads
+                    logger.error(f"Failed to load table {table}: {e}", exc_info=True)
+                    raise  # Fail fast on any error
 
             logger.info(f"\n{'=' * 60}")
             logger.info(f"✓ Batch {batch_id} loaded successfully")
@@ -62,12 +61,16 @@ class LoaderService:
         logger.info(f"Target table: {table}")
         logger.info(f"Row count: {len(fragment.get('records', []))}")
 
+        # Create transformer for this specific table
+        transformer = DataTransformer(table)
+
         # Transform data
-        records = self.transformer.transform_records(fragment, table)
+        records = transformer.transform_records(fragment)
 
         if dry_run:
             logger.info(f"[DRY RUN] Would load {len(records)} records to {table}")
             if records:
+                logger.info(f"[DRY RUN] Sample record keys: {list(records[0].keys())}")
                 logger.info(f"[DRY RUN] Sample record: {records[0]}")
             return
 
@@ -76,11 +79,13 @@ class LoaderService:
         try:
             with conn.cursor() as cursor:
                 # Insert records
+                inserted = 0
                 for record in records:
-                    self._insert_record(cursor, table, record)
+                    if self._insert_record(cursor, table, record):
+                        inserted += 1
 
                 conn.commit()
-                logger.info(f"✓ Loaded {len(records)} records to {table}")
+                logger.info(f"✓ Loaded {inserted}/{len(records)} records to {table}")
 
         except Exception as e:
             conn.rollback()
@@ -89,17 +94,23 @@ class LoaderService:
         finally:
             self.db_client.return_connection(conn)
 
-    def _insert_record(self, cursor, table: str, record: dict):
+    def _insert_record(self, cursor, table: str, record: dict) -> bool:
         """Insert a single record into the database"""
-        # Build INSERT statement
-        columns = ", ".join(record.keys())
-        placeholders = ", ".join(["%s"] * len(record))
-        values = list(record.values())
+        try:
+            # Build INSERT statement
+            columns = ", ".join(record.keys())
+            placeholders = ", ".join(["%s"] * len(record))
+            values = list(record.values())
 
-        query = f"""
-            INSERT INTO {table} ({columns})
-            VALUES ({placeholders})
-            ON CONFLICT DO NOTHING
-        """
+            query = f"""
+                INSERT INTO {table} ({columns})
+                VALUES ({placeholders})
+                ON CONFLICT DO NOTHING
+            """
 
-        cursor.execute(query, values)
+            cursor.execute(query, values)
+            return cursor.rowcount > 0
+
+        except Exception as e:
+            logger.error(f"Failed to insert record: {e}")
+            raise

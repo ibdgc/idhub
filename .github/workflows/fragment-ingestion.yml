@@ -176,13 +176,16 @@ jobs:
           echo "Executing: $CMD"
           echo ""
 
-          # Run with output capture
-          if $CMD 2>&1 | tee loader_output.log; then
+          # Run with proper exit code handling
+          set +e  # Don't exit on error yet
+          $CMD 2>&1 | tee loader_output.log
+          EXIT_CODE=${PIPESTATUS[0]}  # Get exit code of python, not tee
+          set -e
+          echo ""
+          if [ $EXIT_CODE -eq 0 ]; then
             echo "::notice::✓ Table loader completed successfully"
-            EXIT_CODE=0
           else
-            echo "::error::✗ Table loader failed"
-            EXIT_CODE=1
+            echo "::error::✗ Table loader failed with exit code $EXIT_CODE"
           fi
           echo "::endgroup::"
           exit $EXIT_CODE
