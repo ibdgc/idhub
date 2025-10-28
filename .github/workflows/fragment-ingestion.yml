@@ -107,6 +107,9 @@ jobs:
           cd table-loader
           pip install --upgrade pip
           pip install -r requirements.txt
+
+          # Verify installation
+          pip list | grep -E "(pandas|psycopg2|boto3)"
           echo "✓ Dependencies installed"
           echo "::endgroup::"
       - name: Create necessary directories

@@ -1,84 +1,89 @@
+# table-loader/main.py
 import argparse
-import json
 import logging
-import os
 import sys
+from pathlib import Path
 
-from dotenv import load_dotenv
+# Make dotenv optional (not needed in CI/CD environments)
+try:
+    from dotenv import load_dotenv
 
-from services import DatabaseClient, LoaderService, S3Client
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not available, assume env vars are already set
 
-# Load environment variables
-load_dotenv()
+from core.config import settings
+from services.database_client import DatabaseClient
+from services.loader_service import LoaderService
+from services.s3_client import S3Client
 
-# Create logs directory if it doesn't exist
-os.makedirs("logs", exist_ok=True)
-
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.FileHandler("logs/loader.log"), logging.StreamHandler()],
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("logs/loader.log"),
+    ],
 )
+
 logger = logging.getLogger(__name__)
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Load validated fragments to PostgreSQL"
+        description="Load validated fragments into database"
     )
     parser.add_argument("--batch-id", required=True, help="Batch ID to load")
     parser.add_argument(
-        "--approve", action="store_true", help="Execute load (default is dry-run)"
+        "--approve",
+        action="store_true",
+        help="Approve and execute load (default is dry-run)",
     )
     args = parser.parse_args()
 
-    # Get environment variables
-    s3_bucket = os.getenv("S3_BUCKET", "idhub-curated-fragments")
-    db_config = {
-        "host": os.getenv("DB_HOST", "localhost"),  # Default to localhost for CLI
-        "database": os.getenv("DB_NAME", "idhub"),
-        "user": os.getenv("DB_USER", "idhub_user"),
-        "password": os.getenv("DB_PASSWORD"),
-        "port": int(os.getenv("DB_PORT", "5432")),
-    }
+    dry_run = not args.approve
 
-    # Validate required environment variables
-    if not db_config["password"]:
-        logger.error("Missing required environment variable: DB_PASSWORD")
-        sys.exit(1)
+    # Create logs directory if it doesn't exist
+    Path("logs").mkdir(exist_ok=True)
 
-    # Initialize clients (no DB connection yet)
     try:
-        s3_client = S3Client(s3_bucket)
-        db_client = DatabaseClient(db_config)
-        logger.info(f"Initialized clients for batch: {args.batch_id}")
-    except Exception as e:
-        logger.error(f"Failed to initialize clients: {e}")
-        sys.exit(1)
+        if dry_run:
+            logger.info("=" * 60)
+            logger.info("DRY RUN MODE - No changes will be made")
+            logger.info("=" * 60)
+        else:
+            logger.info("=" * 60)
+            logger.info("LIVE MODE - Changes will be committed to database")
+            logger.info("=" * 60)
 
-    # Initialize loader service
-    try:
+        logger.info(f"Batch ID: {args.batch_id}")
+        logger.info(f"S3 Bucket: {settings.S3_BUCKET}")
+        logger.info(
+            f"Database: {settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}"
+        )
+        logger.info("")
+
+        # Initialize services
+        s3_client = S3Client()
+        db_client = DatabaseClient()
         loader = LoaderService(s3_client, db_client)
-    except Exception as e:
-        logger.error(f"Failed to initialize loader service: {e}")
-        sys.exit(1)
 
-    # Execute load (DB connection happens here)
-    try:
-        dry_run = not args.approve
+        # Load batch
         loader.load_batch(args.batch_id, dry_run=dry_run)
-        logger.info("✓ Load completed successfully")
-        sys.exit(0)
-    except Exception as e:
-        logger.error(f"✗ Load failed: {e}")
-        import traceback
 
-        traceback.print_exc()
+        if dry_run:
+            logger.info("\n" + "=" * 60)
+            logger.info("DRY RUN COMPLETE - Run with --approve to execute")
+            logger.info("=" * 60)
+        else:
+            logger.info("\n" + "=" * 60)
+            logger.info("✓ LOAD COMPLETE")
+            logger.info("=" * 60)
+
+    except Exception as e:
+        logger.error(f"✗ Load failed: {e}", exc_info=True)
         sys.exit(1)
-    finally:
-        # Clean up database pool
-        if "db_client" in locals():
-            db_client.close()
 
 
 if __name__ == "__main__":
