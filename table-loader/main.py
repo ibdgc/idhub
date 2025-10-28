@@ -6,14 +6,13 @@ import sys
 
 from dotenv import load_dotenv
 
-from services import (
-    DatabaseClient,
-    LoaderService,
-    S3Client,
-)
+from services import DatabaseClient, LoaderService, S3Client
 
 # Load environment variables
 load_dotenv()
+
+# Create logs directory if it doesn't exist
+os.makedirs("logs", exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,7 +35,7 @@ def main():
     # Get environment variables
     s3_bucket = os.getenv("S3_BUCKET", "idhub-curated-fragments")
     db_config = {
-        "host": os.getenv("DB_HOST", "idhub_db"),
+        "host": os.getenv("DB_HOST", "localhost"),  # Default to localhost for CLI
         "database": os.getenv("DB_NAME", "idhub"),
         "user": os.getenv("DB_USER", "idhub_user"),
         "password": os.getenv("DB_PASSWORD"),
@@ -48,21 +47,28 @@ def main():
         logger.error("Missing required environment variable: DB_PASSWORD")
         sys.exit(1)
 
+    # Initialize clients (no DB connection yet)
     try:
-        # Initialize clients
         s3_client = S3Client(s3_bucket)
         db_client = DatabaseClient(db_config)
+        logger.info(f"Initialized clients for batch: {args.batch_id}")
+    except Exception as e:
+        logger.error(f"Failed to initialize clients: {e}")
+        sys.exit(1)
 
-        # Initialize loader service
+    # Initialize loader service
+    try:
         loader = LoaderService(s3_client, db_client)
+    except Exception as e:
+        logger.error(f"Failed to initialize loader service: {e}")
+        sys.exit(1)
 
-        # Execute load
+    # Execute load (DB connection happens here)
+    try:
         dry_run = not args.approve
         loader.load_batch(args.batch_id, dry_run=dry_run)
-
         logger.info("✓ Load completed successfully")
         sys.exit(0)
-
     except Exception as e:
         logger.error(f"✗ Load failed: {e}")
         import traceback

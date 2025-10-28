@@ -1,11 +1,11 @@
 # table-loader/services/load_strategy.py
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import pandas as pd
-from core.database import db_manager
 
+from core.database import db_manager
 from .data_transformer import DataTransformer
 
 logger = logging.getLogger(__name__)
@@ -49,6 +49,7 @@ class StandardLoadStrategy(LoadStrategy):
                 "sample": values[:5],
             }
 
+        # Database connection happens here, not at import
         with db_manager.get_connection() as conn:
             db_manager.bulk_insert(conn, self.table_name, columns, values)
 
@@ -86,6 +87,7 @@ class UpsertLoadStrategy(LoadStrategy):
                 "conflict_on": self.conflict_columns,
             }
 
+        # Database connection happens here
         with db_manager.get_connection() as conn:
             with db_manager.get_cursor(conn, cursor_factory=None) as cursor:
                 conflict_clause = f"({', '.join(self.conflict_columns)})"

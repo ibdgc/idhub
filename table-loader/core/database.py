@@ -1,6 +1,7 @@
 # table-loader/core/database.py
 import logging
 from contextlib import contextmanager
+from typing import Optional
 
 import psycopg2
 from psycopg2 import pool
@@ -12,13 +13,26 @@ logger = logging.getLogger(__name__)
 
 
 class DatabaseManager:
-    def __init__(self):
-        self.pool = None
-        self._init_pool()
+    _instance: Optional['DatabaseManager'] = None
 
-    def _init_pool(self):
-        """Initialize connection pool"""
+    def __init__(self):
+        self.pool: Optional[pool.ThreadedConnectionPool] = None
+        # DON'T initialize pool here - do it lazily
+
+    @classmethod
+    def get_instance(cls) -> 'DatabaseManager':
+        """Singleton pattern"""
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def _ensure_pool(self):
+        """Lazy initialization of connection pool"""
+        if self.pool is not None:
+            return
+
         try:
+            logger.info("Initializing database connection pool...")
             self.pool = psycopg2.pool.ThreadedConnectionPool(
                 minconn=2,
                 maxconn=10,
@@ -28,7 +42,7 @@ class DatabaseManager:
                 password=settings.DB_PASSWORD,
                 port=settings.DB_PORT,
             )
-            logger.info("Database connection pool initialized")
+            logger.info("✓ Database connection pool initialized")
         except Exception as e:
             logger.error(f"Failed to initialize database pool: {e}")
             raise
@@ -36,8 +50,7 @@ class DatabaseManager:
     @contextmanager
     def get_connection(self):
         """Get connection from pool"""
-        if not self.pool:
-            self._init_pool()
+        self._ensure_pool()  # Initialize only when actually needed
 
         conn = self.pool.getconn()
         try:
@@ -75,6 +88,8 @@ class DatabaseManager:
         if self.pool:
             self.pool.closeall()
             logger.info("Database connection pool closed")
+            self.pool = None
 
 
-db_manager = DatabaseManager()
+# Singleton instance - but doesn't connect until first use
+db_manager = DatabaseManager.get_instance()
