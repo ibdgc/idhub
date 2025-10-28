@@ -13,14 +13,14 @@ logger = logging.getLogger(__name__)
 
 
 class DatabaseManager:
-    _instance: Optional['DatabaseManager'] = None
+    _instance: Optional["DatabaseManager"] = None
 
     def __init__(self):
         self.pool: Optional[pool.ThreadedConnectionPool] = None
         # DON'T initialize pool here - do it lazily
 
     @classmethod
-    def get_instance(cls) -> 'DatabaseManager':
+    def get_instance(cls) -> "DatabaseManager":
         """Singleton pattern"""
         if cls._instance is None:
             cls._instance = cls()
@@ -51,7 +51,6 @@ class DatabaseManager:
     def get_connection(self):
         """Get connection from pool"""
         self._ensure_pool()  # Initialize only when actually needed
-
         conn = self.pool.getconn()
         try:
             yield conn
@@ -78,10 +77,9 @@ class DatabaseManager:
             query = f"""
                 INSERT INTO {table} ({", ".join(columns)})
                 VALUES %s
-                ON CONFLICT DO NOTHING
             """
             execute_values(cursor, query, values)
-            logger.debug(f"Bulk inserted {len(values)} rows into {table}")
+            logger.info(f"✓ Bulk inserted {len(values)} rows into {table}")
 
     def close(self):
         """Close all connections in pool"""

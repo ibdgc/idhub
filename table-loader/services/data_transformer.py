@@ -1,6 +1,8 @@
 # table-loader/services/data_transformer.py
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
+
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,7 @@ class DataTransformer:
             fields_to_keep.add("global_subject_id")
 
         logger.info(f"Fields to load for {self.table_name}: {sorted(fields_to_keep)}")
+
         if self.exclude_fields:
             excluded_present = self.exclude_fields & set(sample_record.keys())
             if excluded_present:
@@ -46,3 +49,22 @@ class DataTransformer:
             f"Transformed {len(transformed_records)} records for {self.table_name}"
         )
         return transformed_records
+
+    def deduplicate(self, df: pd.DataFrame, key_columns: List[str]) -> pd.DataFrame:
+        """Remove duplicate rows based on key columns"""
+        original_count = len(df)
+        df = df.drop_duplicates(subset=key_columns, keep="first")
+        deduped_count = len(df)
+
+        if original_count > deduped_count:
+            logger.info(
+                f"Deduplicated {original_count - deduped_count} rows from {self.table_name}"
+            )
+
+        return df
+
+    def prepare_rows(self, df: pd.DataFrame) -> Tuple[List[str], List[Tuple[Any, ...]]]:
+        """Prepare DataFrame for bulk insert"""
+        columns = list(df.columns)
+        values = [tuple(row) for row in df.values]
+        return columns, values

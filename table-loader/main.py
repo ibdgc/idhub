@@ -13,9 +13,7 @@ except ImportError:
     pass  # dotenv not available, assume env vars are already set
 
 from core.config import settings
-from services.database_client import DatabaseClient
-from services.loader_service import LoaderService
-from services.s3_client import S3Client
+from services.loader import TableLoader
 
 # Configure logging
 logging.basicConfig(
@@ -64,19 +62,17 @@ def main():
         )
         logger.info("")
 
-        # Initialize services
-        s3_client = S3Client()
-        db_client = DatabaseClient()
-        loader = LoaderService(s3_client, db_client)
+        # Initialize loader
+        loader = TableLoader()
 
-        # Load batch
-        loader.load_batch(args.batch_id, dry_run=dry_run)
-
+        # Execute load
         if dry_run:
+            results = loader.preview_load(args.batch_id)
             logger.info("\n" + "=" * 60)
             logger.info("DRY RUN COMPLETE - Run with --approve to execute")
             logger.info("=" * 60)
         else:
+            results = loader.execute_load(args.batch_id)
             logger.info("\n" + "=" * 60)
             logger.info("✓ LOAD COMPLETE")
             logger.info("=" * 60)
