@@ -16,7 +16,6 @@ class S3Client:
 
     def list_batch_fragments(self, batch_id: str) -> List[str]:
         """List all table fragments for a batch"""
-        # Updated to match actual S3 structure
         prefix = f"staging/validated/{batch_id}/"
 
         try:
@@ -34,11 +33,17 @@ class S3Client:
             fragments = []
             for obj in response["Contents"]:
                 key = obj["Key"]
-                # Expected format: staging/validated/batch_id/table_name.json
-                if key.endswith(".json"):
-                    table_name = key.split("/")[-1].replace(".json", "")
+                filename = key.split("/")[-1]
+
+                # Skip metadata files - only process actual table CSVs
+                if filename in ["validation_report.json", "local_subject_ids.csv"]:
+                    continue
+
+                # Extract table name from CSV files
+                if filename.endswith(".csv"):
+                    table_name = filename.replace(".csv", "")
                     fragments.append(table_name)
-                    logger.debug(f"Found fragment: {table_name}")
+                    logger.info(f"Found table fragment: {table_name}")
 
             logger.info(f"Found {len(fragments)} fragments: {fragments}")
             return fragments

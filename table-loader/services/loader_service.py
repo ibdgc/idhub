@@ -67,6 +67,12 @@ class LoaderService:
         # Transform data
         records = transformer.transform_records(fragment)
 
+        # Validate that we have data to load
+        if not records or len(records) == 0:
+            error_msg = f"No records found for table {table} in batch {batch_id}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+
         if dry_run:
             logger.info(f"[DRY RUN] Would load {len(records)} records to {table}")
             if records:
