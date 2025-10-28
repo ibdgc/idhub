@@ -73,19 +73,23 @@ class LoaderService:
         # Build exclusion list from validation report
         exclude_fields = set()
 
-        # Exclude subject_id_candidates (used only for resolution)
-        if "subject_id_candidates" in report:
-            exclude_fields.update(report["subject_id_candidates"])
+        # Option 1: Use explicit exclude_from_load if present (preferred)
+        if "exclude_from_load" in report:
+            exclude_fields.update(report["exclude_from_load"])
             logger.info(
-                f"Excluding subject_id_candidates from load: {report['subject_id_candidates']}"
+                f"Using explicit exclude_from_load: {report['exclude_from_load']}"
             )
+        else:
+            # Option 2: Derive from subject_id_candidates and center_id_field
+            subject_id_candidates = report.get("subject_id_candidates", [])
+            if subject_id_candidates:
+                exclude_fields.update(subject_id_candidates)
+                logger.info(f"Excluding subject_id_candidates: {subject_id_candidates}")
 
-        # Exclude center_id_field if it was used for resolution
-        if report.get("center_id_field"):
-            exclude_fields.add(report["center_id_field"])
-            logger.info(
-                f"Excluding center_id_field from load: {report['center_id_field']}"
-            )
+            center_id_field = report.get("center_id_field")
+            if center_id_field:
+                exclude_fields.add(center_id_field)
+                logger.info(f"Excluding center_id_field: {center_id_field}")
 
         # Always exclude these resolution-only fields
         exclude_fields.update(["identifier_type", "action", "local_subject_id"])
