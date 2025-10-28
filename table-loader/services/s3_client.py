@@ -88,6 +88,26 @@ class S3Client:
             logger.error(f"Error downloading fragment {table}: {e}")
             raise
 
+    def download_validation_report(self, batch_id: str) -> Dict[str, Any]:
+        """Download validation report for a batch"""
+        key = f"staging/validated/{batch_id}/validation_report.json"
+
+        try:
+            logger.info(f"Downloading validation report from s3://{self.bucket}/{key}")
+
+            response = self.s3_client.get_object(Bucket=self.bucket, Key=key)
+            report_data = json.loads(response["Body"].read().decode("utf-8"))
+
+            logger.info(f"✓ Downloaded validation report for batch {batch_id}")
+            return report_data
+
+        except self.s3_client.exceptions.NoSuchKey:
+            logger.warning(f"Validation report not found: s3://{self.bucket}/{key}")
+            return {}
+        except Exception as e:
+            logger.error(f"Error downloading validation report: {e}")
+            return {}
+
     def mark_batch_loaded(self, batch_id: str, table: str):
         """Mark a fragment as loaded by moving it to processed/"""
         source_key = f"staging/validated/{batch_id}/{table}.json"
