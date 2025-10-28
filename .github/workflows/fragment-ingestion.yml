@@ -123,14 +123,29 @@ jobs:
           pip install awscli
           BATCH_ID="${{ github.event.inputs.batch_id }}"
 
-          # Check if batch fragments exist
-          if aws s3 ls s3://$S3_BUCKET/curated/ | grep -q "$BATCH_ID"; then
-            echo "✓ Found fragments for batch: $BATCH_ID"
-            aws s3 ls s3://$S3_BUCKET/curated/ | grep "$BATCH_ID"
+          # Updated to match actual S3 structure
+          PREFIX="staging/validated/${BATCH_ID}/"
+          echo "Searching for batch at: s3://$S3_BUCKET/$PREFIX"
+          echo ""
+
+          # List fragments in the batch
+          if aws s3 ls "s3://$S3_BUCKET/$PREFIX" 2>/dev/null; then
+            echo ""
+            echo "✓ Found batch: $BATCH_ID"
+            
+            # Count fragments
+            FRAGMENT_COUNT=$(aws s3 ls "s3://$S3_BUCKET/$PREFIX" | grep -c '.json' || echo "0")
+            echo "Total fragments: $FRAGMENT_COUNT"
+            
+            if [ "$FRAGMENT_COUNT" -eq "0" ]; then
+              echo "::error::No JSON fragments found in batch"
+              exit 1
+            fi
           else
-            echo "::error::No fragments found for batch: $BATCH_ID"
-            echo "Available batches:"
-            aws s3 ls s3://$S3_BUCKET/curated/ | tail -10
+            echo "::error::Batch not found: $BATCH_ID"
+            echo ""
+            echo "Available batches in staging/validated/:"
+            aws s3 ls "s3://$S3_BUCKET/staging/validated/" || echo "Cannot list staging/validated/"
             exit 1
           fi
           echo "::endgroup::"
