@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Diagnostic script to test project configuration and API tokens
+REDCap Configuration Diagnostic Tool
+Tests configuration loading and API connectivity
 """
 
 import logging
@@ -14,93 +15,139 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def main():
-    logger.info("=" * 80)
-    logger.info("REDCap Configuration Diagnostic")
-    logger.info("=" * 80)
+def mask_token(token: str) -> str:
+    """Mask API token for display"""
+    if not token or len(token) < 8:
+        return "***"
+    return f"{token[:4]}...{token[-4:]}"
 
-    # Check environment variables
-    logger.info("\n1. Environment Variables:")
-    env_vars = [
-        "REDCAP_API_URL",
+
+def check_env_vars():
+    """Check required environment variables"""
+    logger.info("1. Environment Variables:")
+
+    # REDCap URL
+    redcap_url = os.getenv("REDCAP_API_URL")
+    if redcap_url:
+        logger.info(f"  ✓ REDCAP_API_URL = ***")
+    else:
+        logger.error("  ✗ REDCAP_API_URL = NOT SET")
+
+    # Check various token environment variables
+    token_vars = [
         "REDCAP_PRIMARY_TOKEN",
         "REDCAP_LEGACY_TOKEN",
         "REDCAP_TRIAL001_TOKEN",
-        "REDCAP_API_TOKEN",  # Legacy
-        "REDCAP_PROJECT_ID",  # Legacy
+        "REDCAP_API_TOKEN",
     ]
 
-    for var in env_vars:
-        value = os.getenv(var)
-        if value:
-            # Mask sensitive values
-            if "TOKEN" in var or "KEY" in var:
-                masked = f"{value[:4]}...{value[-4:]}" if len(value) > 8 else "***"
-                logger.info(f"  ✓ {var} = {masked} (length: {len(value)})")
-            else:
-                logger.info(f"  ✓ {var} = {value}")
+    for var in token_vars:
+        token = os.getenv(var)
+        if token:
+            logger.info(f"  ✓ {var} = {mask_token(token)} (length: {len(token)})")
         else:
             logger.warning(f"  ✗ {var} = NOT SET")
 
-    # Load projects configuration
-    logger.info("\n2. Loading Projects Configuration:")
+    # REDCap Project ID (legacy)
+    project_id = os.getenv("REDCAP_PROJECT_ID")
+    if project_id:
+        logger.info(f"  ✓ REDCAP_PROJECT_ID = {project_id}")
+    else:
+        logger.warning("  ✗ REDCAP_PROJECT_ID = NOT SET")
+
+
+def load_projects():
+    """Load and validate projects configuration"""
+    logger.info("")
+    logger.info("2. Loading Projects Configuration:")
+
     try:
         from core.config import settings
 
         projects = settings.load_projects_config()
         logger.info(f"  ✓ Loaded {len(projects)} projects")
 
-        for project_key, project_config in projects.items():
-            logger.info(f"\n  Project: {project_key}")
-            logger.info(f"    Name: {project_config.project_name}")
-            logger.info(f"    REDCap ID: {project_config.redcap_project_id}")
-            logger.info(f"    Enabled: {project_config.enabled}")
-            logger.info(f"    Schedule: {project_config.schedule}")
+        logger.info("")
+        for key, project in projects.items():
+            logger.info(f"Project: {key}")
+            logger.info(f"  Name: {project.name}")
+            logger.info(f"  REDCap ID: {project.redcap_project_id}")
+            logger.info(f"  Enabled: {project.enabled}")
+            logger.info(f"  Schedule: {project.schedule}")
+            logger.info(
+                f"  Token: {mask_token(project.api_token)} (length: {len(project.api_token)})"
+            )
+            logger.info("")
 
-            # Check token
-            if project_config.api_token:
-                masked = (
-                    f"{project_config.api_token[:4]}...{project_config.api_token[-4:]}"
-                )
-                logger.info(
-                    f"    Token: {masked} (length: {len(project_config.api_token)})"
-                )
-            else:
-                logger.error(f"    Token: NOT SET!")
+        return projects
 
     except Exception as e:
         logger.error(f"  ✗ Failed to load configuration: {e}", exc_info=True)
-        return 1
+        raise
 
-    # Test REDCap API connection
-    logger.info("\n3. Testing REDCap API Connections:")
+
+def test_connections(projects):
+    """Test REDCap API connections for each project"""
+    logger.info("3. Testing REDCap API Connections:")
+
     try:
         from services.redcap_client import REDCapClient
 
-        for project_key, project_config in projects.items():
-            if not project_config.enabled:
-                logger.info(f"  ⊘ Skipping disabled project: {project_key}")
+        for key, project in projects.items():
+            if not project.enabled:
+                logger.info(f"  ⊘ Skipping disabled project: {key}")
                 continue
 
-            logger.info(f"\n  Testing: {project_key}")
+            logger.info(f"  Testing project: {key} ({project.name})")
+
             try:
-                client = REDCapClient(project_config)
-                info = client.get_project_info()
-                logger.info(f"    ✓ Connected successfully")
-                logger.info(f"    Project Title: {info.get('project_title')}")
-                logger.info(f"    Project ID: {info.get('project_id')}")
-                logger.info(f"    Record Count: {info.get('record_count', 'N/A')}")
+                client = REDCapClient(project)
+                metadata = client.get_metadata()
+
+                if metadata:
+                    logger.info(f"    ✓ Connected successfully")
+                    logger.info(
+                        f"    ✓ Found {len(metadata)} fields in data dictionary"
+                    )
+                else:
+                    logger.warning(f"    ⚠ Connected but no metadata returned")
+
             except Exception as e:
                 logger.error(f"    ✗ Connection failed: {e}")
 
     except Exception as e:
         logger.error(f"  ✗ Failed to test connections: {e}", exc_info=True)
-        return 1
+        raise
 
-    logger.info("\n" + "=" * 80)
-    logger.info("Diagnostic Complete")
+
+def main():
     logger.info("=" * 80)
-    return 0
+    logger.info("REDCap Configuration Diagnostic")
+    logger.info("=" * 80)
+
+    try:
+        # Check environment variables
+        check_env_vars()
+
+        # Load projects configuration
+        projects = load_projects()
+
+        # Test API connections
+        test_connections(projects)
+
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info("✓ Configuration diagnostic complete")
+        logger.info("=" * 80)
+
+        return 0
+
+    except Exception as e:
+        logger.error("")
+        logger.error("=" * 80)
+        logger.error("✗ Configuration diagnostic failed")
+        logger.error("=" * 80)
+        return 1
 
 
 if __name__ == "__main__":

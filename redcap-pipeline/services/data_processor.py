@@ -2,7 +2,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from core.database import Database
+from core.database import get_db_connection
 
 from services.s3_client import S3Client
 
@@ -12,14 +12,12 @@ logger = logging.getLogger(__name__)
 class DataProcessor:
     def __init__(
         self,
-        db: Database,
         s3_client: S3Client,
         project_key: str,
         project_config: Optional[Any] = None,
     ):
-        self.db = db
         self.s3_client = s3_client
-        self.project_key = project_key  # This will be "gap", "legacy_samples", etc.
+        self.project_key = project_key  # This will be "gap", "cd_ileal", etc.
         self.project_config = project_config
 
         # Load field mappings
@@ -59,7 +57,8 @@ class DataProcessor:
 
             now = datetime.utcnow()
 
-            with self.db.get_connection() as conn:
+            conn = get_db_connection()
+            try:
                 with conn.cursor() as cursor:
                     for sample in samples:
                         cursor.execute(
@@ -78,6 +77,8 @@ class DataProcessor:
                             ),
                         )
                     conn.commit()
+            finally:
+                conn.close()
 
             logger.info(
                 f"[{self.project_key}] Inserted {len(samples)} samples for GSID {gsid} (project: {self.project_name})"
