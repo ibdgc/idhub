@@ -1,13 +1,10 @@
 import logging
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from core.config import ProjectConfig, settings
-from core.database import get_db_connection, return_db_connection
-from psycopg2.extras import RealDictCursor
+from core.database import Database
 
-from services.center_resolver import CenterResolver
-from services.gsid_client import GSIDClient
+from services.s3_client import S3Client
 
 logger = logging.getLogger(__name__)
 
@@ -15,334 +12,139 @@ logger = logging.getLogger(__name__)
 class DataProcessor:
     def __init__(
         self,
-        gsid_client: GSIDClient,
-        center_resolver: CenterResolver,
-        project_config: ProjectConfig = None,
+        db: Database,
+        s3_client: S3Client,
+        project_key: str,
+        project_config: Optional[Any] = None,
     ):
-        self.gsid_client = gsid_client
-        self.center_resolver = center_resolver
+        self.db = db
+        self.s3_client = s3_client
+        self.project_key = project_key  # This will be "gap", "legacy_samples", etc.
         self.project_config = project_config
 
-        # Use project_key for logging/tracking, redcap_project_id for REDCap API
+        # Load field mappings
         if project_config:
-            self.project_key = project_config.project_key
-            self.redcap_project_id = project_config.redcap_project_id
-            self.project_name = project_config.project_name
+            self.field_mappings = project_config.load_field_mappings()
+            self.project_name = project_config.name  # e.g., "GAP"
         else:
-            self.project_key = "default"
-            self.redcap_project_id = settings.REDCAP_PROJECT_ID
-            self.project_name = "Default Project"
+            from core.config import settings
 
-    def extract_local_ids(self, record: Dict[str, Any], center_id: int) -> List[Dict]:
-        """Extract all available local identifiers from record"""
-        identifiers = []
+            self.field_mappings = settings.load_field_mappings()
+            self.project_name = "default"
 
-        # Primary identifiers
-        if record.get("consortium_id"):
-            identifiers.append(
-                {
-                    "center_id": center_id,
-                    "local_subject_id": record["consortium_id"],
-                    "identifier_type": "consortium_id",
-                }
-            )
+    def insert_samples(self, gsid: str, samples: List[Dict[str, Any]]) -> bool:
+        """Insert sample records into the database"""
+        if not samples:
+            logger.warning(f"[{self.project_key}] No samples to insert for {gsid}")
+            return True
 
-        if record.get("local_id"):
-            identifiers.append(
-                {
-                    "center_id": center_id,
-                    "local_subject_id": record["local_id"],
-                    "identifier_type": "local_id",
-                }
-            )
-
-        # Additional identifiers that might exist
-        if record.get("subject_id"):
-            identifiers.append(
-                {
-                    "center_id": center_id,
-                    "local_subject_id": record["subject_id"],
-                    "identifier_type": "subject_id",
-                }
-            )
-
-        if record.get("patient_id"):
-            identifiers.append(
-                {
-                    "center_id": center_id,
-                    "local_subject_id": record["patient_id"],
-                    "identifier_type": "patient_id",
-                }
-            )
-
-        return identifiers
-
-    def register_all_local_ids(self, gsid: str, identifiers: List[Dict]):
-        """Register all local IDs for a subject, flag conflicts for review"""
-        conn = get_db_connection()
         try:
-            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                for identifier in identifiers:
-                    # Check if this local_id already exists with a different GSID
-                    cursor.execute(
-                        """
-                        SELECT global_subject_id, identifier_type
-                        FROM local_subject_ids
-                        WHERE center_id = %s AND local_subject_id = %s
-                        """,
-                        (identifier["center_id"], identifier["local_subject_id"]),
-                    )
-                    existing = cursor.fetchone()
+            query = """
+                INSERT INTO specimen (
+                    specimen_id, global_subject_id, sample_type, 
+                    redcap_event, project, collection_date, 
+                    storage_location, notes, created_at, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (specimen_id) 
+                DO UPDATE SET
+                    sample_type = EXCLUDED.sample_type,
+                    redcap_event = EXCLUDED.redcap_event,
+                    project = EXCLUDED.project,
+                    collection_date = EXCLUDED.collection_date,
+                    storage_location = EXCLUDED.storage_location,
+                    notes = EXCLUDED.notes,
+                    updated_at = EXCLUDED.updated_at
+            """
 
-                    if existing and existing["global_subject_id"] != gsid:
-                        # CONFLICT: Same local_id points to different GSID
-                        logger.warning(
-                            f"[{self.project_key}] CONFLICT: {identifier['local_subject_id']} already linked to "
-                            f"{existing['global_subject_id']}, attempting to link to {gsid}"
-                        )
+            now = datetime.utcnow()
 
-                        # Flag BOTH subjects for review
+            with self.db.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    for sample in samples:
                         cursor.execute(
-                            """
-                            UPDATE subjects
-                            SET flagged_for_review = TRUE,
-                                review_notes = COALESCE(review_notes || E'\n', '') || %s
-                            WHERE global_subject_id IN (%s, %s)
-                            """,
+                            query,
                             (
-                                f"[{datetime.utcnow().isoformat()}] [{self.project_name} (REDCap ID: {self.redcap_project_id})] "
-                                f"Duplicate local_id conflict: {identifier['local_subject_id']} "
-                                f"(type: {identifier['identifier_type']}) linked to both {gsid} and {existing['global_subject_id']}",
+                                sample["specimen_id"],
                                 gsid,
-                                existing["global_subject_id"],
+                                sample.get("sample_type"),
+                                sample.get("redcap_event"),
+                                self.project_name,  # Use project name from config (e.g., "GAP")
+                                sample.get("collection_date"),
+                                sample.get("storage_location"),
+                                sample.get("notes"),
+                                now,
+                                now,
                             ),
                         )
+                    conn.commit()
 
-                        # Log to identity_resolutions
-                        cursor.execute(
-                            """
-                            INSERT INTO identity_resolutions
-                            (input_center_id, input_local_id, matched_gsid, action,
-                             match_strategy, confidence_score, requires_review, review_reason, created_by)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            """,
-                            (
-                                identifier["center_id"],
-                                identifier["local_subject_id"],
-                                gsid,
-                                "conflict_detected",
-                                "duplicate_local_id",
-                                0.0,
-                                True,
-                                f"[{self.project_name}] Local ID already exists for GSID {existing['global_subject_id']}",
-                                f"redcap_{self.project_key}",
-                            ),
-                        )
-
-                        # Skip inserting this conflicting ID
-                        continue
-
-                    elif existing and existing["global_subject_id"] == gsid:
-                        # Already linked correctly, skip
-                        logger.debug(
-                            f"[{self.project_key}] ID {identifier['local_subject_id']} already linked to {gsid}"
-                        )
-                        continue
-
-                    # No conflict - insert new mapping
-                    cursor.execute(
-                        """
-                        INSERT INTO local_subject_ids
-                        (center_id, local_subject_id, identifier_type, global_subject_id)
-                        VALUES (%s, %s, %s, %s)
-                        """,
-                        (
-                            identifier["center_id"],
-                            identifier["local_subject_id"],
-                            identifier["identifier_type"],
-                            gsid,
-                        ),
-                    )
-                    logger.info(
-                        f"[{self.project_key}] Linked {identifier['identifier_type']}={identifier['local_subject_id']} -> {gsid}"
-                    )
-
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
-            logger.error(
-                f"[{self.project_key}] Error registering local IDs for {gsid}: {e}"
+            logger.info(
+                f"[{self.project_key}] Inserted {len(samples)} samples for GSID {gsid} (project: {self.project_name})"
             )
-            raise
-        finally:
-            return_db_connection(conn)
+            return True
 
-    def transform_value(self, field_name: str, value: Any) -> Any:
-        """Apply transformations to field values"""
-        if self.project_config:
-            field_mappings = self.project_config.load_field_mappings()
-        else:
-            field_mappings = settings.load_field_mappings()
-
-        transformations = field_mappings.get("transformations", {})
-
-        if field_name not in transformations:
-            return value
-
-        transform = transformations[field_name]
-
-        if transform["type"] == "extract_year":
-            if not value:
-                return None
-            return value.split("-")[0] if "-" in str(value) else value
-
-        elif transform["type"] == "boolean":
-            if value in transform["true_values"]:
-                return True
-            elif value in transform["false_values"]:
-                return False
-            return None
-
-        return value
-
-    def register_subject(self, record: Dict[str, Any]) -> tuple[str, int]:
-        """Register subject with primary identifier"""
-        center_name = record.get("redcap_data_access_group", "Unknown")
-        center_id = self.center_resolver.get_or_create_center(center_name)
-
-        # Determine primary identifier
-        local_subject_id = record.get("consortium_id") or record.get("local_id")
-        identifier_type = "consortium_id" if record.get("consortium_id") else "local_id"
-
-        if not local_subject_id:
-            raise ValueError(
-                f"[{self.project_key}] No local_subject_id found in record: {record.get('record_id')}"
-            )
-
-        # Transform values
-        registration_date = record.get("registration_date")
-        registration_year = self.transform_value("registration_date", registration_date)
-        control = self.transform_value("control", record.get("control", "0"))
-
-        # Register with GSID service
-        result = self.gsid_client.register_subject(
-            center_id=center_id,
-            local_subject_id=local_subject_id,
-            identifier_type=identifier_type,
-            registration_year=registration_year,
-            control=control,
-            created_by=f"redcap_{self.project_key}",
-        )
-
-        return result["gsid"], center_id
-
-    def _process_specimens(self, record: Dict[str, Any], gsid: str):
-        """Process and insert specimen records using field mappings"""
-        if self.project_config:
-            field_mappings = self.project_config.load_field_mappings()
-        else:
-            field_mappings = settings.load_field_mappings()
-
-        conn = get_db_connection()
-        try:
-            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                # Process all specimen mappings from config
-                for mapping in field_mappings.get("mappings", []):
-                    if mapping.get("target_table") == "specimen":
-                        source_field = mapping["source_field"]
-                        sample_type = mapping.get("sample_type")
-
-                        if record.get(source_field):
-                            cursor.execute(
-                                """
-                                INSERT INTO specimen (sample_id, global_subject_id, sample_type, redcap_event, redcap_project_id)
-                                VALUES (%s, %s, %s, %s, %s)
-                                ON CONFLICT (sample_id) DO UPDATE SET
-                                    sample_type = EXCLUDED.sample_type,
-                                    redcap_event = EXCLUDED.redcap_event,
-                                    redcap_project_id = EXCLUDED.redcap_project_id
-                                """,
-                                (
-                                    record[source_field],
-                                    gsid,
-                                    sample_type,
-                                    record.get("redcap_event_name"),
-                                    self.redcap_project_id,
-                                ),
-                            )
-                            logger.debug(
-                                f"[{self.project_key}] Inserted specimen: {record[source_field]} (type: {sample_type})"
-                            )
-
-                # Handle family linkage
-                if record.get("family_id"):
-                    cursor.execute(
-                        """
-                        INSERT INTO family (family_id)
-                        VALUES (%s)
-                        ON CONFLICT (family_id) DO NOTHING
-                        """,
-                        (record["family_id"],),
-                    )
-
-                    cursor.execute(
-                        """
-                        UPDATE subjects
-                        SET family_id = %s
-                        WHERE global_subject_id = %s
-                        """,
-                        (record["family_id"], gsid),
-                    )
-
-                logger.info(f"[{self.project_key}] Inserted samples for GSID {gsid}")
-
-            conn.commit()
         except Exception as e:
-            conn.rollback()
             logger.error(
                 f"[{self.project_key}] Error inserting samples for {gsid}: {e}"
             )
-            raise
-        finally:
-            return_db_connection(conn)
+            return False
 
-    def process_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
-        """Process single REDCap record with conflict detection"""
+    def create_fragment(self, gsid: str, record: Dict[str, Any]) -> Optional[Dict]:
+        """Create a curated data fragment from REDCap record"""
         try:
-            # Register subject with primary ID
-            gsid, center_id = self.register_subject(record)
-
-            # Extract and register ALL local IDs (with conflict detection)
-            all_identifiers = self.extract_local_ids(record, center_id)
-            if all_identifiers:
-                self.register_all_local_ids(gsid, all_identifiers)
-
-            # Insert samples
-            self._process_specimens(record, gsid)
-
-            return {
-                "status": "success",
+            fragment = {
                 "gsid": gsid,
                 "project_key": self.project_key,
-                "redcap_project_id": self.redcap_project_id,
+                "project_name": self.project_name,
+                "source": "redcap",
+                "created_at": datetime.utcnow().isoformat(),
+                "data": {},
             }
+
+            # Map fields according to configuration
+            for section, fields in self.field_mappings.items():
+                fragment["data"][section] = {}
+                for field_name, redcap_field in fields.items():
+                    if redcap_field in record:
+                        value = record[redcap_field]
+                        # Only include non-empty values
+                        if value not in [None, "", "NA", "N/A"]:
+                            fragment["data"][section][field_name] = value
+
+            return fragment
 
         except Exception as e:
             logger.error(
-                f"[{self.project_key}] Error processing record {record.get('record_id')}: {str(e)}"
+                f"[{self.project_key}] Error creating fragment for {gsid}: {e}"
             )
-            return {
-                "status": "error",
-                "error": str(e),
-                "record_id": record.get("record_id"),
-                "project_key": self.project_key,
-                "redcap_project_id": self.redcap_project_id,
-            }
+            return None
 
-    def process_records(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Process multiple records"""
-        results = []
-        for record in records:
-            result = self.process_record(record)
-            results.append(result)
-        return results
+    def process_record(
+        self, record: Dict[str, Any], gsid: str, samples: List[Dict[str, Any]]
+    ) -> bool:
+        """Process a single REDCap record"""
+        try:
+            # Insert samples
+            if not self.insert_samples(gsid, samples):
+                return False
+
+            # Create and upload fragment
+            fragment = self.create_fragment(gsid, record)
+            if fragment:
+                success = self.s3_client.upload_fragment(gsid, fragment)
+                if not success:
+                    logger.warning(
+                        f"[{self.project_key}] Failed to upload fragment for {gsid}"
+                    )
+                    # Don't fail the whole record if S3 upload fails
+                    return True
+
+            return True
+
+        except Exception as e:
+            logger.error(
+                f"[{self.project_key}] Error processing record "
+                f"{record.get('record_id', 'unknown')}: {e}"
+            )
+            return False

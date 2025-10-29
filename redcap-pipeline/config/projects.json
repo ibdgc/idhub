@@ -1,7 +1,7 @@
 {
   "projects": {
-    "primary_biobank": {
-      "name": "IBDGC Primary Biobank",
+    "gap": {
+      "name": "GAP",
       "redcap_project_id": "16894",
       "api_token": "${REDCAP_API_TOKEN}",
       "field_mappings": "gap_field_mappings.json",
@@ -10,8 +10,8 @@
       "enabled": true,
       "description": "Main biobank project - continuous integration"
     },
-    "legacy_samples": {
-      "name": "Post-op CD Ileal",
+    "cd_ileal": {
+      "name": "cd_ileal",
       "redcap_project_id": "16899",
       "api_token": "${REDCAP_API_TOKEN}",
       "field_mappings": "cd_ileal_field_mappings.json",
