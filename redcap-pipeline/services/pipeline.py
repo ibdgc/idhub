@@ -79,8 +79,19 @@ class REDCapPipeline:
             # Extract subject identifiers
             subject_data = self._extract_subject_data(record)
 
+            # Validate required fields
+            if not subject_data.get("center_id"):
+                return {"status": "error", "error": "Missing center_id"}
+            if not subject_data.get("local_subject_id"):
+                return {"status": "error", "error": "Missing local_subject_id"}
+
             # Register/resolve GSID
-            gsid_result = self.gsid_client.register_subject(subject_data)
+            gsid_result = self.gsid_client.register_subject(
+                center_id=subject_data["center_id"],
+                local_subject_id=subject_data["local_subject_id"],
+                identifier_type="primary",
+                created_by=f"redcap_{self.project_config.project_key}",
+            )
             gsid = gsid_result["gsid"]
 
             # Extract samples
@@ -113,35 +124,19 @@ class REDCapPipeline:
         center_name = record.get(center_field, "")
 
         # Use get_or_create_center to handle fuzzy matching and creation
-        center_id = (
-            self.center_resolver.get_or_create_center(center_name)
-            if center_name
-            else None
-        )
+        center_id = None
+        if center_name:
+            center_id = self.center_resolver.get_or_create_center(center_name)
 
         # Extract subject identifiers
         subject_id_field = demographics.get("local_subject_id", "subject_id")
         local_subject_id = record.get(subject_id_field, record.get("record_id"))
 
-        # Build subject data for GSID service
+        # Build subject data
         subject_data = {
             "local_subject_id": local_subject_id,
             "center_id": center_id,
         }
-
-        # Add optional demographic fields if available
-        optional_fields = {
-            "first_name": demographics.get("first_name"),
-            "last_name": demographics.get("last_name"),
-            "date_of_birth": demographics.get("date_of_birth"),
-            "sex": demographics.get("sex"),
-        }
-
-        for key, field_name in optional_fields.items():
-            if field_name and field_name in record:
-                value = record.get(field_name)
-                if value:  # Only include non-empty values
-                    subject_data[key] = value
 
         return subject_data
 
