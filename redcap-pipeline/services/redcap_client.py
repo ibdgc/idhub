@@ -13,7 +13,9 @@ logger = logging.getLogger(__name__)
 class REDCapClient:
     def __init__(self, project_config: ProjectConfig):
         self.project_config = project_config
-        self.api_url = project_config.api_url
+        self.api_url = (
+            project_config.redcap_api_url
+        )  # Changed from api_url to redcap_api_url
         self.api_token = project_config.api_token
 
         # Create session with retry logic
@@ -76,7 +78,6 @@ class REDCapClient:
                     f"[{self.project_config.project_key}] Fetched {len(paginated_records)} records "
                     f"(offset={offset}, total={len(all_records)})"
                 )
-
                 return paginated_records
 
             except requests.exceptions.Timeout as e:
@@ -95,7 +96,6 @@ class REDCapClient:
                         f"after {max_retries} attempts: {e}"
                     )
                     raise
-
             except requests.exceptions.RequestException as e:
                 logger.error(
                     f"[{self.project_config.project_key}] Failed to fetch records: {e}"
