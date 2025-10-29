@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from core.config import ProjectConfig
 
@@ -23,6 +23,10 @@ class REDCapPipeline:
         # Load field mappings to know which fields to extract
         self.field_mappings = project_config.load_field_mappings()
 
+        # Cache all records on first fetch to avoid repeated API calls
+        self._all_records = None
+        self._records_fetched = False
+
     def run(self, batch_size: int = None):
         """Execute the full pipeline with batch processing"""
         if batch_size is None:
@@ -33,19 +37,38 @@ class REDCapPipeline:
             f"({self.project_config.project_name}) - batch size: {batch_size}"
         )
 
+        # Fetch all records once (REDCap API doesn't support true pagination)
+        if not self._records_fetched:
+            logger.info("Fetching all records from REDCap (this may take a while)...")
+            try:
+                self._all_records = self._fetch_all_records()
+                self._records_fetched = True
+                logger.info(
+                    f"✓ Fetched {len(self._all_records)} total records from REDCap"
+                )
+            except Exception as e:
+                logger.error(f"Failed to fetch records from REDCap: {e}")
+                raise
+
+        total_records = len(self._all_records)
         offset = 0
         total_success = 0
         total_errors = 0
         error_summary = {}
 
         try:
-            while True:
-                records = self.redcap_client.fetch_records_batch(batch_size, offset)
+            while offset < total_records:
+                # Get batch from cached records
+                batch_end = min(offset + batch_size, total_records)
+                records = self._all_records[offset:batch_end]
+
                 if not records:
-                    logger.info("No more records to process")
                     break
 
-                logger.info(f"Processing {len(records)} records...")
+                logger.info(
+                    f"Processing batch {offset // batch_size + 1}: "
+                    f"records {offset + 1}-{batch_end} of {total_records}"
+                )
 
                 for record in records:
                     result = self._process_single_record(record)
@@ -57,7 +80,14 @@ class REDCapPipeline:
                         error_type = result.get("error", "Unknown error")
                         error_summary[error_type] = error_summary.get(error_type, 0) + 1
 
-                offset += batch_size
+                offset = batch_end
+
+                # Log progress every 10 batches
+                if (offset // batch_size) % 10 == 0:
+                    logger.info(
+                        f"Progress: {offset}/{total_records} records processed "
+                        f"({total_success} success, {total_errors} errors)"
+                    )
 
             # Log error summary
             if error_summary:
@@ -83,6 +113,16 @@ class REDCapPipeline:
         except Exception as e:
             logger.error(f"Pipeline failed: {e}", exc_info=True)
             raise
+
+    def _fetch_all_records(self) -> List[Dict]:
+        """Fetch all records from REDCap in one call"""
+        # Use fetch_records_batch with offset=0 and large batch_size
+        # This will return all records
+        return self.redcap_client.fetch_records_batch(
+            batch_size=999999,  # Large number to get all records
+            offset=0,
+            timeout=180,  # 3 minutes for large datasets
+        )
 
     def _process_single_record(self, record: Dict) -> Dict:
         """Process a single REDCap record"""
