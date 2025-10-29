@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from core.config import ProjectConfig
 
@@ -20,6 +20,9 @@ class REDCapPipeline:
         self.center_resolver = CenterResolver()
         self.data_processor = DataProcessor(project_config)
         self.s3_uploader = S3Uploader()
+
+        # Load field mappings to know which fields to extract
+        self.field_mappings = project_config.load_field_mappings()
 
     def run(self, batch_size: int = None):
         """Execute the full pipeline with batch processing"""
@@ -81,7 +84,7 @@ class REDCapPipeline:
             gsid = gsid_result["gsid"]
 
             # Extract samples
-            samples = self._extract_samples(record)
+            samples = self._extract_samples(record, gsid)
 
             # Process record (insert samples into DB)
             success = self.data_processor.process_record(record, gsid, samples)
@@ -97,24 +100,97 @@ class REDCapPipeline:
             return {"status": "success", "gsid": gsid}
 
         except Exception as e:
-            logger.error(f"Error processing record: {e}")
+            logger.error(f"Error processing record: {e}", exc_info=True)
             return {"status": "error", "error": str(e)}
 
     def _extract_subject_data(self, record: Dict) -> Dict:
         """Extract subject identification data from record"""
-        # This should be implemented based on your field mappings
-        # For now, a placeholder
-        return {
-            "local_subject_id": record.get("subject_id"),
-            "center_id": self.center_resolver.resolve_center(
-                record.get("center_name", "")
-            ),
+        # Get demographics mapping
+        demographics = self.field_mappings.get("demographics", {})
+
+        # Extract center name and resolve to center_id
+        center_field = demographics.get("center_name", "center_name")
+        center_name = record.get(center_field, "")
+
+        # Use get_or_create_center to handle fuzzy matching and creation
+        center_id = (
+            self.center_resolver.get_or_create_center(center_name)
+            if center_name
+            else None
+        )
+
+        # Extract subject identifiers
+        subject_id_field = demographics.get("local_subject_id", "subject_id")
+        local_subject_id = record.get(subject_id_field, record.get("record_id"))
+
+        # Build subject data for GSID service
+        subject_data = {
+            "local_subject_id": local_subject_id,
+            "center_id": center_id,
         }
 
-    def _extract_samples(self, record: Dict) -> List[Dict]:
+        # Add optional demographic fields if available
+        optional_fields = {
+            "first_name": demographics.get("first_name"),
+            "last_name": demographics.get("last_name"),
+            "date_of_birth": demographics.get("date_of_birth"),
+            "sex": demographics.get("sex"),
+        }
+
+        for key, field_name in optional_fields.items():
+            if field_name and field_name in record:
+                value = record.get(field_name)
+                if value:  # Only include non-empty values
+                    subject_data[key] = value
+
+        return subject_data
+
+    def _extract_samples(self, record: Dict, gsid: str) -> List[Dict]:
         """Extract sample data from record"""
-        # This should be implemented based on your field mappings
-        # For now, a placeholder
         samples = []
-        # Add your sample extraction logic here
+
+        # Get specimen mapping
+        specimen_fields = self.field_mappings.get("specimen", {})
+
+        if not specimen_fields:
+            logger.debug(
+                f"No specimen field mappings defined for {self.project_config.project_key}"
+            )
+            return samples
+
+        # Extract specimen ID
+        specimen_id_field = specimen_fields.get("specimen_id", "specimen_id")
+        specimen_id = record.get(specimen_id_field)
+
+        if not specimen_id:
+            logger.debug(f"No specimen_id found in record {record.get('record_id')}")
+            return samples
+
+        # Build sample record
+        sample = {
+            "specimen_id": specimen_id,
+            "global_subject_id": gsid,
+        }
+
+        # Add optional specimen fields
+        optional_specimen_fields = {
+            "sample_type": "sample_type",
+            "collection_date": "collection_date",
+            "storage_location": "storage_location",
+            "notes": "notes",
+        }
+
+        for key, default_field in optional_specimen_fields.items():
+            field_name = specimen_fields.get(key, default_field)
+            if field_name in record:
+                value = record.get(field_name)
+                if value:  # Only include non-empty values
+                    sample[key] = value
+
+        # Add REDCap event name if present
+        if "redcap_event_name" in record:
+            sample["redcap_event"] = record["redcap_event_name"]
+
+        samples.append(sample)
+
         return samples
