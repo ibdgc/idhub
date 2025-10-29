@@ -4,31 +4,18 @@ from typing import Any, Dict, List, Optional
 
 from core.database import get_db_connection
 
-from services.s3_client import S3Client
-
 logger = logging.getLogger(__name__)
 
 
 class DataProcessor:
     def __init__(
         self,
-        s3_client: S3Client,
-        project_key: str,
-        project_config: Optional[Any] = None,
+        project_config: "ProjectConfig",
     ):
-        self.s3_client = s3_client
-        self.project_key = project_key  # This will be "gap", "cd_ileal", etc.
         self.project_config = project_config
-
-        # Load field mappings
-        if project_config:
-            self.field_mappings = project_config.load_field_mappings()
-            self.project_name = project_config.name  # e.g., "GAP"
-        else:
-            from core.config import settings
-
-            self.field_mappings = settings.load_field_mappings()
-            self.project_name = "default"
+        self.project_key = project_config.project_key
+        self.project_name = project_config.project_name
+        self.field_mappings = project_config.load_field_mappings()
 
     def insert_samples(self, gsid: str, samples: List[Dict[str, Any]]) -> bool:
         """Insert sample records into the database"""
@@ -126,21 +113,11 @@ class DataProcessor:
     ) -> bool:
         """Process a single REDCap record"""
         try:
-            # Insert samples
+            # Insert samples into database
             if not self.insert_samples(gsid, samples):
                 return False
 
-            # Create and upload fragment
-            fragment = self.create_fragment(gsid, record)
-            if fragment:
-                success = self.s3_client.upload_fragment(gsid, fragment)
-                if not success:
-                    logger.warning(
-                        f"[{self.project_key}] Failed to upload fragment for {gsid}"
-                    )
-                    # Don't fail the whole record if S3 upload fails
-                    return True
-
+            # Fragment creation and S3 upload is handled by the pipeline
             return True
 
         except Exception as e:
