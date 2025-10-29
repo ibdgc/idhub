@@ -1,8 +1,6 @@
 import json
 import logging
 import os
-import re
-from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -12,40 +10,83 @@ logger = logging.getLogger(__name__)
 class ProjectConfig:
     """Configuration for a single REDCap project"""
 
-    def __init__(self, project_key: str, config: dict):
-        self.project_key = (
-            project_key  # Our internal identifier (e.g., "primary_biobank")
-        )
-        self.project_name = config.get("name", project_key)
-        self.redcap_project_id = config[
-            "redcap_project_id"
-        ]  # REDCap's numeric project ID
-        self.api_token = config["api_token"]
-        self.field_mappings_file = config.get("field_mappings", "field_mappings.json")
-        self.schedule = config.get("schedule", "manual")  # "continuous" or "manual"
-        self.batch_size = config.get("batch_size", 50)
-        self.enabled = config.get("enabled", True)
-        self.description = config.get("description", "")
+    def __init__(
+        self,
+        project_key: str,
+        project_name: str,
+        redcap_project_id: str,
+        api_token: str,
+        field_mappings_file: str,
+        schedule: str = "manual",
+        batch_size: int = 50,
+        enabled: bool = True,
+        description: str = "",
+        redcap_api_url: str = None,
+    ):
+        self.project_key = project_key
+        self.project_name = project_name
+        self.redcap_project_id = redcap_project_id
+        self.api_token = api_token
+        self.field_mappings_file = field_mappings_file
+        self.schedule = schedule
+        self.batch_size = batch_size
+        self.enabled = enabled
+        self.description = description
+        # Use provided URL or fall back to settings
+        self.redcap_api_url = redcap_api_url or os.getenv("REDCAP_API_URL")
 
-        # Validate that token was resolved
-        if not self.api_token or self.api_token.startswith("${"):
-            raise ValueError(
-                f"API token for project '{project_key}' not properly configured. "
-                f"Token value: {self.api_token}"
+    def load_field_mappings(self) -> Dict:
+        """Load field mappings from JSON file"""
+        config_dir = Path(__file__).parent.parent / "config"
+        mapping_path = config_dir / self.field_mappings_file
+
+        if not mapping_path.exists():
+            raise FileNotFoundError(
+                f"Field mappings file not found: {self.field_mappings_file}"
             )
 
-    def load_field_mappings(self) -> dict:
-        """Load project-specific field mappings"""
-        config_path = Path(__file__).parent.parent / "config" / self.field_mappings_file
-        with open(config_path) as f:
-            return json.load(f)
+        with open(mapping_path) as f:
+            mappings = json.load(f)
+
+        # Convert old format to new format if needed
+        if "mappings" in mappings:
+            # Old format - convert to new format
+            converted = {
+                "demographics": {},
+                "specimen": {},
+                "family": {},
+                "clinical": {},
+            }
+
+            for mapping in mappings["mappings"]:
+                target_table = mapping.get("target_table")
+                source_field = mapping.get("source_field")
+
+                if target_table == "centers":
+                    converted["demographics"]["center_name"] = source_field
+                elif target_table == "local_subject_ids":
+                    if "local_subject_id" not in converted["demographics"]:
+                        converted["demographics"]["local_subject_id"] = source_field
+                elif target_table == "specimen":
+                    # Use sample_type as key if available
+                    sample_type = mapping.get("sample_type", "specimen_id")
+                    if sample_type == "specimen_id" or not converted["specimen"]:
+                        converted["specimen"]["specimen_id"] = source_field
+                elif target_table == "family":
+                    converted["family"]["family_id"] = source_field
+                elif target_table == "subjects":
+                    target_field = mapping.get("target_field")
+                    converted["clinical"][target_field] = source_field
+
+            return converted
+
+        # New format - return as is
+        return mappings
 
 
 class Settings:
-    # REDCap Configuration (legacy - for backward compatibility)
+    # REDCap Configuration (shared across projects)
     REDCAP_API_URL = os.getenv("REDCAP_API_URL")
-    REDCAP_API_TOKEN = os.getenv("REDCAP_API_TOKEN")
-    REDCAP_PROJECT_ID = os.getenv("REDCAP_PROJECT_ID", "default")
 
     # GSID Service
     GSID_SERVICE_URL = os.getenv("GSID_SERVICE_URL", "http://gsid-service:8000")
@@ -68,141 +109,91 @@ class Settings:
     CENTER_ALIASES = {
         "mount_sinai": "MSSM",
         "mount_sinai_ny": "MSSM",
-        "mount-sinai": "MSSM",
-        "mt_sinai": "MSSM",
+        "mssm": "MSSM",
         "cedars_sinai": "Cedars-Sinai",
-        "cedars-sinai": "Cedars-Sinai",
-        "university_of_chicago": "University of Chicago",
-        "uchicago": "University of Chicago",
-        "u_chicago": "University of Chicago",
-        "johns_hopkins": "Johns Hopkins",
-        "jhu": "Johns Hopkins",
-        "mass_general": "Massachusetts General Hospital",
-        "mgh": "Massachusetts General Hospital",
-        "pitt": "Pittsburgh",
-        "upitt": "Pittsburgh",
+        "cedars": "Cedars-Sinai",
         "university_of_pittsburgh": "Pittsburgh",
+        "pitt": "Pittsburgh",
+        "upmc": "Pittsburgh",
     }
 
     @staticmethod
-    def _resolve_env_var(value: str) -> str:
-        """
-        Resolve environment variable references in config values.
-        Supports ${ENV_VAR} and $ENV_VAR syntax.
-        """
-        if not isinstance(value, str):
-            return value
+    def _resolve_token(token_value: str, project_key: str) -> str:
+        """Resolve token from environment variable if needed"""
+        if not token_value:
+            raise ValueError(f"API token for project '{project_key}' is empty")
 
-        # Pattern to match ${VAR} or $VAR
-        pattern = r"\$\{([^}]+)\}|\$([A-Za-z_][A-Za-z0-9_]*)"
+        # Check if it's a variable reference like ${VAR_NAME}
+        if token_value.startswith("${") and token_value.endswith("}"):
+            var_name = token_value[2:-1]
+            logger.info(
+                f"Project '{project_key}': Resolving token from env var '{var_name}'"
+            )
 
-        def replacer(match):
-            var_name = match.group(1) or match.group(2)
-            env_value = os.getenv(var_name)
-            if env_value is None:
+            resolved = os.getenv(var_name)
+            if not resolved:
                 logger.warning(f"Environment variable '{var_name}' not found")
-                return match.group(0)  # Return original if not found
-            return env_value
+                raise ValueError(
+                    f"API token for project '{project_key}' not properly configured. "
+                    f"Token value: {token_value}"
+                )
 
-        return re.sub(pattern, replacer, value)
+            logger.info(
+                f"Project '{project_key}': API token resolved (length: {len(resolved)})"
+            )
+            return resolved
+
+        # Direct token value
+        logger.info(
+            f"Project '{project_key}': Using direct API token (length: {len(token_value)})"
+        )
+        return token_value
 
     @staticmethod
-    @lru_cache(maxsize=None)
     def load_projects_config() -> Dict[str, ProjectConfig]:
-        """Load multi-project configuration"""
-        config_path = Path(__file__).parent.parent / "config" / "projects.json"
+        """Load all project configurations from projects.json"""
+        config_dir = Path(__file__).parent.parent / "config"
+        projects_file = config_dir / "projects.json"
 
-        if not config_path.exists():
-            logger.info("No projects.json found, using legacy single-project mode")
-            # Fallback to legacy single-project mode using env variables
-            project_key = "default"
-            api_token = os.getenv("REDCAP_API_TOKEN")
+        logger.info(f"Loading projects configuration from {projects_file}")
 
-            if not api_token:
-                raise ValueError("REDCAP_API_TOKEN environment variable not set")
+        if not projects_file.exists():
+            raise FileNotFoundError(f"Projects config not found: {projects_file}")
 
-            return {
-                project_key: ProjectConfig(
-                    project_key,
-                    {
-                        "name": os.getenv("REDCAP_PROJECT_NAME", "Default Project"),
-                        "redcap_project_id": os.getenv("REDCAP_PROJECT_ID", "unknown"),
-                        "api_token": api_token,
-                        "field_mappings": "field_mappings.json",
-                        "schedule": "continuous",
-                        "enabled": True,
-                    },
-                )
-            }
+        with open(projects_file) as f:
+            config_data = json.load(f)
 
-        logger.info(f"Loading projects configuration from {config_path}")
-
-        with open(config_path) as f:
-            projects_data = json.load(f)
-
-        # Resolve environment variables in all config values
         projects = {}
-        for project_key, config in projects_data["projects"].items():
-            # Resolve all string values in config
-            resolved_config = {}
-            for key, value in config.items():
-                if isinstance(value, str):
-                    resolved_value = Settings._resolve_env_var(value)
-                    resolved_config[key] = resolved_value
-
-                    # Log token resolution (masked)
-                    if key == "api_token":
-                        if resolved_value and not resolved_value.startswith("${"):
-                            logger.info(
-                                f"Project '{project_key}': API token resolved "
-                                f"(length: {len(resolved_value)})"
-                            )
-                        else:
-                            logger.error(
-                                f"Project '{project_key}': API token NOT resolved! "
-                                f"Value: {resolved_value}"
-                            )
-                else:
-                    resolved_config[key] = value
-
+        for project_key, project_data in config_data.get("projects", {}).items():
             try:
-                projects[project_key] = ProjectConfig(project_key, resolved_config)
-                logger.info(
-                    f"✓ Loaded project '{project_key}': {resolved_config.get('name')} "
-                    f"(REDCap ID: {resolved_config.get('redcap_project_id')})"
+                # Resolve API token
+                token = Settings._resolve_token(
+                    project_data.get("api_token", ""), project_key
                 )
-            except ValueError as e:
+
+                projects[project_key] = ProjectConfig(
+                    project_key=project_key,
+                    project_name=project_data.get("name", project_key),
+                    redcap_project_id=project_data.get("redcap_project_id"),
+                    api_token=token,
+                    field_mappings_file=project_data.get("field_mappings"),
+                    schedule=project_data.get("schedule", "manual"),
+                    batch_size=project_data.get("batch_size", 50),
+                    enabled=project_data.get("enabled", True),
+                    description=project_data.get("description", ""),
+                    redcap_api_url=Settings.REDCAP_API_URL,
+                )
+
+                logger.info(
+                    f"✓ Loaded project '{project_key}': {projects[project_key].project_name} "
+                    f"(REDCap ID: {projects[project_key].redcap_project_id})"
+                )
+
+            except Exception as e:
                 logger.error(f"✗ Failed to load project '{project_key}': {e}")
-                # Don't add this project to the list
                 continue
 
-        if not projects:
-            raise ValueError("No valid projects found in configuration")
-
         return projects
-
-    @staticmethod
-    def get_project_config(project_key: str) -> Optional[ProjectConfig]:
-        """Get configuration for a specific project by our internal key"""
-        projects = Settings.load_projects_config()
-        return projects.get(project_key)
-
-    @staticmethod
-    def get_project_by_redcap_id(redcap_project_id: str) -> Optional[ProjectConfig]:
-        """Get configuration by REDCap's numeric project ID"""
-        projects = Settings.load_projects_config()
-        for project in projects.values():
-            if project.redcap_project_id == str(redcap_project_id):
-                return project
-        return None
-
-    @staticmethod
-    @lru_cache(maxsize=None)
-    def load_field_mappings():
-        """Legacy method - loads default project mappings"""
-        config_path = Path(__file__).parent.parent / "config" / "field_mappings.json"
-        with open(config_path) as f:
-            return json.load(f)
 
 
 settings = Settings()
