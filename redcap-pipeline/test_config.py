@@ -70,13 +70,23 @@ def load_projects():
         logger.info("")
         for key, project in projects.items():
             logger.info(f"Project: {key}")
-            logger.info(f"  Name: {project.name}")
+
+            # Access the raw config dict to get the name
+            project_name = getattr(project, "project_name", key)
+
+            logger.info(f"  Name: {project_name}")
             logger.info(f"  REDCap ID: {project.redcap_project_id}")
             logger.info(f"  Enabled: {project.enabled}")
             logger.info(f"  Schedule: {project.schedule}")
+            logger.info(f"  Batch Size: {project.batch_size}")
+
+            if hasattr(project, "description"):
+                logger.info(f"  Description: {project.description}")
+
             logger.info(
                 f"  Token: {mask_token(project.api_token)} (length: {len(project.api_token)})"
             )
+            logger.info(f"  Field Mappings: {project.field_mappings_file}")
             logger.info("")
 
         return projects
@@ -98,7 +108,8 @@ def test_connections(projects):
                 logger.info(f"  ⊘ Skipping disabled project: {key}")
                 continue
 
-            logger.info(f"  Testing project: {key} ({project.name})")
+            project_name = getattr(project, "project_name", key)
+            logger.info(f"  Testing project: {key} ({project_name})")
 
             try:
                 client = REDCapClient(project)
