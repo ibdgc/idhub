@@ -37,6 +37,7 @@ class REDCapPipeline:
         offset = 0
         total_success = 0
         total_errors = 0
+        error_summary = {}
 
         try:
             while True:
@@ -54,8 +55,19 @@ class REDCapPipeline:
                         total_success += 1
                     else:
                         total_errors += 1
+                        # Track error types
+                        error_type = result.get("error", "Unknown error")
+                        error_summary[error_type] = error_summary.get(error_type, 0) + 1
 
                 offset += batch_size
+
+            # Log error summary
+            if error_summary:
+                logger.warning(f"Error summary for {self.project_config.project_key}:")
+                for error_type, count in sorted(
+                    error_summary.items(), key=lambda x: x[1], reverse=True
+                ):
+                    logger.warning(f"  - {error_type}: {count} occurrences")
 
             logger.info(
                 f"Pipeline complete for {self.project_config.project_key}: "
@@ -67,6 +79,7 @@ class REDCapPipeline:
                 "project_name": self.project_config.project_name,
                 "total_success": total_success,
                 "total_errors": total_errors,
+                "error_summary": error_summary,
             }
 
         except Exception as e:
@@ -75,44 +88,89 @@ class REDCapPipeline:
 
     def _process_single_record(self, record: Dict) -> Dict:
         """Process a single REDCap record"""
+        record_id = record.get("record_id", "unknown")
+
         try:
             # Extract subject identifiers
             subject_data = self._extract_subject_data(record)
 
             # Validate required fields
             if not subject_data.get("center_id"):
-                return {"status": "error", "error": "Missing center_id"}
+                logger.debug(f"Record {record_id}: Missing center_id")
+                return {
+                    "status": "error",
+                    "error": "Missing center_id",
+                    "record_id": record_id,
+                }
+
             if not subject_data.get("local_subject_id"):
-                return {"status": "error", "error": "Missing local_subject_id"}
+                logger.debug(f"Record {record_id}: Missing local_subject_id")
+                return {
+                    "status": "error",
+                    "error": "Missing local_subject_id",
+                    "record_id": record_id,
+                }
 
             # Register/resolve GSID
-            gsid_result = self.gsid_client.register_subject(
-                center_id=subject_data["center_id"],
-                local_subject_id=subject_data["local_subject_id"],
-                identifier_type="primary",
-                created_by=f"redcap_{self.project_config.project_key}",
-            )
-            gsid = gsid_result["gsid"]
+            try:
+                gsid_result = self.gsid_client.register_subject(
+                    center_id=subject_data["center_id"],
+                    local_subject_id=subject_data["local_subject_id"],
+                    identifier_type="primary",
+                    created_by=f"redcap_{self.project_config.project_key}",
+                )
+                gsid = gsid_result["gsid"]
+                logger.debug(f"Record {record_id}: Registered GSID {gsid}")
+            except Exception as e:
+                logger.error(f"Record {record_id}: GSID registration failed: {e}")
+                return {
+                    "status": "error",
+                    "error": f"GSID registration failed: {str(e)}",
+                    "record_id": record_id,
+                }
 
             # Extract samples
             samples = self._extract_samples(record, gsid)
+            logger.debug(f"Record {record_id}: Extracted {len(samples)} samples")
 
             # Process record (insert samples into DB)
-            success = self.data_processor.process_record(record, gsid, samples)
-
-            if not success:
-                return {"status": "error", "error": "Failed to process record"}
+            try:
+                success = self.data_processor.process_record(record, gsid, samples)
+                if not success:
+                    return {
+                        "status": "error",
+                        "error": "Data processor returned False",
+                        "record_id": record_id,
+                    }
+            except Exception as e:
+                logger.error(f"Record {record_id}: Data processing failed: {e}")
+                return {
+                    "status": "error",
+                    "error": f"Data processing failed: {str(e)}",
+                    "record_id": record_id,
+                }
 
             # Create and upload fragment to S3
-            fragment = self.data_processor.create_fragment(gsid, record)
-            if fragment:
-                self.s3_uploader.upload_fragment(gsid, fragment)
+            try:
+                fragment = self.data_processor.create_fragment(gsid, record)
+                if fragment:
+                    self.s3_uploader.upload_fragment(gsid, fragment)
+                    logger.debug(
+                        f"Record {record_id}: Uploaded fragment for GSID {gsid}"
+                    )
+            except Exception as e:
+                logger.warning(f"Record {record_id}: S3 upload failed: {e}")
+                # Don't fail the whole record if S3 upload fails
 
-            return {"status": "success", "gsid": gsid}
+            return {"status": "success", "gsid": gsid, "record_id": record_id}
 
         except Exception as e:
-            logger.error(f"Error processing record: {e}", exc_info=True)
-            return {"status": "error", "error": str(e)}
+            logger.error(f"Record {record_id}: Unexpected error: {e}", exc_info=True)
+            return {
+                "status": "error",
+                "error": f"Unexpected error: {str(e)}",
+                "record_id": record_id,
+            }
 
     def _extract_subject_data(self, record: Dict) -> Dict:
         """Extract subject identification data from record"""
@@ -126,7 +184,10 @@ class REDCapPipeline:
         # Use get_or_create_center to handle fuzzy matching and creation
         center_id = None
         if center_name:
-            center_id = self.center_resolver.get_or_create_center(center_name)
+            try:
+                center_id = self.center_resolver.get_or_create_center(center_name)
+            except Exception as e:
+                logger.warning(f"Failed to resolve center '{center_name}': {e}")
 
         # Extract subject identifiers
         subject_id_field = demographics.get("local_subject_id", "subject_id")
