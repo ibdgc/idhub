@@ -2,9 +2,10 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List
 
-from core.config import settings
+from core.config import ProjectConfig, settings
 from core.database import get_db_connection, return_db_connection
 from psycopg2.extras import RealDictCursor
+
 from services.center_resolver import CenterResolver
 from services.gsid_client import GSIDClient
 
@@ -12,9 +13,25 @@ logger = logging.getLogger(__name__)
 
 
 class DataProcessor:
-    def __init__(self, gsid_client: GSIDClient, center_resolver: CenterResolver):
+    def __init__(
+        self,
+        gsid_client: GSIDClient,
+        center_resolver: CenterResolver,
+        project_config: ProjectConfig = None,
+    ):
         self.gsid_client = gsid_client
         self.center_resolver = center_resolver
+        self.project_config = project_config
+
+        # Use project_key for logging/tracking, redcap_project_id for REDCap API
+        if project_config:
+            self.project_key = project_config.project_key
+            self.redcap_project_id = project_config.redcap_project_id
+            self.project_name = project_config.project_name
+        else:
+            self.project_key = "default"
+            self.redcap_project_id = settings.REDCAP_PROJECT_ID
+            self.project_name = "Default Project"
 
     def extract_local_ids(self, record: Dict[str, Any], center_id: int) -> List[Dict]:
         """Extract all available local identifiers from record"""
@@ -80,7 +97,7 @@ class DataProcessor:
                     if existing and existing["global_subject_id"] != gsid:
                         # CONFLICT: Same local_id points to different GSID
                         logger.warning(
-                            f"CONFLICT: {identifier['local_subject_id']} already linked to "
+                            f"[{self.project_key}] CONFLICT: {identifier['local_subject_id']} already linked to "
                             f"{existing['global_subject_id']}, attempting to link to {gsid}"
                         )
 
@@ -93,9 +110,9 @@ class DataProcessor:
                             WHERE global_subject_id IN (%s, %s)
                             """,
                             (
-                                f"[{datetime.utcnow().isoformat()}] Duplicate local_id conflict: "
-                                f"{identifier['local_subject_id']} (type: {identifier['identifier_type']}) "
-                                f"linked to both {gsid} and {existing['global_subject_id']}",
+                                f"[{datetime.utcnow().isoformat()}] [{self.project_name} (REDCap ID: {self.redcap_project_id})] "
+                                f"Duplicate local_id conflict: {identifier['local_subject_id']} "
+                                f"(type: {identifier['identifier_type']}) linked to both {gsid} and {existing['global_subject_id']}",
                                 gsid,
                                 existing["global_subject_id"],
                             ),
@@ -117,8 +134,8 @@ class DataProcessor:
                                 "duplicate_local_id",
                                 0.0,
                                 True,
-                                f"Local ID already exists for GSID {existing['global_subject_id']}",
-                                "redcap_pipeline",
+                                f"[{self.project_name}] Local ID already exists for GSID {existing['global_subject_id']}",
+                                f"redcap_{self.project_key}",
                             ),
                         )
 
@@ -128,7 +145,7 @@ class DataProcessor:
                     elif existing and existing["global_subject_id"] == gsid:
                         # Already linked correctly, skip
                         logger.debug(
-                            f"ID {identifier['local_subject_id']} already linked to {gsid}"
+                            f"[{self.project_key}] ID {identifier['local_subject_id']} already linked to {gsid}"
                         )
                         continue
 
@@ -147,19 +164,26 @@ class DataProcessor:
                         ),
                     )
                     logger.info(
-                        f"Linked {identifier['identifier_type']}={identifier['local_subject_id']} -> {gsid}"
+                        f"[{self.project_key}] Linked {identifier['identifier_type']}={identifier['local_subject_id']} -> {gsid}"
                     )
+
             conn.commit()
         except Exception as e:
             conn.rollback()
-            logger.error(f"Error registering local IDs for {gsid}: {e}")
+            logger.error(
+                f"[{self.project_key}] Error registering local IDs for {gsid}: {e}"
+            )
             raise
         finally:
             return_db_connection(conn)
 
     def transform_value(self, field_name: str, value: Any) -> Any:
         """Apply transformations to field values"""
-        field_mappings = settings.load_field_mappings()
+        if self.project_config:
+            field_mappings = self.project_config.load_field_mappings()
+        else:
+            field_mappings = settings.load_field_mappings()
+
         transformations = field_mappings.get("transformations", {})
 
         if field_name not in transformations:
@@ -192,7 +216,7 @@ class DataProcessor:
 
         if not local_subject_id:
             raise ValueError(
-                f"No local_subject_id found in record: {record.get('record_id')}"
+                f"[{self.project_key}] No local_subject_id found in record: {record.get('record_id')}"
             )
 
         # Transform values
@@ -207,13 +231,18 @@ class DataProcessor:
             identifier_type=identifier_type,
             registration_year=registration_year,
             control=control,
+            created_by=f"redcap_{self.project_key}",
         )
 
         return result["gsid"], center_id
 
     def _process_specimens(self, record: Dict[str, Any], gsid: str):
         """Process and insert specimen records using field mappings"""
-        field_mappings = settings.load_field_mappings()
+        if self.project_config:
+            field_mappings = self.project_config.load_field_mappings()
+        else:
+            field_mappings = settings.load_field_mappings()
+
         conn = get_db_connection()
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -226,21 +255,23 @@ class DataProcessor:
                         if record.get(source_field):
                             cursor.execute(
                                 """
-                                INSERT INTO specimen (sample_id, global_subject_id, sample_type, redcap_event)
-                                VALUES (%s, %s, %s, %s)
+                                INSERT INTO specimen (sample_id, global_subject_id, sample_type, redcap_event, redcap_project_id)
+                                VALUES (%s, %s, %s, %s, %s)
                                 ON CONFLICT (sample_id) DO UPDATE SET
                                     sample_type = EXCLUDED.sample_type,
-                                    redcap_event = EXCLUDED.redcap_event
+                                    redcap_event = EXCLUDED.redcap_event,
+                                    redcap_project_id = EXCLUDED.redcap_project_id
                                 """,
                                 (
                                     record[source_field],
                                     gsid,
                                     sample_type,
                                     record.get("redcap_event_name"),
+                                    self.redcap_project_id,
                                 ),
                             )
                             logger.debug(
-                                f"Inserted specimen: {record[source_field]} (type: {sample_type})"
+                                f"[{self.project_key}] Inserted specimen: {record[source_field]} (type: {sample_type})"
                             )
 
                 # Handle family linkage
@@ -253,6 +284,7 @@ class DataProcessor:
                         """,
                         (record["family_id"],),
                     )
+
                     cursor.execute(
                         """
                         UPDATE subjects
@@ -262,11 +294,14 @@ class DataProcessor:
                         (record["family_id"], gsid),
                     )
 
-                logger.info(f"Inserted samples for GSID {gsid}")
+                logger.info(f"[{self.project_key}] Inserted samples for GSID {gsid}")
+
             conn.commit()
         except Exception as e:
             conn.rollback()
-            logger.error(f"Error inserting samples for {gsid}: {e}")
+            logger.error(
+                f"[{self.project_key}] Error inserting samples for {gsid}: {e}"
+            )
             raise
         finally:
             return_db_connection(conn)
@@ -285,14 +320,23 @@ class DataProcessor:
             # Insert samples
             self._process_specimens(record, gsid)
 
-            return {"status": "success", "gsid": gsid}
+            return {
+                "status": "success",
+                "gsid": gsid,
+                "project_key": self.project_key,
+                "redcap_project_id": self.redcap_project_id,
+            }
 
         except Exception as e:
-            logger.error(f"Error processing record {record.get('record_id')}: {str(e)}")
+            logger.error(
+                f"[{self.project_key}] Error processing record {record.get('record_id')}: {str(e)}"
+            )
             return {
                 "status": "error",
                 "error": str(e),
                 "record_id": record.get("record_id"),
+                "project_key": self.project_key,
+                "redcap_project_id": self.redcap_project_id,
             }
 
     def process_records(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

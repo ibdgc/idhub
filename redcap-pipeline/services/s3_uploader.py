@@ -16,7 +16,12 @@ class S3Uploader:
         self.bucket = settings.S3_BUCKET
 
     def create_curated_fragment(
-        self, record: Dict[str, Any], gsid: str, center_id: int
+        self,
+        record: Dict[str, Any],
+        gsid: str,
+        center_id: int,
+        project_key: str = "default",
+        redcap_project_id: str = None,
     ) -> Dict[str, Any]:
         """Create curated data fragment (PHI-free)"""
         fragment = {
@@ -26,6 +31,8 @@ class S3Uploader:
             "family": {},
             "metadata": {
                 "source": "redcap",
+                "project_key": project_key,
+                "redcap_project_id": redcap_project_id,
                 "pipeline_version": "1.0",
                 "processed_at": datetime.utcnow().isoformat(),
             },
@@ -34,10 +41,12 @@ class S3Uploader:
         # Group specimens by type from mappings
         specimen_types = {}
         field_mappings = settings.load_field_mappings()
+
         for mapping in field_mappings.get("mappings", []):
             if mapping.get("target_table") == "specimen":
                 source_field = mapping["source_field"]
                 sample_type = mapping.get("sample_type")
+
                 if record.get(source_field):
                     if sample_type not in specimen_types:
                         specimen_types[sample_type] = []
@@ -55,11 +64,22 @@ class S3Uploader:
 
         return fragment
 
-    def upload_fragment(self, record: Dict[str, Any], gsid: str, center_id: int) -> str:
+    def upload_fragment(
+        self,
+        record: Dict[str, Any],
+        gsid: str,
+        center_id: int,
+        project_key: str = "default",
+        redcap_project_id: str = None,
+    ) -> str:
         """Create and upload curated fragment to S3"""
-        fragment = self.create_curated_fragment(record, gsid, center_id)
+        fragment = self.create_curated_fragment(
+            record, gsid, center_id, project_key, redcap_project_id
+        )
 
-        key = f"subjects/{gsid}/{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
+        # Include project_key in S3 path for organization
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        key = f"subjects/{gsid}/redcap_{project_key}_{timestamp}.json"
 
         try:
             self.s3_client.put_object(
@@ -68,19 +88,35 @@ class S3Uploader:
                 Body=json.dumps(fragment, indent=2),
                 ContentType="application/json",
                 ServerSideEncryption="AES256",
+                Metadata={
+                    "project_key": project_key,
+                    "redcap_project_id": redcap_project_id or "unknown",
+                    "gsid": gsid,
+                    "center_id": str(center_id),
+                },
             )
-            logger.info(f"Uploaded fragment to s3://{self.bucket}/{key}")
+            logger.info(
+                f"[{project_key}] Uploaded fragment to s3://{self.bucket}/{key}"
+            )
             return key
         except ClientError as e:
-            logger.error(f"Failed to upload fragment to S3: {e}")
+            logger.error(f"[{project_key}] Failed to upload fragment to S3: {e}")
             raise
 
-    def upload_batch_summary(self, results: List[Dict[str, Any]], batch_id: str) -> str:
+    def upload_batch_summary(
+        self,
+        results: List[Dict[str, Any]],
+        batch_id: str,
+        project_key: str = "default",
+        redcap_project_id: str = None,
+    ) -> str:
         """Upload batch processing summary"""
-        key = f"batches/{batch_id}/summary.json"
+        key = f"batches/{project_key}/{batch_id}/summary.json"
 
         summary = {
             "batch_id": batch_id,
+            "project_key": project_key,
+            "redcap_project_id": redcap_project_id,
             "processed_at": datetime.utcnow().isoformat(),
             "total_records": len(results),
             "successful": sum(1 for r in results if r["status"] == "success"),
@@ -95,9 +131,16 @@ class S3Uploader:
                 Body=json.dumps(summary, indent=2),
                 ContentType="application/json",
                 ServerSideEncryption="AES256",
+                Metadata={
+                    "project_key": project_key,
+                    "redcap_project_id": redcap_project_id or "unknown",
+                    "batch_id": batch_id,
+                },
             )
-            logger.info(f"Uploaded batch summary to s3://{self.bucket}/{key}")
+            logger.info(
+                f"[{project_key}] Uploaded batch summary to s3://{self.bucket}/{key}"
+            )
             return key
         except ClientError as e:
-            logger.error(f"Failed to upload batch summary: {e}")
+            logger.error(f"[{project_key}] Failed to upload batch summary: {e}")
             raise

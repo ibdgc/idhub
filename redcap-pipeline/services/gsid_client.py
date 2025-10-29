@@ -24,6 +24,7 @@ class GSIDClient:
         identifier_type: str = "primary",
         registration_year: Optional[int] = None,
         control: bool = False,
+        created_by: str = "redcap_pipeline",
     ) -> Dict[str, Any]:
         """Register subject with GSID service"""
         payload = {
@@ -32,7 +33,7 @@ class GSIDClient:
             "identifier_type": identifier_type,
             "registration_year": registration_year,
             "control": control,
-            "created_by": "redcap_pipeline",
+            "created_by": created_by,
         }
 
         try:
@@ -41,19 +42,16 @@ class GSIDClient:
             )
             response.raise_for_status()
             result = response.json()
-
             logger.info(
-                f"Registered {local_subject_id} ({identifier_type}) -> "
+                f"[{created_by}] Registered {local_subject_id} ({identifier_type}) -> "
                 f"GSID {result['gsid']} ({result['action']})"
             )
             return result
         except requests.exceptions.RequestException as e:
-            logger.error(f"GSID registration failed: {e}")
+            logger.error(f"[{created_by}] GSID registration failed: {e}")
             raise
 
-    def register_batch(
-        self, subjects: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
+    def register_batch(self, subjects: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Register multiple subjects in batch"""
         payload = {"requests": subjects}
 
@@ -66,3 +64,4 @@ class GSIDClient:
         except requests.exceptions.RequestException as e:
             logger.error(f"Batch registration failed: {e}")
             raise
+

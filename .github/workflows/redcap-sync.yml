@@ -1,19 +1,21 @@
+---
 # .github/workflows/redcap-sync.yml
 name: REDCap Sync Pipeline
-
 on:
   schedule:
-    - cron: '0 2 * * *'  # Daily at 2 AM UTC
-  workflow_dispatch:      # Manual trigger
-
+    - cron: 0 2 * * *  # Daily at 2 AM UTC
+  workflow_dispatch:
+    inputs:
+      project_key:
+        description: Specific project to sync (leave empty for all enabled projects)
+        required: false
+        type: string
 jobs:
   sync:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-
       - name: Set up SSH tunnel
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
@@ -24,14 +26,14 @@ jobs:
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts
-    
+
           # Start SSH tunnel with verbose logging and keep-alive
           ssh -4 -v -f -N \
             -o ServerAliveInterval=60 \
             -o ServerAliveCountMax=3 \
             -L 127.0.0.1:5432:127.0.0.1:5432 \
             $SSH_USER@$SSH_HOST
-    
+
           # Wait and verify tunnel
           echo "Waiting for SSH tunnel..."
           for i in {1..30}; do
@@ -42,46 +44,75 @@ jobs:
             echo "Attempt $i/30..."
             sleep 2
           done
-    
           echo "Tunnel failed to establish"
           exit 1
-
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-
       - name: Install dependencies
         run: |
           cd redcap-pipeline
           pip install -r requirements.txt
-
       - name: Create logs directory
         run: mkdir -p redcap-pipeline/logs
-
       - name: Run REDCap pipeline
         env:
+          # REDCap Configuration
           REDCAP_API_URL: ${{ secrets.REDCAP_API_URL }}
-          REDCAP_API_TOKEN: ${{ secrets.REDCAP_API_TOKEN }}
+
+          # Project-specific API tokens
+          REDCAP_PRIMARY_TOKEN: ${{ secrets.REDCAP_PRIMARY_TOKEN }}
+          REDCAP_LEGACY_TOKEN: ${{ secrets.REDCAP_LEGACY_TOKEN }}
+          REDCAP_TRIAL001_TOKEN: ${{ secrets.REDCAP_TRIAL001_TOKEN }}
+
+          # Legacy support (optional)
+          REDCAP_API_TOKEN: ${{ secrets.REDCAP_PRIMARY_TOKEN }}
           REDCAP_PROJECT_ID: ${{ secrets.REDCAP_PROJECT_ID }}
+
+          # GSID Service
           GSID_SERVICE_URL: https://api.idhub.ibdgc.org
           GSID_API_KEY: ${{ secrets.GSID_API_KEY }}
+
+          # Database
           DB_HOST: localhost
           DB_NAME: idhub
           DB_USER: idhub_user
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+
+          # AWS
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: us-east-1
           S3_BUCKET: idhub-curated-fragments
+
+          # Optional: specific project override
+          PROJECT_KEY: ${{ github.event.inputs.project_key }}
         run: |
           cd redcap-pipeline
-          python main.py
-
+          if [ -n "$PROJECT_KEY" ]; then
+            echo "Running pipeline for specific project: $PROJECT_KEY"
+            python main.py --project "$PROJECT_KEY"
+          else
+            echo "Running pipeline for all enabled projects"
+            python main.py --all
+          fi
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pipeline-logs
+          name: pipeline-logs-${{ github.run_id }}
           path: redcap-pipeline/logs/
           retention-days: 30
+      - name: Notify on failure
+        if: failure()
+        uses: actions/github-script@v6
+        with:
+          script: |-
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🚨 REDCap Pipeline Failed',
+              body: `Pipeline run failed: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              labels: ['pipeline-failure', 'automated']
+            })

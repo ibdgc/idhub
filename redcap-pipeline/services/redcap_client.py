@@ -1,82 +1,126 @@
 # redcap-pipeline/services/redcap_client.py
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
-from core.config import settings
+from core.config import ProjectConfig, settings
 
 logger = logging.getLogger(__name__)
 
 
 class REDCapClient:
-    def __init__(self):
-        self.api_url = settings.REDCAP_API_URL
-        self.api_token = settings.REDCAP_API_TOKEN
+    def __init__(self, project_config: Optional[ProjectConfig] = None):
+        """
+        Initialize REDCap client
 
-    def fetch_records(self) -> List[Dict[str, Any]]:
-        """Fetch all records from REDCap with data access groups"""
+        Args:
+            project_config: Project-specific configuration. If None, uses legacy env vars.
+        """
+        if project_config:
+            self.api_url = settings.REDCAP_API_URL
+            self.api_token = project_config.api_token
+            self.project_id = project_config.redcap_project_id
+            self.project_key = project_config.project_key
+            self.project_name = project_config.project_name
+        else:
+            # Legacy mode
+            self.api_url = settings.REDCAP_API_URL
+            self.api_token = settings.REDCAP_API_TOKEN
+            self.project_id = settings.REDCAP_PROJECT_ID
+            self.project_key = "default"
+            self.project_name = "Default Project"
+
+        self.session = requests.Session()
+        logger.info(
+            f"Initialized REDCap client for project: {self.project_name} "
+            f"(REDCap ID: {self.project_id}, Key: {self.project_key})"
+        )
+
+    def fetch_records_batch(
+        self, batch_size: int = 50, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Fetch records in batches with pagination"""
         payload = {
             "token": self.api_token,
             "content": "record",
             "format": "json",
             "type": "flat",
             "rawOrLabel": "raw",
-            "exportDataAccessGroups": "true",  # This is critical!
+            "rawOrLabelHeaders": "raw",
+            "exportCheckboxLabel": "false",
+            "exportSurveyFields": "false",
+            "exportDataAccessGroups": "true",
+            "returnFormat": "json",
         }
 
         try:
-            logger.info(f"Fetching records from REDCap API: {self.api_url}")
-            logger.debug(f"Payload: {payload}")
-            
-            response = requests.post(self.api_url, data=payload, timeout=60)
+            response = self.session.post(self.api_url, data=payload, timeout=60)
             response.raise_for_status()
-            records = response.json()
-            
-            logger.info(f"Fetched {len(records)} records from REDCap")
-            
-            # Debug: Check first record
-            if records:
-                logger.info(f"Sample record keys: {list(records[0].keys())}")
-                logger.info(f"Sample record: {records[0]}")
-                
-                # Check for DAG field
-                dag_field = records[0].get("redcap_data_access_group")
-                logger.info(f"First record DAG value: '{dag_field}'")
-                
-                # Count records with DAG
-                records_with_dag = sum(1 for r in records if r.get("redcap_data_access_group"))
-                logger.info(f"Records with DAG: {records_with_dag}/{len(records)}")
-            
-            return records
-            
-        except Exception as e:
-            logger.error(f"Error fetching REDCap records: {e}")
+            all_records = response.json()
+
+            # Apply pagination
+            paginated = all_records[offset : offset + batch_size]
+
+            logger.info(
+                f"[{self.project_key}] Fetched {len(paginated)} records "
+                f"(offset={offset}, total={len(all_records)})"
+            )
+
+            return paginated
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"[{self.project_key}] Failed to fetch REDCap records: {e}")
             raise
 
-    def fetch_records_batch(
-        self, batch_size: int = 100, offset: int = 0
-    ) -> List[Dict[str, Any]]:
-        """Fetch records in batches"""
-        logger.info(f"Fetching batch: offset={offset}, limit={batch_size}")
-
-        all_records = self.fetch_records()
-        return all_records[offset : offset + batch_size]
-
-    def fetch_metadata(self) -> List[Dict[str, Any]]:
-        """Fetch field metadata from REDCap"""
+    def fetch_all_records(self) -> List[Dict[str, Any]]:
+        """Fetch all records from the project"""
         payload = {
             "token": self.api_token,
-            "content": "metadata",
+            "content": "record",
             "format": "json",
+            "type": "flat",
+            "rawOrLabel": "raw",
+            "rawOrLabelHeaders": "raw",
+            "exportCheckboxLabel": "false",
+            "exportSurveyFields": "false",
+            "exportDataAccessGroups": "true",
+            "returnFormat": "json",
         }
 
         try:
-            response = requests.post(self.api_url, data=payload, timeout=60)
+            response = self.session.post(self.api_url, data=payload, timeout=60)
             response.raise_for_status()
-            metadata = response.json()
-            logger.info(f"Fetched metadata for {len(metadata)} fields")
-            return metadata
-        except Exception as e:
-            logger.error(f"Error fetching REDCap metadata: {e}")
+            records = response.json()
+
+            logger.info(f"[{self.project_key}] Fetched {len(records)} total records")
+            return records
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"[{self.project_key}] Failed to fetch REDCap records: {e}")
             raise
 
+    def get_project_info(self) -> Dict[str, Any]:
+        """Get project metadata from REDCap"""
+        payload = {
+            "token": self.api_token,
+            "content": "project",
+            "format": "json",
+            "returnFormat": "json",
+        }
+
+        try:
+            response = self.session.post(self.api_url, data=payload, timeout=30)
+            response.raise_for_status()
+            info = response.json()
+
+            logger.info(
+                f"[{self.project_key}] Project info: "
+                f"REDCap ID={info.get('project_id')}, "
+                f"Title={info.get('project_title')}"
+            )
+
+            return info
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"[{self.project_key}] Failed to fetch project info: {e}")
+            raise

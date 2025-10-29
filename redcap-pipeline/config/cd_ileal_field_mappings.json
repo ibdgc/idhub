@@ -1,0 +1,194 @@
+{
+  "mappings": [
+    {
+      "source_field": "redcap_data_access_group",
+      "target_table": "centers",
+      "target_field": "name"
+    },
+    {
+      "source_field": "pax_repo",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "pax_repo"
+    },
+    {
+      "source_field": "pax_local",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "pax_local"
+    },
+    {
+      "source_field": "serum_1",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_2",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_3",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_4",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_5",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_6",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_7",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_8",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_9",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_10",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_11",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_12",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_13",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_14",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_15",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_16",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_17",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_18",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_19",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_20",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_21",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_22",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_23",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_24",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_25",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_26",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_27",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "serum_28",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "serum"
+    },
+    {
+      "source_field": "consortium_id",
+      "target_table": "local_subject_ids",
+      "target_field": "local_subject_id"
+    }
+  ]
+}

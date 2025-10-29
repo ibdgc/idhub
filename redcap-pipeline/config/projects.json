@@ -1,0 +1,34 @@
+{
+  "projects": {
+    "primary_biobank": {
+      "name": "IBDGC Primary Biobank",
+      "redcap_project_id": "16894",
+      "api_token": "${REDCAP_API_TOKEN}",
+      "field_mappings": "gap_field_mappings.json",
+      "schedule": "continuous",
+      "batch_size": 50,
+      "enabled": true,
+      "description": "Main biobank project - continuous integration"
+    },
+    "legacy_samples": {
+      "name": "Post-op CD Ileal",
+      "redcap_project_id": "16899",
+      "api_token": "${REDCAP_API_TOKEN}",
+      "field_mappings": "cd_ileal_field_mappings.json",
+      "schedule": "manual",
+      "batch_size": 50,
+      "enabled": true,
+      "description": "Legacy sample collection - manual integration"
+    },
+    "clinical_trial_001": {
+      "name": "Clinical Trial 001",
+      "redcap_project_id": "11223",
+      "api_token": "${REDCAP_TRIAL001_TOKEN}",
+      "field_mappings": "field_mappings_trial.json",
+      "schedule": "manual",
+      "batch_size": 50,
+      "enabled": false,
+      "description": "Clinical trial data - ad hoc integration"
+    }
+  }
+}
