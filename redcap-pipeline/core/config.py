@@ -1,8 +1,12 @@
 import json
+import logging
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class ProjectConfig:
@@ -22,6 +26,13 @@ class ProjectConfig:
         self.batch_size = config.get("batch_size", 50)
         self.enabled = config.get("enabled", True)
         self.description = config.get("description", "")
+
+        # Validate that token was resolved
+        if not self.api_token or self.api_token.startswith("${"):
+            raise ValueError(
+                f"API token for project '{project_key}' not properly configured. "
+                f"Token value: {self.api_token}"
+            )
 
     def load_field_mappings(self) -> dict:
         """Load project-specific field mappings"""
@@ -74,21 +85,49 @@ class Settings:
     }
 
     @staticmethod
+    def _resolve_env_var(value: str) -> str:
+        """
+        Resolve environment variable references in config values.
+        Supports ${ENV_VAR} and $ENV_VAR syntax.
+        """
+        if not isinstance(value, str):
+            return value
+
+        # Pattern to match ${VAR} or $VAR
+        pattern = r"\$\{([^}]+)\}|\$([A-Za-z_][A-Za-z0-9_]*)"
+
+        def replacer(match):
+            var_name = match.group(1) or match.group(2)
+            env_value = os.getenv(var_name)
+            if env_value is None:
+                logger.warning(f"Environment variable '{var_name}' not found")
+                return match.group(0)  # Return original if not found
+            return env_value
+
+        return re.sub(pattern, replacer, value)
+
+    @staticmethod
     @lru_cache(maxsize=None)
     def load_projects_config() -> Dict[str, ProjectConfig]:
         """Load multi-project configuration"""
         config_path = Path(__file__).parent.parent / "config" / "projects.json"
 
         if not config_path.exists():
+            logger.info("No projects.json found, using legacy single-project mode")
             # Fallback to legacy single-project mode using env variables
             project_key = "default"
+            api_token = os.getenv("REDCAP_API_TOKEN")
+
+            if not api_token:
+                raise ValueError("REDCAP_API_TOKEN environment variable not set")
+
             return {
                 project_key: ProjectConfig(
                     project_key,
                     {
                         "name": os.getenv("REDCAP_PROJECT_NAME", "Default Project"),
                         "redcap_project_id": os.getenv("REDCAP_PROJECT_ID", "unknown"),
-                        "api_token": os.getenv("REDCAP_API_TOKEN"),
+                        "api_token": api_token,
                         "field_mappings": "field_mappings.json",
                         "schedule": "continuous",
                         "enabled": True,
@@ -96,25 +135,49 @@ class Settings:
                 )
             }
 
+        logger.info(f"Loading projects configuration from {config_path}")
+
         with open(config_path) as f:
             projects_data = json.load(f)
 
-        # Resolve environment variables in tokens and project IDs
+        # Resolve environment variables in all config values
         projects = {}
         for project_key, config in projects_data["projects"].items():
-            # Replace ${ENV_VAR} with actual environment variable
-            if "api_token" in config and config["api_token"].startswith("${"):
-                env_var = config["api_token"].strip("${}")
-                config["api_token"] = os.getenv(env_var)
+            # Resolve all string values in config
+            resolved_config = {}
+            for key, value in config.items():
+                if isinstance(value, str):
+                    resolved_value = Settings._resolve_env_var(value)
+                    resolved_config[key] = resolved_value
 
-            # Also support env vars for project IDs (optional)
-            if "redcap_project_id" in config and str(
-                config["redcap_project_id"]
-            ).startswith("${"):
-                env_var = str(config["redcap_project_id"]).strip("${}")
-                config["redcap_project_id"] = os.getenv(env_var)
+                    # Log token resolution (masked)
+                    if key == "api_token":
+                        if resolved_value and not resolved_value.startswith("${"):
+                            logger.info(
+                                f"Project '{project_key}': API token resolved "
+                                f"(length: {len(resolved_value)})"
+                            )
+                        else:
+                            logger.error(
+                                f"Project '{project_key}': API token NOT resolved! "
+                                f"Value: {resolved_value}"
+                            )
+                else:
+                    resolved_config[key] = value
 
-            projects[project_key] = ProjectConfig(project_key, config)
+            try:
+                projects[project_key] = ProjectConfig(project_key, resolved_config)
+                logger.info(
+                    f"✓ Loaded project '{project_key}': {resolved_config.get('name')} "
+                    f"(REDCap ID: {resolved_config.get('redcap_project_id')})"
+                )
+            except ValueError as e:
+                logger.error(f"✗ Failed to load project '{project_key}': {e}")
+                # Don't add this project to the list
+                continue
+
+        if not projects:
+            raise ValueError("No valid projects found in configuration")
 
         return projects
 
