@@ -20,7 +20,6 @@ class REDCapPipeline:
         self.center_resolver = CenterResolver()
         self.data_processor = DataProcessor(project_config)
         self.s3_uploader = S3Uploader()
-
         # Load field mappings to know which fields to extract
         self.field_mappings = project_config.load_field_mappings()
 
@@ -42,7 +41,6 @@ class REDCapPipeline:
         try:
             while True:
                 records = self.redcap_client.fetch_records_batch(batch_size, offset)
-
                 if not records:
                     logger.info("No more records to process")
                     break
@@ -89,14 +87,16 @@ class REDCapPipeline:
     def _process_single_record(self, record: Dict) -> Dict:
         """Process a single REDCap record"""
         record_id = record.get("record_id", "unknown")
-
         try:
             # Extract subject identifiers
             subject_data = self._extract_subject_data(record)
 
             # Validate required fields
             if not subject_data.get("center_id"):
-                logger.debug(f"Record {record_id}: Missing center_id")
+                logger.debug(
+                    f"Record {record_id}: Missing center_id "
+                    f"(center_name: {subject_data.get('center_name', 'N/A')})"
+                )
                 return {
                     "status": "error",
                     "error": "Missing center_id",
@@ -177,9 +177,19 @@ class REDCapPipeline:
         # Get demographics mapping
         demographics = self.field_mappings.get("demographics", {})
 
-        # Extract center name and resolve to center_id
-        center_field = demographics.get("center_name", "center_name")
-        center_name = record.get(center_field, "")
+        # Extract center name - try multiple possible field names
+        center_name = None
+        center_field = demographics.get("center_name")
+
+        if center_field and center_field in record:
+            center_name = record.get(center_field)
+        else:
+            # Fallback: try common REDCap field names
+            for field in ["redcap_data_access_group", "center_name", "center", "site"]:
+                if field in record and record[field]:
+                    center_name = record[field]
+                    logger.debug(f"Found center name in field '{field}': {center_name}")
+                    break
 
         # Use get_or_create_center to handle fuzzy matching and creation
         center_id = None
@@ -189,14 +199,27 @@ class REDCapPipeline:
             except Exception as e:
                 logger.warning(f"Failed to resolve center '{center_name}': {e}")
 
-        # Extract subject identifiers
-        subject_id_field = demographics.get("local_subject_id", "subject_id")
-        local_subject_id = record.get(subject_id_field, record.get("record_id"))
+        # Extract subject identifiers - try multiple possible fields
+        local_subject_id = None
+        subject_id_field = demographics.get("local_subject_id")
+
+        if subject_id_field and subject_id_field in record:
+            local_subject_id = record.get(subject_id_field)
+        else:
+            # Fallback: try common field names
+            for field in ["local_id", "consortium_id", "subject_id", "record_id"]:
+                if field in record and record[field]:
+                    local_subject_id = record[field]
+                    logger.debug(
+                        f"Found subject ID in field '{field}': {local_subject_id}"
+                    )
+                    break
 
         # Build subject data
         subject_data = {
             "local_subject_id": local_subject_id,
             "center_id": center_id,
+            "center_name": center_name,  # Include for debugging
         }
 
         return subject_data
@@ -207,7 +230,6 @@ class REDCapPipeline:
 
         # Get specimen mapping
         specimen_fields = self.field_mappings.get("specimen", {})
-
         if not specimen_fields:
             logger.debug(
                 f"No specimen field mappings defined for {self.project_config.project_key}"
