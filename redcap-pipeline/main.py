@@ -1,79 +1,53 @@
-#!/usr/bin/env python3
-import logging
 import sys
-
-from core.config import settings
-from core.database import close_db_pool
+import logging
 from services.pipeline import REDCapPipeline
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+from core.database import close_db_pool
+from core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
 def main():
-    """Main entry point for REDCap pipeline"""
+    """Main entry point for REDCap pipeline - processes all enabled projects"""
     try:
-        # Load all project configurations
-        projects = settings.load_projects_config()
+        # Load all enabled projects
+        projects = settings.get_enabled_projects()
 
-        # Filter to only enabled projects with continuous schedule
-        continuous_projects = {
-            key: config
-            for key, config in projects.items()
-            if config.enabled and config.schedule == "continuous"
-        }
-
-        if not continuous_projects:
-            logger.warning("No enabled continuous projects found")
+        if not projects:
+            logger.warning("No enabled projects found")
             return 0
 
-        logger.info(f"Running pipeline for {len(continuous_projects)} projects")
+        logger.info(f"Processing {len(projects)} enabled projects: {[p['key'] for p in projects]}")
 
-        total_results = []
+        total_success = 0
+        total_errors = 0
 
-        for project_key, project_config in continuous_projects.items():
+        # Process each project
+        for project_config in projects:
+            project_key = project_config['key']
+            logger.info("")
             logger.info("=" * 80)
-            logger.info(
-                f"Processing project: {project_key} ({project_config.project_name})"
-            )
+            logger.info(f"Starting pipeline for project: {project_key}")
             logger.info("=" * 80)
 
             try:
                 pipeline = REDCapPipeline(project_config)
-                result = pipeline.run()
-                total_results.append(result)
+                result = pipeline.run(batch_size=project_config.get('batch_size', 50))
 
-                logger.info(
-                    f"✓ {project_key} complete: {result['total_success']} success, "
-                    f"{result['total_errors']} errors"
-                )
+                total_success += result.get('total_success', 0)
+                total_errors += result.get('total_errors', 0)
+
+                logger.info(f"✓ {project_key} complete: {result.get('total_success', 0)} success, {result.get('total_errors', 0)} errors")
+
             except Exception as e:
-                logger.error(f"✗ {project_key} failed: {e}", exc_info=True)
-                total_results.append(
-                    {
-                        "project_key": project_key,
-                        "project_name": project_config.project_name,
-                        "total_success": 0,
-                        "total_errors": 0,
-                        "error": str(e),
-                    }
-                )
+                logger.error(f"✗ Pipeline failed for {project_key}: {e}", exc_info=True)
+                total_errors += 1
 
-        # Summary
         logger.info("")
         logger.info("=" * 80)
         logger.info("PIPELINE SUMMARY")
         logger.info("=" * 80)
-        for result in total_results:
-            status = "✓" if "error" not in result else "✗"
-            logger.info(
-                f"{status} {result['project_key']}: "
-                f"{result['total_success']} success, {result['total_errors']} errors"
-            )
+        logger.info(f"Total: {total_success} success, {total_errors} errors")
 
         return 0
 
