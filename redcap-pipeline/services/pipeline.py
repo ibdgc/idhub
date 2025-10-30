@@ -45,6 +45,24 @@ class REDCapPipeline:
 
         return "Unknown"
 
+    def extract_local_subject_id(self, record: Dict[str, Any]) -> str:
+        """Extract local subject ID from REDCap record"""
+        # Try common fields for subject ID
+        subject_id_fields = [
+            "subject_id",
+            "patient_id",
+            "participant_id",
+            "study_id",
+            "record_id",
+        ]
+
+        for field in subject_id_fields:
+            if field in record and record[field]:
+                return str(record[field])
+
+        # Fallback to record_id
+        return str(record.get("record_id", "unknown"))
+
     def extract_samples(self, record: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Extract sample information from a REDCap record"""
         samples = []
@@ -112,30 +130,40 @@ class REDCapPipeline:
                             )
                             continue
 
-                        # Get center name from cache
-                        center_name = self.center_resolver.center_names.get(
-                            center_id, center_name_raw
-                        )
+                        # Extract local subject ID
+                        local_subject_id = self.extract_local_subject_id(record)
 
-                        # Get or create GSID
-                        gsid_result = self.gsid_client.get_or_create_gsid(
-                            first_name=record.get("first_name"),
-                            last_name=record.get("last_name"),
-                            date_of_birth=record.get("date_of_birth"),
-                            center_name=center_name,
-                        )
+                        # Register subject and get GSID
+                        try:
+                            gsid_result = self.gsid_client.register_subject(
+                                center_id=center_id,
+                                local_subject_id=local_subject_id,
+                                identifier_type="primary",
+                                registration_year=None,  # Could extract from record if available
+                                control=False,
+                                created_by=f"redcap_pipeline_{self.project_key}",
+                            )
 
-                        if not gsid_result or not gsid_result.get("gsid"):
+                            gsid = gsid_result.get("gsid")
+                            if not gsid:
+                                logger.warning(
+                                    f"[{self.project_key}] Record {record_id}: No GSID returned"
+                                )
+                                total_errors += 1
+                                error_summary["GSID creation failed"] = (
+                                    error_summary.get("GSID creation failed", 0) + 1
+                                )
+                                continue
+
+                        except Exception as e:
                             logger.warning(
-                                f"[{self.project_key}] Record {record_id}: GSID creation failed"
+                                f"[{self.project_key}] Record {record_id}: GSID registration failed: {e}"
                             )
                             total_errors += 1
-                            error_summary["GSID creation failed"] = (
-                                error_summary.get("GSID creation failed", 0) + 1
+                            error_summary["GSID registration failed"] = (
+                                error_summary.get("GSID registration failed", 0) + 1
                             )
                             continue
-
-                        gsid = gsid_result["gsid"]
 
                         # Extract samples
                         samples = self.extract_samples(record)
