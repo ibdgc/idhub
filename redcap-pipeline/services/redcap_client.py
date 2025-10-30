@@ -3,7 +3,6 @@ import time
 from typing import Dict, List
 
 import requests
-from core.config import ProjectConfig
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -11,12 +10,27 @@ logger = logging.getLogger(__name__)
 
 
 class REDCapClient:
-    def __init__(self, project_config: ProjectConfig):
+    def __init__(self, project_config: dict):
+        """Initialize REDCap client for a specific project"""
         self.project_config = project_config
-        self.api_url = (
-            project_config.redcap_api_url
-        )  # Changed from api_url to redcap_api_url
-        self.api_token = project_config.api_token
+        self.project_key = project_config.get("key")
+        self.project_name = project_config.get("name")
+        self.redcap_project_id = project_config.get("redcap_project_id")
+
+        # Get API URL - use project-specific or fall back to global
+        self.api_url = project_config.get("redcap_api_url")
+        if not self.api_url:
+            # Fall back to global REDCAP_API_URL from environment
+            from core.config import settings
+
+            self.api_url = settings.REDCAP_API_URL
+
+        self.api_token = project_config.get("api_token")
+
+        if not self.api_url:
+            raise ValueError(f"Project {self.project_key}: redcap_api_url is required")
+        if not self.api_token:
+            raise ValueError(f"Project {self.project_key}: api_token is required")
 
         # Create session with retry logic
         self.session = requests.Session()
@@ -31,10 +45,10 @@ class REDCapClient:
         self.session.mount("http://", adapter)
 
         logger.info(
-            f"Initialized REDCap client for project: {project_config.project_name} "
-            f"(REDCap ID: {project_config.redcap_project_id}, "
-            f"Key: {project_config.project_key}, "
-            f"Token: {project_config.api_token[:4]}...{project_config.api_token[-4:]})"
+            f"Initialized REDCap client for project: {self.project_name} "
+            f"(REDCap ID: {self.redcap_project_id}, "
+            f"Key: {self.project_key}, "
+            f"Token: {self.api_token[:4]}...{self.api_token[-4:]})"
         )
 
     def fetch_records_batch(
@@ -60,7 +74,7 @@ class REDCapClient:
         for attempt in range(max_retries):
             try:
                 logger.debug(
-                    f"[{self.project_config.project_key}] Fetching records "
+                    f"[{self.project_key}] Fetching records "
                     f"(batch_size={batch_size}, offset={offset}, timeout={timeout}s, "
                     f"attempt={attempt + 1}/{max_retries})"
                 )
@@ -75,15 +89,16 @@ class REDCapClient:
                 paginated_records = all_records[offset : offset + batch_size]
 
                 logger.info(
-                    f"[{self.project_config.project_key}] Fetched {len(paginated_records)} records "
+                    f"[{self.project_key}] Fetched {len(paginated_records)} records "
                     f"(offset={offset}, total={len(all_records)})"
                 )
+
                 return paginated_records
 
             except requests.exceptions.Timeout as e:
                 if attempt < max_retries - 1:
                     logger.warning(
-                        f"[{self.project_config.project_key}] Request timed out "
+                        f"[{self.project_key}] Request timed out "
                         f"(attempt {attempt + 1}/{max_retries}). "
                         f"Retrying in {retry_delay}s..."
                     )
@@ -92,14 +107,13 @@ class REDCapClient:
                     timeout = min(timeout * 1.5, 300)  # Increase timeout, max 5 min
                 else:
                     logger.error(
-                        f"[{self.project_config.project_key}] Failed to fetch records "
+                        f"[{self.project_key}] Failed to fetch records "
                         f"after {max_retries} attempts: {e}"
                     )
                     raise
+
             except requests.exceptions.RequestException as e:
-                logger.error(
-                    f"[{self.project_config.project_key}] Failed to fetch records: {e}"
-                )
+                logger.error(f"[{self.project_key}] Failed to fetch records: {e}")
                 raise
 
         return []
