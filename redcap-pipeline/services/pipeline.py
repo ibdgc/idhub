@@ -22,18 +22,35 @@ class REDCapPipeline:
         self.data_processor = DataProcessor(project_config)
         self.s3_uploader = S3Uploader()
 
+    def extract_center_name(self, record: Dict[str, Any]) -> str:
+        """Extract center name from REDCap record"""
+        # Try common REDCap fields for center/site information
+        center_fields = [
+            "redcap_data_access_group",
+            "data_access_group",
+            "center",
+            "site",
+            "center_name",
+            "site_name",
+        ]
+
+        for field in center_fields:
+            if field in record and record[field]:
+                return str(record[field])
+
+        # Fall back to project's default center if configured
+        default_center = self.project_config.get("default_center")
+        if default_center:
+            return default_center
+
+        return "Unknown"
+
     def extract_samples(self, record: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Extract sample information from a REDCap record"""
         samples = []
 
         # This is a simplified version - you may need to customize based on your REDCap structure
         # Look for sample-related fields in the record
-        sample_fields = [
-            "specimen_id",
-            "sample_type",
-            "collection_date",
-            "storage_location",
-        ]
 
         # Check if this record has sample data
         if record.get("specimen_id"):
@@ -55,7 +72,7 @@ class REDCapPipeline:
         batch_size = self.project_config.get("batch_size", batch_size)
 
         logger.info(
-            f"Starting REDCap pipeline for {self.project_key} (batch mode, batch_size={batch_size})..."
+            f"[{self.project_key}] Starting REDCap pipeline (batch_size={batch_size})..."
         )
 
         offset = 0
@@ -79,17 +96,26 @@ class REDCapPipeline:
                     record_id = record.get("record_id", "unknown")
 
                     try:
-                        # Resolve center
-                        center_name = self.center_resolver.resolve_center(record)
-                        if not center_name:
+                        # Extract and resolve center
+                        center_name_raw = self.extract_center_name(record)
+                        center_id = self.center_resolver.get_or_create_center(
+                            center_name_raw
+                        )
+
+                        if not center_id:
                             logger.warning(
-                                f"[{self.project_key}] Record {record_id}: Could not resolve center"
+                                f"[{self.project_key}] Record {record_id}: Could not resolve center '{center_name_raw}'"
                             )
                             total_errors += 1
                             error_summary["Center resolution failed"] = (
                                 error_summary.get("Center resolution failed", 0) + 1
                             )
                             continue
+
+                        # Get center name from cache
+                        center_name = self.center_resolver.center_names.get(
+                            center_id, center_name_raw
+                        )
 
                         # Get or create GSID
                         gsid_result = self.gsid_client.get_or_create_gsid(
@@ -110,7 +136,6 @@ class REDCapPipeline:
                             continue
 
                         gsid = gsid_result["gsid"]
-                        center_id = gsid_result.get("center_id")
 
                         # Extract samples
                         samples = self.extract_samples(record)
