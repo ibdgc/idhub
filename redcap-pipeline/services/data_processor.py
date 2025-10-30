@@ -8,14 +8,36 @@ logger = logging.getLogger(__name__)
 
 
 class DataProcessor:
-    def __init__(
-        self,
-        project_config: "ProjectConfig",
-    ):
+    def __init__(self, project_config: dict):
+        """Initialize DataProcessor with project configuration"""
         self.project_config = project_config
-        self.project_key = project_config.project_key
-        self.project_name = project_config.project_name
-        self.field_mappings = project_config.load_field_mappings()
+        self.project_key = project_config.get("key")
+        self.project_name = project_config.get("name")
+        self.field_mappings = self.load_field_mappings()
+
+    def load_field_mappings(self) -> Dict:
+        """Load field mappings from configuration file"""
+        import json
+        from pathlib import Path
+
+        mapping_file = self.project_config.get("field_mappings")
+        if not mapping_file:
+            logger.warning(f"[{self.project_key}] No field mappings configured")
+            return {}
+
+        mapping_path = Path(__file__).parent.parent / "config" / mapping_file
+
+        if not mapping_path.exists():
+            logger.warning(
+                f"[{self.project_key}] Field mappings file not found: {mapping_path}"
+            )
+            return {}
+
+        with open(mapping_path) as f:
+            mappings = json.load(f)
+
+        logger.info(f"[{self.project_key}] Loaded field mappings from {mapping_file}")
+        return mappings
 
     def insert_samples(self, gsid: str, samples: List[Dict[str, Any]]) -> bool:
         """Insert sample records into the database"""
@@ -43,7 +65,6 @@ class DataProcessor:
             """
 
             now = datetime.utcnow()
-
             conn = get_db_connection()
             try:
                 with conn.cursor() as cursor:
