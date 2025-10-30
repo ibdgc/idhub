@@ -1,8 +1,8 @@
-import os
 import json
+import logging
+import os
 from pathlib import Path
 from typing import List
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -57,15 +57,37 @@ class Settings:
         with open(config_path) as f:
             config = json.load(f)
 
+        projects_dict = config.get("projects", {})
+
+        if not isinstance(projects_dict, dict):
+            raise ValueError(
+                f"Expected 'projects' to be a dictionary, got {type(projects_dict)}"
+            )
+
         projects = []
-        for project in config.get("projects", []):
-            project_key = project.get("key")
+
+        # Iterate through projects dictionary
+        for project_key, project_config in projects_dict.items():
+            if not isinstance(project_config, dict):
+                logger.warning(
+                    f"Project '{project_key}' config is not a dictionary, skipping"
+                )
+                continue
+
+            # Add the key to the project config
+            project_config["key"] = project_key
 
             # Resolve API token from environment variable
-            token_env_var = project.get("api_token")
-            if token_env_var and token_env_var.startswith("${") and token_env_var.endswith("}"):
+            token_env_var = project_config.get("api_token")
+            if (
+                token_env_var
+                and token_env_var.startswith("${")
+                and token_env_var.endswith("}")
+            ):
                 env_var_name = token_env_var[2:-1]
-                logger.info(f"Project '{project_key}': Resolving token from env var '{env_var_name}'")
+                logger.info(
+                    f"Project '{project_key}': Resolving token from env var '{env_var_name}'"
+                )
 
                 api_token = os.getenv(env_var_name)
                 if not api_token:
@@ -77,22 +99,29 @@ class Settings:
                     )
                     continue
 
-                project["api_token"] = api_token
-                logger.info(f"Project '{project_key}': API token resolved (length: {len(api_token)})")
+                project_config["api_token"] = api_token
+                logger.info(
+                    f"Project '{project_key}': API token resolved (length: {len(api_token)})"
+                )
 
-            projects.append(project)
+            projects.append(project_config)
             logger.info(
-                f"✓ Loaded project '{project_key}': {project.get('name')} "
-                f"(REDCap ID: {project.get('redcap_project_id')})"
+                f"✓ Loaded project '{project_key}': {project_config.get('name')} "
+                f"(REDCap ID: {project_config.get('redcap_project_id')})"
             )
+
+        if not projects:
+            logger.warning("No valid projects loaded from configuration")
 
         return projects
 
     def get_enabled_projects(self) -> List[dict]:
         """Get list of enabled project configurations"""
         projects = self.load_projects_config()
-        enabled = [p for p in projects if p.get('enabled', True)]
-        logger.info(f"Found {len(enabled)} enabled projects out of {len(projects)} total")
+        enabled = [p for p in projects if p.get("enabled", True)]
+        logger.info(
+            f"Found {len(enabled)} enabled projects out of {len(projects)} total"
+        )
         return enabled
 
 
