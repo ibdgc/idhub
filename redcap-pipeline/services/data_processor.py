@@ -336,15 +336,13 @@ class DataProcessor:
             )
             control = self.transform_value("control", record.get("control", "0"))
 
-            # Register subject with GSID service (primary ID only)
+            # Register subject with GSID service (individual parameters, not dict)
             gsid_result = self.gsid_client.register_subject(
-                {
-                    "center_id": center_id,
-                    "local_subject_id": local_subject_id,
-                    "registration_year": registration_year,
-                    "control": control,
-                    "created_by": "redcap_pipeline",
-                }
+                center_id=center_id,
+                local_subject_id=local_subject_id,
+                registration_year=registration_year,
+                control=control,
+                created_by="redcap_pipeline",
             )
             gsid = gsid_result["gsid"]
 
