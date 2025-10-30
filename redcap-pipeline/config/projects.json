@@ -19,16 +19,6 @@
       "batch_size": 50,
       "enabled": true,
       "description": "Legacy sample collection - manual integration"
-    },
-    "clinical_trial_001": {
-      "name": "Clinical Trial 001",
-      "redcap_project_id": "11223",
-      "api_token": "${REDCAP_TRIAL001_TOKEN}",
-      "field_mappings": "field_mappings_trial.json",
-      "schedule": "manual",
-      "batch_size": 50,
-      "enabled": false,
-      "description": "Clinical trial data - ad hoc integration"
     }
   }
 }
