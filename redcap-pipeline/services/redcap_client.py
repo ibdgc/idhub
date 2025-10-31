@@ -9,6 +9,23 @@ from urllib3.util.retry import Retry
 logger = logging.getLogger(__name__)
 
 
+def resolve_api_token(token_template: str) -> str:
+    """Resolve API token from template with environment variable substitution"""
+    resolved = token_template
+
+    # Replace all possible token variables
+    replacements = {
+        "${REDCAP_API_TOKEN}": os.getenv("REDCAP_API_TOKEN", ""),
+        "${REDCAP_API_TOKEN_GAP}": os.getenv("REDCAP_API_TOKEN_GAP", ""),
+        "${REDCAP_API_TOKEN_CD_ILEAL}": os.getenv("REDCAP_API_TOKEN_CD_ILEAL", ""),
+    }
+
+    for placeholder, value in replacements.items():
+        resolved = resolved.replace(placeholder, value)
+
+    return resolved
+
+
 class REDCapClient:
     def __init__(self, project_config: dict):
         """Initialize REDCap client for a specific project"""

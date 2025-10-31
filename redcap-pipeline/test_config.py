@@ -70,16 +70,54 @@ def test_s3():
         return False
 
 
+def resolve_api_token(token_template: str) -> str:
+    """Resolve API token from template with environment variable substitution"""
+    resolved = token_template
+
+    # Replace all possible token variables
+    replacements = {
+        "${REDCAP_API_TOKEN}": os.getenv("REDCAP_API_TOKEN", ""),
+        "${REDCAP_API_TOKEN_GAP}": os.getenv("REDCAP_API_TOKEN_GAP", ""),
+        "${REDCAP_API_TOKEN_CD_ILEAL}": os.getenv("REDCAP_API_TOKEN_CD_ILEAL", ""),
+    }
+
+    for placeholder, value in replacements.items():
+        resolved = resolved.replace(placeholder, value)
+
+    return resolved
+
+
 def test_redcap_project(project_key: str, config: dict):
     """Test REDCap API connection for a specific project"""
     try:
-        api_token = config.get("api_token", "").replace(
-            "${REDCAP_API_TOKEN}", os.getenv("REDCAP_API_TOKEN", "")
-        )
+        api_token_template = config.get("api_token", "")
+        api_token = resolve_api_token(api_token_template)
 
-        if not api_token:
-            logger.warning(f"⚠ No API token found for project '{project_key}'")
+        if not api_token or api_token.startswith("${"):
+            logger.error(f"✗ API token not resolved for '{project_key}'")
+            logger.error(f"   Template: {api_token_template}")
+            logger.error(f"   Resolved to: {api_token}")
+            logger.error(f"   Environment check:")
+            logger.error(
+                f"     REDCAP_API_TOKEN: {'SET' if os.getenv('REDCAP_API_TOKEN') else 'NOT SET'}"
+            )
+            logger.error(
+                f"     REDCAP_API_TOKEN_GAP: {'SET' if os.getenv('REDCAP_API_TOKEN_GAP') else 'NOT SET'}"
+            )
+            logger.error(
+                f"     REDCAP_API_TOKEN_CD_ILEAL: {'SET' if os.getenv('REDCAP_API_TOKEN_CD_ILEAL') else 'NOT SET'}"
+            )
             return False
+
+        # Show first/last 4 chars of token for debugging
+        token_preview = (
+            f"{api_token[:4]}...{api_token[-4:]}"
+            if len(api_token) >= 8
+            else "TOO_SHORT"
+        )
+        logger.info(
+            f"   Using token: {token_preview} for project_id: {config.get('redcap_project_id')}"
+        )
 
         data = {
             "token": api_token,
@@ -100,6 +138,16 @@ def test_redcap_project(project_key: str, config: dict):
             f"✓ REDCap API connected for '{project_key}': {len(records)} records available"
         )
         return True
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"✗ REDCap API connection failed for '{project_key}': {e}")
+        if e.response.status_code == 403:
+            logger.error(f"   403 Forbidden - Possible causes:")
+            logger.error(
+                f"   1. Token is for wrong project (expected: {config.get('redcap_project_id')})"
+            )
+            logger.error(f"   2. Token doesn't have 'API Export' rights enabled")
+            logger.error(f"   3. Token has been revoked or expired")
+        return False
     except Exception as e:
         logger.error(f"✗ REDCap API connection failed for '{project_key}': {e}")
         return False
