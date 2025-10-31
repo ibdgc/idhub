@@ -56,29 +56,6 @@ jobs:
           pip install -r requirements.txt
       - name: Create logs directory
         run: mkdir -p redcap-pipeline/logs
-      - name: Run configuration diagnostics
-        env:
-          REDCAP_API_URL: ${{ secrets.REDCAP_API_URL }}
-          REDCAP_API_TOKEN_GAP: ${{ secrets.REDCAP_API_TOKEN_GAP }}
-          REDCAP_API_TOKEN_CD_ILEAL: ${{ secrets.REDCAP_API_TOKEN_CD_ILEAL }}
-          REDCAP_API_TOKEN_UC_DEMARC: ${{ secrets.REDCAP_API_TOKEN_UC_DEMARC }}
-          GSID_SERVICE_URL: https://api.idhub.ibdgc.org
-          GSID_API_KEY: ${{ secrets.GSID_API_KEY }}
-          DB_HOST: localhost
-          DB_NAME: idhub
-          DB_USER: idhub_user
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: us-east-1
-          S3_BUCKET: idhub-curated-fragments
-        run: |
-          cd redcap-pipeline
-          if [ -n "${{ github.event.inputs.project_key }}" ]; then
-            python test_config.py --project "${{ github.event.inputs.project_key }}"
-          else
-            python test_config.py
-          fi
       - name: Run REDCap pipeline
         if: ${{ github.event.inputs.run_diagnostics != 'true' }}
         env:
