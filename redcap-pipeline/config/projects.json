@@ -3,7 +3,7 @@
     "gap": {
       "name": "GAP",
       "redcap_project_id": "16894",
-      "api_token": "${REDCAP_API_TOKEN}",
+      "api_token": "${REDCAP_API_TOKEN_GAP}",
       "field_mappings": "gap_field_mappings.json",
       "schedule": "continuous",
       "batch_size": 50,
@@ -13,7 +13,7 @@
     "cd_ileal": {
       "name": "cd_ileal",
       "redcap_project_id": "16899",
-      "api_token": "${REDCAP_API_TOKEN}",
+      "api_token": "${REDCAP_API_TOKEN_CD_ILEAL}",
       "field_mappings": "cd_ileal_field_mappings.json",
       "schedule": "manual",
       "batch_size": 50,

@@ -59,7 +59,8 @@ jobs:
       - name: Run configuration diagnostics
         env:
           REDCAP_API_URL: ${{ secrets.REDCAP_API_URL }}
-          REDCAP_API_TOKEN: ${{ secrets.REDCAP_API_TOKEN }}
+          REDCAP_API_TOKEN_GAP: ${{ secrets.REDCAP_API_TOKEN_GAP }}
+          REDCAP_API_TOKEN_CD_ILEAL: ${{ secrets.REDCAP_API_TOKEN_CD_ILEAL }}
           GSID_SERVICE_URL: https://api.idhub.ibdgc.org
           GSID_API_KEY: ${{ secrets.GSID_API_KEY }}
           DB_HOST: localhost
@@ -81,7 +82,8 @@ jobs:
         if: ${{ github.event.inputs.run_diagnostics != 'true' }}
         env:
           REDCAP_API_URL: ${{ secrets.REDCAP_API_URL }}
-          REDCAP_API_TOKEN: ${{ secrets.REDCAP_API_TOKEN }}
+          REDCAP_API_TOKEN_GAP: ${{ secrets.REDCAP_API_TOKEN_GAP }}
+          REDCAP_API_TOKEN_CD_ILEAL: ${{ secrets.REDCAP_API_TOKEN_CD_ILEAL }}
           GSID_SERVICE_URL: https://api.idhub.ibdgc.org
           GSID_API_KEY: ${{ secrets.GSID_API_KEY }}
           DB_HOST: localhost
