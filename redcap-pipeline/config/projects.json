@@ -10,6 +10,16 @@
       "enabled": true,
       "description": "Main biobank project - continuous integration"
     },
+    "uc_demarc": {
+      "name": "uc_demarc",
+      "redcap_project_id": "16895",
+      "api_token": "${REDCAP_API_TOKEN_UC_DEMARC}",
+      "field_mappings": "uc_demarc_field_mappings.json",
+      "schedule": "manual",
+      "batch_size": 50,
+      "enabled": true,
+      "description": "Legacy sample collection - manual integration"
+    },
     "cd_ileal": {
       "name": "cd_ileal",
       "redcap_project_id": "16899",

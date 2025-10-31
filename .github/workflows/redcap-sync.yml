@@ -61,6 +61,7 @@ jobs:
           REDCAP_API_URL: ${{ secrets.REDCAP_API_URL }}
           REDCAP_API_TOKEN_GAP: ${{ secrets.REDCAP_API_TOKEN_GAP }}
           REDCAP_API_TOKEN_CD_ILEAL: ${{ secrets.REDCAP_API_TOKEN_CD_ILEAL }}
+          REDCAP_API_TOKEN_UC_DEMARC: ${{ secrets.REDCAP_API_TOKEN_UC_DEMARC }}
           GSID_SERVICE_URL: https://api.idhub.ibdgc.org
           GSID_API_KEY: ${{ secrets.GSID_API_KEY }}
           DB_HOST: localhost
@@ -84,6 +85,7 @@ jobs:
           REDCAP_API_URL: ${{ secrets.REDCAP_API_URL }}
           REDCAP_API_TOKEN_GAP: ${{ secrets.REDCAP_API_TOKEN_GAP }}
           REDCAP_API_TOKEN_CD_ILEAL: ${{ secrets.REDCAP_API_TOKEN_CD_ILEAL }}
+          REDCAP_API_TOKEN_UC_DEMARC: ${{ secrets.REDCAP_API_TOKEN_UC_DEMARC }}
           GSID_SERVICE_URL: https://api.idhub.ibdgc.org
           GSID_API_KEY: ${{ secrets.GSID_API_KEY }}
           DB_HOST: localhost
