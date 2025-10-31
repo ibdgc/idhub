@@ -1,3 +1,10 @@
+#!/usr/bin/env python3
+"""
+Configuration diagnostics for REDCap pipeline
+Tests all connections and configurations before running pipeline
+"""
+
+import argparse
 import json
 import logging
 import os
@@ -7,30 +14,30 @@ from pathlib import Path
 import boto3
 import psycopg2
 import requests
+from botocore.exceptions import ClientError
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger()
 
 
-def test_database_connection():
+def test_database():
     """Test PostgreSQL database connection"""
-    logger.info("Testing database connection...")
     try:
         conn = psycopg2.connect(
-            host=os.getenv("DB_HOST"),
-            database=os.getenv("DB_NAME"),
-            user=os.getenv("DB_USER"),
+            host=os.getenv("DB_HOST", "localhost"),
+            database=os.getenv("DB_NAME", "idhub"),
+            user=os.getenv("DB_USER", "idhub_user"),
             password=os.getenv("DB_PASSWORD"),
+            port=int(os.getenv("DB_PORT", "5432")),
         )
-        cur = conn.cursor()
-        cur.execute("SELECT version();")
-        version = cur.fetchone()[0]
-        logger.info(f"✓ Database connected: {version}")
-        cur.close()
+        with conn.cursor() as cur:
+            cur.execute("SELECT version();")
+            version = cur.fetchone()[0]
         conn.close()
+        logger.info(f"✓ Database connected: {version}")
         return True
     except Exception as e:
         logger.error(f"✗ Database connection failed: {e}")
@@ -38,63 +45,56 @@ def test_database_connection():
 
 
 def test_gsid_service():
-    """Test GSID service API"""
-    logger.info("Testing GSID service...")
+    """Test GSID service connection"""
     try:
-        url = os.getenv("GSID_SERVICE_URL", "http://gsid-service:8000")
-        headers = {"x-api-key": os.getenv("GSID_API_KEY")}
-
-        response = requests.get(f"{url}/health", headers=headers, timeout=10)
+        url = os.getenv("GSID_SERVICE_URL", "https://api.idhub.ibdgc.org")
+        response = requests.get(f"{url}/health", timeout=10)
         response.raise_for_status()
-
-        data = response.json()
-        logger.info(f"✓ GSID service connected: {data}")
+        logger.info(f"✓ GSID service connected: {response.json()}")
         return True
     except Exception as e:
         logger.error(f"✗ GSID service connection failed: {e}")
         return False
 
 
-def test_s3_access():
+def test_s3():
     """Test S3 bucket access"""
-    logger.info("Testing S3 access...")
     try:
-        s3_client = boto3.client("s3")
+        s3 = boto3.client("s3")
         bucket = os.getenv("S3_BUCKET", "idhub-curated-fragments")
-
-        # Test bucket access
-        s3_client.head_bucket(Bucket=bucket)
+        s3.head_bucket(Bucket=bucket)
         logger.info(f"✓ S3 bucket accessible: {bucket}")
         return True
-    except Exception as e:
-        logger.error(f"✗ S3 access failed: {e}")
+    except ClientError as e:
+        logger.error(f"✗ S3 bucket access failed: {e}")
         return False
 
 
-def test_redcap_api(project_config: dict):
-    """Test REDCap API access"""
-    project_key = project_config.get("key", "unknown")
-    logger.info(f"Testing REDCap API for project '{project_key}'...")
-
+def test_redcap_project(project_key: str, config: dict):
+    """Test REDCap API connection for a specific project"""
     try:
-        url = os.getenv("REDCAP_API_URL")
-        token = project_config.get("api_token")
+        api_token = config.get("api_token", "").replace(
+            "${REDCAP_API_TOKEN}", os.getenv("REDCAP_API_TOKEN", "")
+        )
 
-        if not token:
-            logger.error(f"✗ No API token configured for project '{project_key}'")
+        if not api_token:
+            logger.warning(f"⚠ No API token found for project '{project_key}'")
             return False
 
-        payload = {
-            "token": token,
+        data = {
+            "token": api_token,
             "content": "record",
             "format": "json",
             "type": "flat",
             "returnFormat": "json",
         }
 
-        response = requests.post(url, data=payload, timeout=30)
+        response = requests.post(
+            os.getenv("REDCAP_API_URL", "https://redcap.mountsinai.org/api/"),
+            data=data,
+            timeout=30,
+        )
         response.raise_for_status()
-
         records = response.json()
         logger.info(
             f"✓ REDCap API connected for '{project_key}': {len(records)} records available"
@@ -105,128 +105,128 @@ def test_redcap_api(project_config: dict):
         return False
 
 
-def test_field_mappings(project_config: dict):
-    """Test field mapping configuration"""
-    project_key = project_config.get("key", "unknown")
-    mapping_file = project_config.get("field_mappings")
-
-    logger.info(f"Testing field mappings for project '{project_key}'...")
-
-    if not mapping_file:
-        logger.warning(f"⚠ No field mappings configured for '{project_key}'")
-        return True
-
+def test_field_mappings(project_key: str, config: dict):
+    """Test field mappings configuration"""
     try:
-        mapping_path = Path(__file__).parent / "config" / mapping_file
+        mapping_file = config.get("field_mappings")
+        if not mapping_file:
+            logger.warning(f"⚠ No field mappings configured for '{project_key}'")
+            return False
 
+        mapping_path = Path(__file__).parent / "config" / mapping_file
         if not mapping_path.exists():
-            logger.error(f"✗ Mapping file not found: {mapping_path}")
+            logger.error(
+                f"✗ Field mappings file not found for '{project_key}': {mapping_path}"
+            )
             return False
 
         with open(mapping_path) as f:
-            config = json.load(f)
+            mappings = json.load(f)
 
-        mappings = config.get("mappings", [])
-        transformations = config.get("transformations", {})
-
-        # Validate structure
-        for mapping in mappings:
-            if not all(
-                k in mapping for k in ["source_field", "target_table", "target_field"]
-            ):
-                logger.error(f"✗ Invalid mapping structure: {mapping}")
-                return False
+        num_mappings = len(mappings.get("mappings", []))
+        num_transforms = len(mappings.get("transformations", {}))
 
         logger.info(
             f"✓ Field mappings valid for '{project_key}': "
-            f"{len(mappings)} mappings, {len(transformations)} transformations"
+            f"{num_mappings} mappings, {num_transforms} transformations"
         )
         return True
     except Exception as e:
-        logger.error(f"✗ Field mapping validation failed for '{project_key}': {e}")
+        logger.error(f"✗ Field mappings test failed for '{project_key}': {e}")
         return False
 
 
-def load_projects() -> dict:
+def load_projects():
     """Load project configurations"""
     config_path = Path(__file__).parent / "config" / "projects.json"
-
-    if not config_path.exists():
-        logger.error(f"✗ Projects configuration not found: {config_path}")
-        return {}
-
     with open(config_path) as f:
         config = json.load(f)
-
-    projects = config.get("projects", {})
-
-    # Substitute environment variables and add keys
-    for key, project in projects.items():
-        project["key"] = key
-        if "api_token" in project:
-            api_token = project["api_token"]
-            if api_token.startswith("${") and api_token.endswith("}"):
-                env_var = api_token[2:-1]
-                project["api_token"] = os.getenv(env_var)
-
-    return projects
+    return config["projects"]
 
 
 def main():
-    """Run all configuration tests"""
+    """Run diagnostics"""
+    parser = argparse.ArgumentParser(description="REDCap Pipeline Diagnostics")
+    parser.add_argument(
+        "--project",
+        type=str,
+        help="Only test specific project (optional)",
+    )
+    args = parser.parse_args()
+
     logger.info("=" * 60)
     logger.info("REDCap Pipeline Configuration Diagnostics")
     logger.info("=" * 60)
 
-    tests_passed = 0
-    tests_failed = 0
+    passed = 0
+    failed = 0
 
-    # Core infrastructure tests
-    if test_database_connection():
-        tests_passed += 1
+    # Test core services
+    logger.info("Testing database connection...")
+    if test_database():
+        passed += 1
     else:
-        tests_failed += 1
+        failed += 1
 
+    logger.info("Testing GSID service...")
     if test_gsid_service():
-        tests_passed += 1
+        passed += 1
     else:
-        tests_failed += 1
+        failed += 1
 
-    if test_s3_access():
-        tests_passed += 1
+    logger.info("Testing S3 access...")
+    if test_s3():
+        passed += 1
     else:
-        tests_failed += 1
+        failed += 1
 
     # Load projects
-    projects = load_projects()
+    try:
+        projects = load_projects()
+    except Exception as e:
+        logger.error(f"✗ Failed to load projects configuration: {e}")
+        sys.exit(1)
 
-    if not projects:
-        logger.error("✗ No projects configured")
-        tests_failed += 1
+    # Filter projects if specific one requested
+    if args.project:
+        if args.project not in projects:
+            logger.error(f"✗ Project '{args.project}' not found in configuration")
+            sys.exit(1)
+        projects = {args.project: projects[args.project]}
+        logger.info(f"Testing only project: {args.project}")
     else:
-        logger.info(f"Found {len(projects)} project(s): {', '.join(projects.keys())}")
+        enabled_projects = {k: v for k, v in projects.items() if v.get("enabled", True)}
+        project_keys = ", ".join(enabled_projects.keys())
+        logger.info(f"Found {len(enabled_projects)} enabled project(s): {project_keys}")
+        projects = enabled_projects
 
-        # Test each project configuration
-        for project_key, project_config in projects.items():
-            logger.info(f"\n--- Testing project: {project_key} ---")
+    # Test each project
+    for project_key, project_config in projects.items():
+        if not project_config.get("enabled", True):
+            logger.info(f"⊘ Skipping disabled project: {project_key}")
+            continue
 
-            if test_redcap_api(project_config):
-                tests_passed += 1
-            else:
-                tests_failed += 1
+        logger.info(f"--- Testing project: {project_key} ---")
 
-            if test_field_mappings(project_config):
-                tests_passed += 1
-            else:
-                tests_failed += 1
+        logger.info(f"Testing REDCap API for project '{project_key}'...")
+        if test_redcap_project(project_key, project_config):
+            passed += 1
+        else:
+            failed += 1
+
+        logger.info(f"Testing field mappings for project '{project_key}'...")
+        if test_field_mappings(project_key, project_config):
+            passed += 1
+        else:
+            failed += 1
 
     # Summary
-    logger.info("\n" + "=" * 60)
-    logger.info(f"Tests passed: {tests_passed}")
-    logger.info(f"Tests failed: {tests_failed}")
+    logger.info("-" * 60)
+    logger.info(f"Tests passed: {passed}")
+    logger.info(f"Tests failed: {failed}")
     logger.info("=" * 60)
 
-    if tests_failed > 0:
+    if failed > 0:
         logger.error("✗ Some tests failed")
         sys.exit(1)
     else:

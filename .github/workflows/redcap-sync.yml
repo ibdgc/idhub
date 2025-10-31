@@ -2,7 +2,7 @@
 name: REDCap Sync Pipeline
 on:
   schedule:
-    - cron: 0 2 * * * # Daily at 2 AM UTC
+    - cron: 0 2 * * *  # Daily at 2 AM UTC
   workflow_dispatch:
     inputs:
       project_key:
@@ -49,7 +49,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.11"
+          python-version: '3.11'
       - name: Install dependencies
         run: |
           cd redcap-pipeline
@@ -72,7 +72,11 @@ jobs:
           S3_BUCKET: idhub-curated-fragments
         run: |
           cd redcap-pipeline
-          python test_config.py
+          if [ -n "${{ github.event.inputs.project_key }}" ]; then
+            python test_config.py --project "${{ github.event.inputs.project_key }}"
+          else
+            python test_config.py
+          fi
       - name: Run REDCap pipeline
         if: ${{ github.event.inputs.run_diagnostics != 'true' }}
         env:
