@@ -30,16 +30,50 @@ class Settings:
     AWS_DEFAULT_REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
     S3_BUCKET = os.getenv("S3_BUCKET", "idhub-curated-fragments")
 
-    # Center Aliases
+    # Center Aliases - maps common variations to canonical center names
     CENTER_ALIASES = {
+        # GAP project aliases
         "mount_sinai": "MSSM",
         "mount_sinai_ny": "MSSM",
-        "cedars_sinai": "Cedars-Sinai",
+        "mt_sinai": "MSSM",
+        "sinai": "MSSM",
         "johns_hopkins": "Johns Hopkins",
-        "university_of_pitt": "University of Pittsburgh",
-        "university_of_mont": "University of Montreal",
-        "university_of_miam": "University of Miami",
+        "jhu": "Johns Hopkins",
+        "hopkins": "Johns Hopkins",
+        "university_of_chicago": "UChicago",
+        "uchicago": "UChicago",
+        "u_chicago": "UChicago",
+        "cedars_sinai": "Cedars-Sinai",
+        "cedars": "Cedars-Sinai",
+        "ucla": "UCLA",
+        "university_of_california_los_angeles": "UCLA",
+        "emory": "Emory",
+        "emory_university": "Emory",
+        "mayo": "Mayo",
+        "mayo_clinic": "Mayo",
+        "upenn": "Penn",
+        "university_of_pennsylvania": "Penn",
+        "penn": "Penn",
+        
+        # cd_ileal project aliases (REDCap data access groups)
+        "mt_sinai_hospital": "MSSM",
+        "icahn_school_of_me": "MSSM",
+        "university_of_mont": "Montreal",
+        "montreal": "Montreal",
+        "university_of_pitt": "Pittsburgh",
+        "pittsburgh": "Pittsburgh",
+        "pitt": "Pittsburgh",
+        "cedarssinai_medica": "Cedars-Sinai",
+        "johns_hopkins_univ": "Johns Hopkins",
+        "emory_university": "Emory",
     }
+
+    # Fuzzy matching threshold (0.0-1.0)
+    # Increased to 0.85 to prevent bad matches like Montreal->Miami
+    FUZZY_MATCH_THRESHOLD = float(os.getenv("FUZZY_MATCH_THRESHOLD", "0.85"))
+
+
+settings = Settings()
 
     @staticmethod
     def load_projects_config(config_path: str = None) -> List[dict]:
