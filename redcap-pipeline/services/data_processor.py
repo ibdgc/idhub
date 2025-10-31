@@ -27,6 +27,10 @@ class DataProcessor:
         self.gsid_client = GSIDClient()
         self.s3_uploader = S3Uploader()
 
+        # Cache subject ID fields from mappings
+        self.subject_id_fields = self.get_subject_id_fields()
+        logger.info(f"[{self.project_key}] Subject ID fields: {self.subject_id_fields}")
+
     def load_field_mappings(self) -> Dict:
         """Load field mappings from configuration file"""
         mapping_file = self.project_config.get("field_mappings")
@@ -46,6 +50,19 @@ class DataProcessor:
 
         logger.info(f"[{self.project_key}] Loaded field mappings from {mapping_file}")
         return config
+
+    def get_subject_id_fields(self) -> List[str]:
+        """Extract subject ID field names from mappings"""
+        mappings = self.field_mappings.get("mappings", [])
+
+        # Find all fields mapped to local_subject_ids
+        id_fields = [
+            m["source_field"]
+            for m in mappings
+            if m.get("target_table") == "local_subject_ids"
+        ]
+
+        return id_fields
 
     def transform_value(self, field_name: str, value: Any) -> Any:
         """Apply transformations to field values"""
@@ -69,38 +86,90 @@ class DataProcessor:
 
         return value
 
-    def extract_local_ids(self, record: Dict, center_id: int) -> List[Dict]:
-        """Extract all local identifiers from record using field mappings"""
-        identifiers = []
-        mappings = self.field_mappings.get("mappings", [])
+    def extract_subject_ids(self, record: Dict) -> List[Dict[str, str]]:
+        """Extract all available subject IDs from record based on field mappings"""
+        subject_ids = []
 
-        # Get all local_subject_ids mappings
-        local_id_mappings = [
-            m for m in mappings if m.get("target_table") == "local_subject_ids"
-        ]
-
-        for mapping in local_id_mappings:
-            source_field = mapping.get("source_field")
-            value = record.get(source_field)
-
-            if value and value not in ["", "NA", "N/A", "null"]:
-                identifiers.append(
+        for field_name in self.subject_id_fields:
+            value = record.get(field_name)
+            if value and value not in ["", "NA", "N/A", "null", "NULL"]:
+                subject_ids.append(
                     {
-                        "center_id": center_id,
+                        "identifier_type": field_name,
                         "local_subject_id": str(value).strip(),
-                        "identifier_type": source_field,
                     }
                 )
 
-        return identifiers
+        return subject_ids
 
-    def register_all_local_ids(self, gsid: str, identifiers: List[Dict]):
+    def resolve_subject_ids(
+        self, subject_ids: List[Dict[str, str]], center_id: int
+    ) -> Dict[str, Any]:
+        """
+        Check all subject IDs against GSID service to find existing matches.
+        Returns the GSID to use and metadata about the resolution.
+        """
+        if not subject_ids:
+            raise ValueError("No valid subject IDs found in record")
+
+        # Build batch request for all IDs
+        batch_requests = []
+        for id_info in subject_ids:
+            batch_requests.append(
+                {
+                    "center_id": center_id,
+                    "local_subject_id": id_info["local_subject_id"],
+                    "registration_year": None,  # Will be set later if creating new
+                    "control": False,
+                    "created_by": "redcap_pipeline",
+                }
+            )
+
+        # Query GSID service
+        results = self.gsid_client.register_batch(batch_requests)
+
+        # Analyze results
+        found_gsids = set()
+        primary_result = None
+
+        for i, result in enumerate(results):
+            gsid = result["gsid"]
+            found_gsids.add(gsid)
+
+            # Use first result as primary
+            if primary_result is None:
+                primary_result = {
+                    "gsid": gsid,
+                    "action": result["action"],
+                    "identifier_type": subject_ids[i]["identifier_type"],
+                    "local_subject_id": subject_ids[i]["local_subject_id"],
+                }
+
+        # Check for conflicts (multiple different GSIDs)
+        if len(found_gsids) > 1:
+            logger.warning(
+                f"[{self.project_key}] CONFLICT: Multiple GSIDs found for same subject: "
+                f"{found_gsids}. IDs: {[s['local_subject_id'] for s in subject_ids]}"
+            )
+            primary_result["conflict"] = True
+            primary_result["conflicting_gsids"] = list(found_gsids)
+        else:
+            primary_result["conflict"] = False
+
+        return primary_result
+
+    def register_all_local_ids(
+        self, gsid: str, subject_ids: List[Dict[str, str]], center_id: int
+    ):
         """Register all local IDs for a subject, flag conflicts for review"""
         conn = None
         try:
             conn = get_db_connection()
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                for identifier in identifiers:
+                for id_info in subject_ids:
+                    local_id = id_info["local_subject_id"]
+                    id_type = id_info["identifier_type"]
+
                     # Check if this local_id already exists with a different GSID
                     cur.execute(
                         """
@@ -108,14 +177,14 @@ class DataProcessor:
                         FROM local_subject_ids
                         WHERE center_id = %s AND local_subject_id = %s
                         """,
-                        (identifier["center_id"], identifier["local_subject_id"]),
+                        (center_id, local_id),
                     )
                     existing = cur.fetchone()
 
                     if existing and existing["global_subject_id"] != gsid:
                         # CONFLICT: Same local_id points to different GSID
                         logger.warning(
-                            f"[{self.project_key}] CONFLICT: {identifier['local_subject_id']} "
+                            f"[{self.project_key}] CONFLICT: {local_id} "
                             f"already linked to {existing['global_subject_id']}, "
                             f"attempting to link to {gsid}"
                         )
@@ -130,7 +199,7 @@ class DataProcessor:
                             """,
                             (
                                 f"[{datetime.utcnow().isoformat()}] Duplicate local_id conflict: "
-                                f"{identifier['local_subject_id']} (type: {identifier['identifier_type']}) "
+                                f"{local_id} (type: {id_type}) "
                                 f"linked to both {gsid} and {existing['global_subject_id']}",
                                 gsid,
                                 existing["global_subject_id"],
@@ -146,8 +215,8 @@ class DataProcessor:
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                             """,
                             (
-                                identifier["center_id"],
-                                identifier["local_subject_id"],
+                                center_id,
+                                local_id,
                                 gsid,
                                 "conflict_detected",
                                 "duplicate_local_id",
@@ -162,8 +231,7 @@ class DataProcessor:
                     elif existing and existing["global_subject_id"] == gsid:
                         # Already linked correctly, skip
                         logger.debug(
-                            f"[{self.project_key}] ID {identifier['local_subject_id']} "
-                            f"already linked to {gsid}"
+                            f"[{self.project_key}] ID {local_id} already linked to {gsid}"
                         )
                         continue
 
@@ -173,17 +241,14 @@ class DataProcessor:
                         INSERT INTO local_subject_ids
                         (center_id, local_subject_id, identifier_type, global_subject_id)
                         VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (center_id, local_subject_id) DO UPDATE SET
+                            identifier_type = EXCLUDED.identifier_type,
+                            global_subject_id = EXCLUDED.global_subject_id
                         """,
-                        (
-                            identifier["center_id"],
-                            identifier["local_subject_id"],
-                            identifier["identifier_type"],
-                            gsid,
-                        ),
+                        (center_id, local_id, id_type, gsid),
                     )
                     logger.info(
-                        f"[{self.project_key}] Linked {identifier['identifier_type']}="
-                        f"{identifier['local_subject_id']} -> {gsid}"
+                        f"[{self.project_key}] Linked {id_type}={local_id} -> {gsid}"
                     )
 
                 conn.commit()
@@ -259,7 +324,6 @@ class DataProcessor:
                     )
 
                 conn.commit()
-                logger.info(f"[{self.project_key}] Inserted samples for GSID {gsid}")
 
         except Exception as e:
             if conn:
@@ -316,48 +380,47 @@ class DataProcessor:
         return fragment
 
     def process_record(self, record: Dict) -> Dict:
-        """Process single REDCap record with conflict detection"""
+        """Process single REDCap record with multi-ID resolution and conflict detection"""
         try:
             # Get center
             center_name = record.get("redcap_data_access_group", "Unknown")
             center_id = self.center_resolver.get_or_create_center(center_name)
 
-            # Extract primary local ID for GSID registration
-            local_subject_id = record.get("consortium_id") or record.get("local_id")
-            if not local_subject_id:
+            # Extract ALL subject IDs from field mappings
+            subject_ids = self.extract_subject_ids(record)
+
+            if not subject_ids:
                 raise ValueError(
-                    f"No local_subject_id found in record: {record.get('record_id')}"
+                    f"No subject IDs found in record {record.get('record_id')}. "
+                    f"Expected fields: {self.subject_id_fields}"
                 )
 
-            # Get transformed values
-            registration_date = record.get("registration_date")
-            registration_year = self.transform_value(
-                "registration_date", registration_date
+            # Format IDs for logging
+            id_list = ", ".join(
+                [f"{s['identifier_type']}={s['local_subject_id']}" for s in subject_ids]
             )
-            control = self.transform_value("control", record.get("control", "0"))
-
-            # Register subject with GSID service (individual parameters, not dict)
-            gsid_result = self.gsid_client.register_subject(
-                center_id=center_id,
-                local_subject_id=local_subject_id,
-                registration_year=registration_year,
-                control=control,
-                created_by="redcap_pipeline",
-            )
-            gsid = gsid_result["gsid"]
-
-            identifier_type = (
-                "consortium_id" if record.get("consortium_id") else "local_id"
-            )
-            logger.info(
-                f"[{self.project_key}] Registered {local_subject_id} ({identifier_type}) -> "
-                f"GSID {gsid} ({gsid_result['action']})"
+            logger.debug(
+                f"[{self.project_key}] Found {len(subject_ids)} subject ID(s): {id_list}"
             )
 
-            # Extract and register ALL local IDs (with conflict detection)
-            all_identifiers = self.extract_local_ids(record, center_id)
-            if all_identifiers:
-                self.register_all_local_ids(gsid, all_identifiers)
+            # Resolve against GSID service (checks all IDs for existing matches)
+            resolution = self.resolve_subject_ids(subject_ids, center_id)
+            gsid = resolution["gsid"]
+
+            # Log resolution
+            log_msg = (
+                f"[{self.project_key}] Resolved to GSID {gsid} "
+                f"(action: {resolution['action']}, primary: {resolution['identifier_type']}="
+                f"{resolution['local_subject_id']})"
+            )
+            if resolution.get("conflict"):
+                log_msg += f" ⚠️ CONFLICT: Multiple GSIDs found: {resolution['conflicting_gsids']}"
+                logger.warning(log_msg)
+            else:
+                logger.info(log_msg)
+
+            # Register ALL local IDs (with conflict detection at DB level)
+            self.register_all_local_ids(gsid, subject_ids, center_id)
 
             # Insert samples
             self.insert_samples(record, gsid)
@@ -366,12 +429,23 @@ class DataProcessor:
             fragment = self.create_curated_fragment(record, gsid, center_id)
             self.s3_uploader.upload_fragment(fragment, self.project_key, gsid)
 
-            return {"status": "success", "gsid": gsid}
+            result = {
+                "status": "success",
+                "gsid": gsid,
+                "action": resolution["action"],
+            }
+
+            if resolution.get("conflict"):
+                result["conflict"] = True
+                result["conflicting_gsids"] = resolution["conflicting_gsids"]
+
+            return result
 
         except Exception as e:
             logger.error(
                 f"[{self.project_key}] Error processing record "
-                f"{record.get('record_id')}: {e}"
+                f"{record.get('record_id')}: {e}",
+                exc_info=True,
             )
             return {
                 "status": "error",
