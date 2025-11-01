@@ -279,7 +279,7 @@ class DataProcessor:
                             identifier_type
                         )
                         VALUES (%s, %s, %s, %s)
-                        ON CONFLICT (center_id, local_subject_id) DO NOTHING
+                        ON CONFLICT DO NOTHING
                         """,
                         (gsid, center_id, local_id, id_type),
                     )
