@@ -159,7 +159,6 @@ class DataProcessor:
                 center_id=center_id,
                 local_subject_id=primary_id["local_subject_id"],
                 identifier_type=primary_id["identifier_type"],
-                created_by="redcap_pipeline",
             )
             gsid = result["gsid"]
             action = result["action"]  # will be 'create_new'
@@ -207,60 +206,46 @@ class DataProcessor:
         """
         Register every local-subject-ID in `subject_ids` for the given GSID,
         logging any conflicts to the identity_resolutions table.
-
-        Parameters
-        ----------
-        gsid : str
-            GSID returned by the GSID service.
-        subject_ids : List[Dict[str, str]]
-            List of {"identifier_type": ..., "local_subject_id": ...} dicts.
-        center_id : int
-            Center ID resolved for the current record.
         """
         conn = None
         try:
             conn = get_db_connection()
             with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                # Iterate over the list of subject-ID dicts
                 for id_info in subject_ids:
                     id_type = id_info["identifier_type"]
                     local_id = id_info["local_subject_id"]
-
                     if not local_id or local_id.strip() == "":
                         continue
 
-                    # Check for existing mapping / conflicts
+                    # ‒‒‒ conflict check ‒‒‒
                     cursor.execute(
                         """
-                        SELECT global_subject_id, local_subject_id
-                        FROM local_subject_ids
-                        WHERE center_id = %s AND local_subject_id = %s
+                        SELECT global_subject_id
+                        FROM   local_subject_ids
+                        WHERE  center_id = %s AND local_subject_id = %s
                         """,
                         (center_id, local_id),
                     )
                     existing = cursor.fetchone()
 
                     if existing and existing["global_subject_id"] != gsid:
-                        # Conflict: same local_id linked to different GSID
                         logger.warning(
-                            f"[{self.project_key}] Conflict detected: "
-                            f"Local ID {local_id} already linked to {existing['global_subject_id']}, "
-                            f"attempting to link to {gsid}"
+                            f"[{self.project_key}] Conflict: {local_id} already "
+                            f"linked to {existing['global_subject_id']} – skipping"
                         )
-
-                        # Record the conflict in identity_resolutions
                         cursor.execute(
                             """
-                            INSERT INTO identity_resolutions
-                                (input_center_id,
-                                 input_local_id,
-                                 matched_gsid,
-                                 action,
-                                 match_strategy,
-                                 confidence_score,
-                                 requires_review,
-                                 review_reason,
-                                 created_by)
+                            INSERT INTO identity_resolutions (
+                                input_center_id,
+                                input_local_id,
+                                matched_gsid,
+                                action,
+                                match_strategy,
+                                confidence_score,
+                                requires_review,
+                                review_reason,
+                                created_by
+                            )
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                             """,
                             (
@@ -271,37 +256,38 @@ class DataProcessor:
                                 "duplicate_local_id",
                                 0.0,
                                 True,
-                                f"Local ID already exists for GSID {existing['global_subject_id']}",
+                                f"Local ID already exists for GSID "
+                                f"{existing['global_subject_id']}",
                                 "redcap_pipeline",
                             ),
                         )
-                        continue  # skip inserting this conflicting ID
+                        continue
 
-                    elif existing and existing["global_subject_id"] == gsid:
-                        # Already correctly linked
+                    if existing:
                         logger.debug(
                             f"[{self.project_key}] Local ID {local_id} already linked to {gsid}"
                         )
                         continue
 
-                    # Insert new local-ID mapping
+                    # ‒‒‒ insert new mapping (NO created_by column) ‒‒‒
                     cursor.execute(
                         """
-                        INSERT INTO local_subject_ids
-                            (global_subject_id, center_id, local_subject_id,
-                             identifier_type, created_by)
-                        VALUES (%s, %s, %s, %s, %s)
+                        INSERT INTO local_subject_ids (
+                            global_subject_id,
+                            center_id,
+                            local_subject_id,
+                            identifier_type
+                        )
+                        VALUES (%s, %s, %s, %s)
                         ON CONFLICT (center_id, local_subject_id) DO NOTHING
                         """,
-                        (gsid, center_id, local_id, id_type, "redcap_pipeline"),
+                        (gsid, center_id, local_id, id_type),
                     )
-
                     logger.info(
-                        f"[{self.project_key}] Registered {id_type}={local_id} for GSID {gsid}"
+                        f"[{self.project_key}] Registered {id_type}={local_id} → {gsid}"
                     )
 
                 conn.commit()
-
         except Exception as e:
             if conn:
                 conn.rollback()
