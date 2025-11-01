@@ -9,11 +9,6 @@ on:
         description: Specific project to sync (leave empty for all enabled projects)
         required: false
         type: string
-      run_diagnostics:
-        description: Run diagnostics only (no sync)
-        required: false
-        type: boolean
-        default: false
 jobs:
   sync:
     runs-on: ubuntu-latest
