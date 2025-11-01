@@ -4,9 +4,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from core.database import get_db_connection, return_db_connection
 from psycopg2.extras import RealDictCursor
 
+from core.database import get_db_connection, return_db_connection
 from services.center_resolver import CenterResolver
 from services.gsid_client import GSIDClient
 from services.s3_uploader import S3Uploader
@@ -171,18 +171,34 @@ class DataProcessor:
         return result
 
     def register_all_local_ids(
-        self, gsid: str, subject_ids: Dict[str, str], center_id: int
+        self, gsid: str, subject_ids: List[Dict[str, str]], center_id: int
     ):
-        """Register all local IDs for a subject"""
+        """
+        Register all local subject IDs for a GSID.
+
+        Parameters
+        ----------
+        gsid : str
+            The Global Subject ID returned by the GSID service.
+        subject_ids : List[Dict[str, str]]
+            A list of dictionaries, each containing
+            {"identifier_type": str, "local_subject_id": str}.
+        center_id : int
+            Center ID resolved for the current record.
+        """
         conn = None
         try:
             conn = get_db_connection()
             with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                for id_type, local_id in subject_ids.items():
+                # Iterate over the *list* of subject-ID dictionaries
+                for id_info in subject_ids:
+                    id_type = id_info["identifier_type"]
+                    local_id = id_info["local_subject_id"]
+
                     if not local_id or local_id.strip() == "":
                         continue
 
-                    # Check for conflicts
+                    # Check for existing mapping / conflicts
                     cursor.execute(
                         """
                         SELECT global_subject_id, local_subject_id
@@ -201,7 +217,7 @@ class DataProcessor:
                             f"attempting to link to {gsid}"
                         )
 
-                        # Log to conflict_resolution table
+                        # Log conflict
                         cursor.execute(
                             """
                             INSERT INTO conflict_resolution
@@ -221,16 +237,16 @@ class DataProcessor:
                                 "redcap_pipeline",
                             ),
                         )
-                        # Skip inserting this conflicting ID
-                        continue
+                        continue  # skip conflicting ID
+
                     elif existing and existing["global_subject_id"] == gsid:
-                        # Already linked correctly, skip
+                        # Already correctly linked
                         logger.debug(
                             f"[{self.project_key}] Local ID {local_id} already linked to {gsid}"
                         )
                         continue
 
-                    # Insert new local ID mapping
+                    # Insert new local-ID mapping
                     cursor.execute(
                         """
                         INSERT INTO local_subject_ids
