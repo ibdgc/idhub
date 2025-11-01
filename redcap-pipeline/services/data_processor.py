@@ -4,9 +4,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from core.database import get_db_connection, return_db_connection
 from psycopg2.extras import RealDictCursor
 
-from core.database import get_db_connection, return_db_connection
 from services.center_resolver import CenterResolver
 from services.gsid_client import GSIDClient
 from services.s3_uploader import S3Uploader
@@ -174,15 +174,15 @@ class DataProcessor:
         self, gsid: str, subject_ids: List[Dict[str, str]], center_id: int
     ):
         """
-        Register all local subject IDs for a GSID.
+        Register every local-subject-ID in `subject_ids` for the given GSID,
+        logging any conflicts to the identity_resolutions table.
 
         Parameters
         ----------
         gsid : str
-            The Global Subject ID returned by the GSID service.
+            GSID returned by the GSID service.
         subject_ids : List[Dict[str, str]]
-            A list of dictionaries, each containing
-            {"identifier_type": str, "local_subject_id": str}.
+            List of {"identifier_type": ..., "local_subject_id": ...} dicts.
         center_id : int
             Center ID resolved for the current record.
         """
@@ -190,7 +190,7 @@ class DataProcessor:
         try:
             conn = get_db_connection()
             with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                # Iterate over the *list* of subject-ID dictionaries
+                # Iterate over the list of subject-ID dicts
                 for id_info in subject_ids:
                     id_type = id_info["identifier_type"]
                     local_id = id_info["local_subject_id"]
@@ -217,12 +217,19 @@ class DataProcessor:
                             f"attempting to link to {gsid}"
                         )
 
-                        # Log conflict
+                        # Record the conflict in identity_resolutions
                         cursor.execute(
                             """
-                            INSERT INTO conflict_resolution
-                            (center_id, local_subject_id, global_subject_id, conflict_type,
-                             match_strategy, confidence_score, requires_review, review_reason, created_by)
+                            INSERT INTO identity_resolutions
+                                (input_center_id,
+                                 input_local_id,
+                                 matched_gsid,
+                                 action,
+                                 match_strategy,
+                                 confidence_score,
+                                 requires_review,
+                                 review_reason,
+                                 created_by)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                             """,
                             (
@@ -237,7 +244,7 @@ class DataProcessor:
                                 "redcap_pipeline",
                             ),
                         )
-                        continue  # skip conflicting ID
+                        continue  # skip inserting this conflicting ID
 
                     elif existing and existing["global_subject_id"] == gsid:
                         # Already correctly linked
@@ -250,7 +257,8 @@ class DataProcessor:
                     cursor.execute(
                         """
                         INSERT INTO local_subject_ids
-                        (global_subject_id, center_id, local_subject_id, identifier_type, created_by)
+                            (global_subject_id, center_id, local_subject_id,
+                             identifier_type, created_by)
                         VALUES (%s, %s, %s, %s, %s)
                         ON CONFLICT (center_id, local_subject_id) DO NOTHING
                         """,
