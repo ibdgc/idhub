@@ -52,7 +52,6 @@ jobs:
       - name: Create logs directory
         run: mkdir -p redcap-pipeline/logs
       - name: Run REDCap pipeline
-        if: ${{ github.event.inputs.run_diagnostics != 'true' }}
         env:
           REDCAP_API_URL: ${{ secrets.REDCAP_API_URL }}
           REDCAP_API_TOKEN_GAP: ${{ secrets.REDCAP_API_TOKEN_GAP }}
