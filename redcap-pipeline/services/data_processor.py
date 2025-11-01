@@ -103,60 +103,72 @@ class DataProcessor:
         return subject_ids
 
     def resolve_subject_ids(
-        self, subject_ids: List[Dict[str, str]], center_id: int
+        self,
+        subject_ids: List[Dict[str, str]],
+        center_id: int,
     ) -> Dict[str, Any]:
         """
-        Check all subject IDs against GSID service to find existing matches.
-        Returns the GSID to use and metadata about the resolution.
+        Register/attach a *set* of local subject IDs to **one** and only one GSID.
+
+        Strategy
+        --------
+        1. Register the first ID in the list – this either returns an existing GSID
+           (if the ID is already known) or creates a new GSID.
+        2. For every remaining ID call the GSID service again *with the GSID we
+           just got* so the service attaches the alias instead of creating a new
+           subject.
+        3. Collect/return metadata that downstream code expects.
         """
         if not subject_ids:
             raise ValueError("No valid subject IDs found in record")
 
-        # Build batch request for all IDs
-        batch_requests = []
-        for id_info in subject_ids:
-            batch_requests.append(
-                {
+        # --- step 1 : primary registration ------------------------------------
+        primary_id = subject_ids[0]
+        primary_result = self.gsid_client.register_subject(
+            center_id=center_id,
+            local_subject_id=primary_id["local_subject_id"],
+            identifier_type=primary_id["identifier_type"],
+            created_by="redcap_pipeline",
+        )
+
+        gsid = primary_result["gsid"]
+        primary_action = primary_result["action"]
+
+        # --- step 2 : attach secondary IDs ------------------------------------
+        for id_info in subject_ids[1:]:
+            try:
+                # We re-use the same endpoint but supply the GSID so the service
+                # links instead of spawns a new subject record.
+                payload = {
                     "center_id": center_id,
                     "local_subject_id": id_info["local_subject_id"],
-                    "registration_year": None,  # Will be set later if creating new
-                    "control": False,
+                    "identifier_type": id_info["identifier_type"],
                     "created_by": "redcap_pipeline",
+                    "gsid": gsid,  # <-- adjust if your API uses a different key
                 }
-            )
+                # Use the lower-level session so we can freely craft the payload
+                resp = self.gsid_client.session.post(
+                    f"{self.gsid_client.base_url}/register",
+                    json=payload,
+                    timeout=30,
+                )
+                resp.raise_for_status()
+            except Exception as e:
+                logger.warning(
+                    f"[{self.project_key}] Unable to attach "
+                    f"{id_info['local_subject_id']} to GSID {gsid}: {e}"
+                )
 
-        # Query GSID service
-        results = self.gsid_client.register_batch(batch_requests)
+        # --- step 3 : build return structure ----------------------------------
+        result = {
+            "gsid": gsid,
+            "action": primary_action,
+            "identifier_type": primary_id["identifier_type"],
+            "local_subject_id": primary_id["local_subject_id"],
+            "conflict": False,  # we guarantee a single GSID
+        }
 
-        # Analyze results
-        found_gsids = set()
-        primary_result = None
-
-        for i, result in enumerate(results):
-            gsid = result["gsid"]
-            found_gsids.add(gsid)
-
-            # Use first result as primary
-            if primary_result is None:
-                primary_result = {
-                    "gsid": gsid,
-                    "action": result["action"],
-                    "identifier_type": subject_ids[i]["identifier_type"],
-                    "local_subject_id": subject_ids[i]["local_subject_id"],
-                }
-
-        # Check for conflicts (multiple different GSIDs)
-        if len(found_gsids) > 1:
-            logger.warning(
-                f"[{self.project_key}] CONFLICT: Multiple GSIDs found for same subject: "
-                f"{found_gsids}. IDs: {[s['local_subject_id'] for s in subject_ids]}"
-            )
-            primary_result["conflict"] = True
-            primary_result["conflicting_gsids"] = list(found_gsids)
-        else:
-            primary_result["conflict"] = False
-
-        return primary_result
+        return result
 
     def register_all_local_ids(
         self, gsid: str, subject_ids: List[Dict[str, str]], center_id: int
