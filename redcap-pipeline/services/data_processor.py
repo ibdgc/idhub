@@ -171,58 +171,41 @@ class DataProcessor:
         return result
 
     def register_all_local_ids(
-        self, gsid: str, subject_ids: List[Dict[str, str]], center_id: int
+        self, gsid: str, subject_ids: Dict[str, str], center_id: int
     ):
-        """Register all local IDs for a subject, flag conflicts for review"""
+        """Register all local IDs for a subject"""
         conn = None
         try:
             conn = get_db_connection()
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                for id_info in subject_ids:
-                    local_id = id_info["local_subject_id"]
-                    id_type = id_info["identifier_type"]
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                for id_type, local_id in subject_ids.items():
+                    if not local_id or local_id.strip() == "":
+                        continue
 
-                    # Check if this local_id already exists with a different GSID
-                    cur.execute(
+                    # Check for conflicts
+                    cursor.execute(
                         """
-                        SELECT global_subject_id, identifier_type
+                        SELECT global_subject_id, local_subject_id
                         FROM local_subject_ids
                         WHERE center_id = %s AND local_subject_id = %s
                         """,
                         (center_id, local_id),
                     )
-                    existing = cur.fetchone()
+                    existing = cursor.fetchone()
 
                     if existing and existing["global_subject_id"] != gsid:
-                        # CONFLICT: Same local_id points to different GSID
+                        # Conflict: same local_id linked to different GSID
                         logger.warning(
-                            f"[{self.project_key}] CONFLICT: {local_id} "
-                            f"already linked to {existing['global_subject_id']}, "
+                            f"[{self.project_key}] Conflict detected: "
+                            f"Local ID {local_id} already linked to {existing['global_subject_id']}, "
                             f"attempting to link to {gsid}"
                         )
 
-                        # Flag BOTH subjects for review
-                        cur.execute(
+                        # Log to conflict_resolution table
+                        cursor.execute(
                             """
-                            UPDATE subjects
-                            SET flagged_for_review = TRUE,
-                                review_notes = COALESCE(review_notes || E'\n', '') || %s
-                            WHERE global_subject_id IN (%s, %s)
-                            """,
-                            (
-                                f"[{datetime.utcnow().isoformat()}] Duplicate local_id conflict: "
-                                f"{local_id} (type: {id_type}) "
-                                f"linked to both {gsid} and {existing['global_subject_id']}",
-                                gsid,
-                                existing["global_subject_id"],
-                            ),
-                        )
-
-                        # Log to identity_resolutions
-                        cur.execute(
-                            """
-                            INSERT INTO identity_resolutions
-                            (input_center_id, input_local_id, matched_gsid, action,
+                            INSERT INTO conflict_resolution
+                            (center_id, local_subject_id, global_subject_id, conflict_type,
                              match_strategy, confidence_score, requires_review, review_reason, created_by)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                             """,
@@ -243,24 +226,23 @@ class DataProcessor:
                     elif existing and existing["global_subject_id"] == gsid:
                         # Already linked correctly, skip
                         logger.debug(
-                            f"[{self.project_key}] ID {local_id} already linked to {gsid}"
+                            f"[{self.project_key}] Local ID {local_id} already linked to {gsid}"
                         )
                         continue
 
-                    # No conflict - insert new mapping
-                    cur.execute(
+                    # Insert new local ID mapping
+                    cursor.execute(
                         """
                         INSERT INTO local_subject_ids
-                        (center_id, local_subject_id, identifier_type, global_subject_id)
-                        VALUES (%s, %s, %s, %s)
-                        ON CONFLICT (center_id, local_subject_id) DO UPDATE SET
-                            identifier_type = EXCLUDED.identifier_type,
-                            global_subject_id = EXCLUDED.global_subject_id
+                        (global_subject_id, center_id, local_subject_id, identifier_type, created_by)
+                        VALUES (%s, %s, %s, %s, %s)
+                        ON CONFLICT (center_id, local_subject_id) DO NOTHING
                         """,
-                        (center_id, local_id, id_type, gsid),
+                        (gsid, center_id, local_id, id_type, "redcap_pipeline"),
                     )
+
                     logger.info(
-                        f"[{self.project_key}] Linked {id_type}={local_id} -> {gsid}"
+                        f"[{self.project_key}] Registered {id_type}={local_id} for GSID {gsid}"
                     )
 
                 conn.commit()
