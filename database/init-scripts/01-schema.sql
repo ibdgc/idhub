@@ -31,6 +31,12 @@ CREATE TABLE subjects (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE subject_alias (
+    alias VARCHAR(14) NOT NULL,
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE local_subject_ids (
     center_id INT,
     local_subject_id VARCHAR,
@@ -38,97 +44,6 @@ CREATE TABLE local_subject_ids (
     global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (center_id, local_subject_id, identifier_type)
-);
-
-CREATE TABLE subject_alias (
-    alias VARCHAR(14) NOT NULL,
-    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE lcl (
-    niddk_no INT PRIMARY KEY,
-    knumber VARCHAR(7),
-    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
-    date_collected DATE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE specimen (
-    sample_id VARCHAR PRIMARY KEY,
-    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
-    sample_type VARCHAR,
-    year_collected INTEGER,
-    redcap_event VARCHAR,
-    region_location VARCHAR,
-    sample_available BOOLEAN DEFAULT TRUE,
-    project VARCHAR,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE wgs (
-    sample_id VARCHAR PRIMARY KEY,
-    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE immunochip (
-    sample_id VARCHAR PRIMARY KEY,
-    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE bge (
-    sample_id VARCHAR PRIMARY KEY,
-    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE exomechip (
-    sample_id VARCHAR PRIMARY KEY,
-    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE gwas2 (
-    sample_id VARCHAR PRIMARY KEY,
-    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE enteroid (
-    sample_id VARCHAR PRIMARY KEY,
-    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE olink (
-    sample_id VARCHAR PRIMARY KEY,
-    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE rnaseq (
-    sample_id VARCHAR PRIMARY KEY,
-    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE wes (
-    seq_id TEXT PRIMARY KEY,
-    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
-    batch TEXT,
-    vcf_sample_id VARCHAR,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE genotyping (
-    genotype_id TEXT PRIMARY KEY,
-    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
-    genotyping_project TEXT,
-    genotyping_barcode TEXT,
-    batch TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE identity_resolutions (
@@ -146,6 +61,73 @@ CREATE TABLE identity_resolutions (
     resolution_notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR DEFAULT 'system'
+);
+
+CREATE TABLE specimen (
+    sample_id VARCHAR PRIMARY KEY,
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
+    sample_type VARCHAR,
+    year_collected INTEGER,
+    redcap_event VARCHAR,
+    region_location VARCHAR,
+    sample_available BOOLEAN DEFAULT TRUE,
+    project VARCHAR,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE lcl (
+    niddk_no INT PRIMARY KEY,
+    knumber VARCHAR(7),
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
+    date_collected DATE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE enteroid (
+    sample_id VARCHAR PRIMARY KEY,
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE sequence (
+    sample_id TEXT PRIMARY KEY,
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
+    batch TEXT,
+    vcf_sample_id VARCHAR,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE immunochip (
+    sample_id VARCHAR PRIMARY KEY,
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE exomechip (
+    sample_id VARCHAR PRIMARY KEY,
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE gwas2 (
+    sample_id VARCHAR PRIMARY KEY,
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE genotyping (
+    genotype_id TEXT PRIMARY KEY,
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
+    genotyping_project TEXT,
+    genotyping_barcode TEXT,
+    batch TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE olink (
+    sample_id VARCHAR PRIMARY KEY,
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Indexes
