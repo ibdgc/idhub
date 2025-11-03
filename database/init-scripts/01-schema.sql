@@ -97,25 +97,7 @@ CREATE TABLE sequence (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE immunochip (
-    sample_id VARCHAR PRIMARY KEY,
-    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE exomechip (
-    sample_id VARCHAR PRIMARY KEY,
-    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE gwas2 (
-    sample_id VARCHAR PRIMARY KEY,
-    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE genotyping (
+CREATE TABLE genotype (
     genotype_id TEXT PRIMARY KEY,
     global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
     genotyping_project TEXT,
