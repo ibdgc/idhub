@@ -186,6 +186,42 @@
       "sample_type": "serum"
     },
     {
+      "source_field": "tib_rna_id",
+      "target_table": "sequence",
+      "target_field": "sample_id",
+      "sample_type": "bulk_rna"
+    },
+    {
+      "source_field": "tib_rna_id2",
+      "target_table": "sequence",
+      "target_field": "sample_id",
+      "sample_type": "bulk_rna"
+    },
+    {
+      "source_field": "cb_rna_id",
+      "target_table": "sequence",
+      "target_field": "sample_id",
+      "sample_type": "bulk_rna"
+    },
+    {
+      "source_field": "cb_rna_id2",
+      "target_table": "sequence",
+      "target_field": "sample_id",
+      "sample_type": "bulk_rna"
+    },
+    {
+      "source_field": "rsb_rna_id",
+      "target_table": "sequence",
+      "target_field": "sample_id",
+      "sample_type": "bulk_rna"
+    },
+    {
+      "source_field": "rsb_rna_id2",
+      "target_table": "sequence",
+      "target_field": "sample_id",
+      "sample_type": "bulk_rna"
+    },
+    {
       "source_field": "consortium_id",
       "target_table": "local_subject_ids",
       "target_field": "local_subject_id"
