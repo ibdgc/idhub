@@ -336,6 +336,41 @@ class DataProcessor:
                                 f"{record[source_field]} (type: {sample_type})"
                             )
 
+                    # Process all sequence mappings from config
+                    elif mapping.get("target_table") == "sequence":
+                        source_field = mapping["source_field"]
+                        sample_type = mapping.get("sample_type", "unknown")
+
+                        if record.get(source_field):
+                            # Extract batch and vcf_sample_id if present in record
+                            batch = record.get("batch") or record.get(
+                                "sequencing_batch"
+                            )
+                            vcf_sample_id = record.get("vcf_sample_id") or record.get(
+                                "vcf_id"
+                            )
+
+                            cur.execute(
+                                """
+                                INSERT INTO sequence (sample_id, global_subject_id, batch, vcf_sample_id)
+                                VALUES (%s, %s, %s, %s)
+                                ON CONFLICT (sample_id) DO UPDATE SET
+                                    global_subject_id = EXCLUDED.global_subject_id,
+                                    batch = EXCLUDED.batch,
+                                    vcf_sample_id = EXCLUDED.vcf_sample_id
+                                """,
+                                (
+                                    record[source_field],
+                                    gsid,
+                                    batch,
+                                    vcf_sample_id,
+                                ),
+                            )
+                            logger.debug(
+                                f"[{self.project_key}] Inserted sequence: "
+                                f"{record[source_field]} (type: {sample_type}, batch: {batch})"
+                            )
+
                 # Family linkage
                 if record.get("family_id"):
                     cur.execute(
@@ -379,6 +414,7 @@ class DataProcessor:
             "project_key": self.project_key,
             "project_name": self.project_name,
             "samples": {},
+            "sequences": {},
             "family": {},
             "metadata": {
                 "source": "redcap",
@@ -391,6 +427,8 @@ class DataProcessor:
 
         # Group specimens by type from mappings
         specimen_types = {}
+        sequence_types = {}
+
         for mapping in mappings:
             if mapping.get("target_table") == "specimen":
                 source_field = mapping["source_field"]
@@ -401,12 +439,28 @@ class DataProcessor:
                         specimen_types[sample_type] = []
                     specimen_types[sample_type].append(record[source_field])
 
-        # Add to fragment
+            elif mapping.get("target_table") == "sequence":
+                source_field = mapping["source_field"]
+                sample_type = mapping.get("sample_type", "unknown")
+
+                if record.get(source_field):
+                    if sample_type not in sequence_types:
+                        sequence_types[sample_type] = []
+                    sequence_types[sample_type].append(record[source_field])
+
+        # Add specimens to fragment
         for sample_type, sample_ids in specimen_types.items():
             if len(sample_ids) == 1:
                 fragment["samples"][sample_type] = sample_ids[0]
             else:
                 fragment["samples"][sample_type] = sample_ids
+
+        # Add sequences to fragment
+        for sample_type, sample_ids in sequence_types.items():
+            if len(sample_ids) == 1:
+                fragment["sequences"][sample_type] = sample_ids[0]
+            else:
+                fragment["sequences"][sample_type] = sample_ids
 
         # Add family info if present
         if record.get("family_id"):
