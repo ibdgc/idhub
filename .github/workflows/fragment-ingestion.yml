@@ -1,9 +1,14 @@
 ---
-# .github/workflows/fragment-ingestion.yml
 name: Fragment Ingestion Pipeline
 on:
   workflow_dispatch:
     inputs:
+      environment:
+        description: Target environment
+        required: true
+        type: choice
+        options: [qa, prod]
+        default: qa
       batch_id:
         description: Batch ID to load (e.g., batch_20251027_115323)
         required: true
@@ -20,6 +25,7 @@ jobs:
     outputs:
       batch_id: ${{ steps.validate.outputs.batch_id }}
       mode: ${{ steps.validate.outputs.mode }}
+      environment: ${{ steps.validate.outputs.environment }}
     steps:
       - name: Validate batch ID format
         id: validate
@@ -30,43 +36,42 @@ jobs:
             exit 1
           fi
           echo "batch_id=$BATCH_ID" >> $GITHUB_OUTPUT
+          echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
           if [[ "${{ github.event.inputs.dry_run }}" == "true" ]]; then
             echo "mode=DRY RUN" >> $GITHUB_OUTPUT
             echo "::notice::Running in DRY RUN mode - no changes will be made"
           else
             echo "mode=LIVE LOAD" >> $GITHUB_OUTPUT
-            echo "::warning::Running in LIVE mode - data will be loaded to database"
+            echo "::warning::Running in LIVE mode - data will be loaded to ${{ github.event.inputs.environment }} database"
           fi
   ingest:
     name: Load Fragment Data
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    environment: ${{ github.event.inputs.environment }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.environment }}
       - name: Set up SSH tunnel to database
         env:
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets[format('SSH_PRIVATE_KEY_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          SSH_HOST: ${{ secrets[format('SSH_HOST_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          SSH_USER: ${{ secrets[format('SSH_USER_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
         run: |
           echo "::group::Setting up SSH tunnel"
-          # Configure SSH
           mkdir -p ~/.ssh
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts
-
-          # Start SSH tunnel
           ssh -4 -f -N \
             -o ServerAliveInterval=60 \
             -o ServerAliveCountMax=3 \
             -o ExitOnForwardFailure=yes \
             -L 127.0.0.1:5432:127.0.0.1:5432 \
             $SSH_USER@$SSH_HOST
-
-          # Wait for tunnel to be ready
           echo "Waiting for tunnel..."
           for i in {1..30}; do
             if nc -zv 127.0.0.1 5432 2>&1 | grep -q succeeded; then
@@ -82,21 +87,20 @@ jobs:
           exit 1
       - name: Verify database connectivity
         env:
-          PGPASSWORD: ${{ secrets.DB_PASSWORD }}
+          PGPASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_USER: ${{ secrets[format('DB_USER_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_NAME: ${{ secrets[format('DB_NAME_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
         run: |
           echo "::group::Testing database connection"
-          # Install PostgreSQL client
           sudo apt-get update -qq
           sudo apt-get install -y postgresql-client
-
-          # Test connection
-          psql -h localhost -p 5432 -U idhub_user -d idhub -c "SELECT version();"
+          psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -c "SELECT version();"
           echo "✓ Database connection verified"
           echo "::endgroup::"
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
           cache: pip
           cache-dependency-path: table-loader/requirements.txt
       - name: Install dependencies
@@ -105,8 +109,6 @@ jobs:
           cd table-loader
           pip install --upgrade pip
           pip install -r requirements.txt
-
-          # Verify installation
           pip list | grep -E "(pandas|psycopg2|boto3)"
           echo "✓ Dependencies installed"
           echo "::endgroup::"
@@ -118,7 +120,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: us-east-1
-          S3_BUCKET: idhub-curated-fragments
+          S3_BUCKET: ${{ needs.validate.outputs.environment == 'prod' && 'idhub-curated-fragments' || 'idhub-curated-fragments-qa' }}
         run: |
           echo "::group::Verifying S3 batch exists"
           pip install awscli
@@ -126,35 +128,34 @@ jobs:
           PREFIX="staging/validated/${BATCH_ID}/"
           echo "Searching for batch at: s3://$S3_BUCKET/$PREFIX"
           echo ""
-
-          # List fragments in the batch
           if aws s3 ls "s3://$S3_BUCKET/$PREFIX" 2>/dev/null; then
             echo ""
             echo "✓ Found batch: $BATCH_ID"
             echo ""
-            # List all files in batch
             echo "Files in batch:"
             aws s3 ls "s3://$S3_BUCKET/$PREFIX"
             echo ""
-            # Count CSV table fragments (exclude metadata files)
+            
             TABLE_COUNT=$(aws s3 ls "s3://$S3_BUCKET/$PREFIX" | grep '\.csv$' | grep -v 'local_subject_ids.csv' | wc -l || echo "0")
             echo "Table fragments (CSV): $TABLE_COUNT"
-            # Check for required files
+            
             REPORT_EXISTS=$(aws s3 ls "s3://$S3_BUCKET/$PREFIX" | grep -c 'validation_report.json' || echo "0")
             LOCAL_IDS_EXISTS=$(aws s3 ls "s3://$S3_BUCKET/$PREFIX" | grep -c 'local_subject_ids.csv' || echo "0")
             echo "Validation report: $([ "$REPORT_EXISTS" -eq "1" ] && echo "✓ Found" || echo "✗ Missing")"
             echo "Local subject IDs: $([ "$LOCAL_IDS_EXISTS" -eq "1" ] && echo "✓ Found" || echo "✗ Missing")"
             echo ""
-            # Show validation report contents for debugging (optional)
+            
             if [ "$REPORT_EXISTS" -eq "1" ]; then
               echo "Validation report preview:"
               aws s3 cp "s3://$S3_BUCKET/$PREFIX/validation_report.json" - | jq -r '.subject_id_candidates, .center_id_field, .exclude_from_load' 2>/dev/null || echo "Could not parse report"
               echo ""
             fi
+            
             if [ "$TABLE_COUNT" -eq "0" ]; then
               echo "::error::No table CSV fragments found in batch"
               exit 1
             fi
+            
             if [ "$REPORT_EXISTS" -eq "0" ]; then
               echo "::warning::validation_report.json not found - will use default exclusions"
             fi
@@ -170,30 +171,26 @@ jobs:
         id: load
         env:
           DB_HOST: localhost
-          DB_NAME: idhub
-          DB_USER: idhub_user
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: ${{ secrets[format('DB_NAME_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_USER: ${{ secrets[format('DB_USER_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_PASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
           DB_PORT: 5432
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: us-east-1
-          S3_BUCKET: idhub-curated-fragments
+          S3_BUCKET: ${{ needs.validate.outputs.environment == 'prod' && 'idhub-curated-fragments' || 'idhub-curated-fragments-qa' }}
         run: |
           echo "::group::Running table loader"
           cd table-loader
-
-          # Build command
           CMD="python main.py --batch-id ${{ github.event.inputs.batch_id }}"
           if [[ "${{ github.event.inputs.dry_run }}" == "false" ]]; then
             CMD="$CMD --approve"
           fi
           echo "Executing: $CMD"
           echo ""
-
-          # Run with proper exit code handling
-          set +e  # Don't exit on error yet
+          set +e
           $CMD 2>&1 | tee loader_output.log
-          EXIT_CODE=${PIPESTATUS[0]}  # Get exit code of python, not tee
+          EXIT_CODE=${PIPESTATUS[0]}
           set -e
           echo ""
           if [ $EXIT_CODE -eq 0 ]; then
@@ -208,9 +205,7 @@ jobs:
         run: |
           if [ -f table-loader/loader_output.log ]; then
             echo "::group::Load Summary"
-            # Extract key metrics from logs
             grep -E "(Loaded|Processing|Error|Success|Failed)" table-loader/loader_output.log || true
-            # Count operations
             RECORDS=$(grep -oP "Loaded \K\d+" table-loader/loader_output.log | tail -1 || echo "0")
             echo "Records processed: $RECORDS"
             echo "::endgroup::"
@@ -219,7 +214,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: loader-logs-${{ github.event.inputs.batch_id }}
+          name: loader-logs-${{ needs.validate.outputs.environment }}-${{ github.event.inputs.batch_id
+            }}
           path: |
             table-loader/logs/
             table-loader/loader_output.log
@@ -229,7 +225,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: load-report-${{ github.event.inputs.batch_id }}
+          name: load-report-${{ needs.validate.outputs.environment }}-${{ github.event.inputs.batch_id
+            }}
           path: table-loader/loader_output.log
           retention-days: 90
       - name: Cleanup SSH tunnel
@@ -240,13 +237,14 @@ jobs:
       - name: Notify on failure
         if: failure() && github.event.inputs.dry_run == 'false'
         run: |
-          echo "::error::Fragment ingestion failed for batch ${{ github.event.inputs.batch_id }}"
+          echo "::error::Fragment ingestion failed for batch ${{ github.event.inputs.batch_id }} in ${{ needs.validate.outputs.environment }}"
           echo "Check the uploaded logs for details"
       - name: Summary
         if: always()
         run: |-
           echo "## Fragment Ingestion Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ needs.validate.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Batch ID**: \`${{ github.event.inputs.batch_id }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Mode**: ${{ needs.validate.outputs.mode }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY

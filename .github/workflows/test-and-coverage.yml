@@ -2,9 +2,9 @@
 name: Test and Coverage
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, prod, qa]
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, prod, qa]
   workflow_dispatch:
 jobs:
   test:
@@ -24,13 +24,12 @@ jobs:
       - name: Copy coverage reports from container
         if: always()
         run: |
-          # Reports are already in the mounted volume, just verify they exist
           ls -la */htmlcov/ */test-reports/ || true
       - name: Upload coverage HTML report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-html-${{ matrix.service }}
+          name: coverage-html-${{ matrix.service }}-${{ github.sha }}
           path: |
             gsid-service/htmlcov/
             redcap-pipeline/htmlcov/
@@ -42,7 +41,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-reports-${{ matrix.service }}
+          name: test-reports-${{ matrix.service }}-${{ github.sha }}
           path: |
             gsid-service/test-reports/
             redcap-pipeline/test-reports/
@@ -101,7 +100,6 @@ jobs:
           for service in gsid-service redcap-pipeline fragment-validator table-loader; do
             if [ -f "$service/test-reports/coverage.xml" ]; then
               echo "### $service" >> $GITHUB_STEP_SUMMARY
-              # Extract coverage percentage from XML (basic parsing)
               coverage=$(grep -oP 'line-rate="\K[0-9.]+' "$service/test-reports/coverage.xml" | head -1)
               if [ -n "$coverage" ]; then
                 percentage=$(echo "$coverage * 100" | bc)
