@@ -1,0 +1,41 @@
+---
+name: Deploy to Environment
+on:
+  push:
+    branches: [qa, prod]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        type: choice
+        options: [qa, prod]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/prod' && 'prod' || 'qa') }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Determine environment
+        id: env
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ENV="${{ github.event.inputs.environment }}"
+          elif [ "${{ github.ref }}" = "refs/heads/prod" ]; then
+            ENV="prod"
+          else
+            ENV="qa"
+          fi
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+          echo "::notice::Deploying to $ENV environment"
+      - name: Deploy notification
+        run: |-
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ steps.env.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Deployment process would continue here with actual deployment steps" >> $GITHUB_STEP_SUMMARY
