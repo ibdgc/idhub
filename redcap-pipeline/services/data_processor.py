@@ -352,10 +352,11 @@ class DataProcessor:
 
                             cur.execute(
                                 """
-                                INSERT INTO sequence (sample_id, global_subject_id, batch, vcf_sample_id)
+                                INSERT INTO sequence (sample_id, global_subject_id, sample_type, batch, vcf_sample_id)
                                 VALUES (%s, %s, %s, %s)
                                 ON CONFLICT (sample_id) DO UPDATE SET
                                     global_subject_id = EXCLUDED.global_subject_id,
+                                    sample_type = EXCLUDED.sample_type,
                                     batch = EXCLUDED.batch,
                                     vcf_sample_id = EXCLUDED.vcf_sample_id
                                 """,

@@ -92,6 +92,7 @@ CREATE TABLE enteroid (
 CREATE TABLE sequence (
     sample_id TEXT PRIMARY KEY,
     global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
+    sample_type VARCHAR,
     batch TEXT,
     vcf_sample_id VARCHAR,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
