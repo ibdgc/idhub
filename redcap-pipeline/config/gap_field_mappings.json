@@ -292,6 +292,11 @@
       "target_field": "local_subject_id"
     },
     {
+      "source_field": "alias",
+      "target_table": "local_subject_ids",
+      "target_field": "local_subject_id"
+    },
+    {
       "source_field": "family_id",
       "target_table": "family",
       "target_field": "family_id"
@@ -306,15 +311,5 @@
       "target_table": "subjects",
       "target_field": "registration_year"
     }
-  ],
-  "transformations": {
-    "registration_date": {
-      "type": "extract_year"
-    },
-    "control": {
-      "type": "boolean",
-      "true_values": ["1", "yes", "true"],
-      "false_values": ["0", "no", "false"]
-    }
-  }
+  ]
 }

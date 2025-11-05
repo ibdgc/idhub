@@ -186,6 +186,18 @@
       "sample_type": "serum"
     },
     {
+      "source_field": "dna_fbs",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "dna_feinstein"
+    },
+    {
+      "source_field": "dna_local",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "dna_local"
+    },
+    {
       "source_field": "consortium_id",
       "target_table": "local_subject_ids",
       "target_field": "local_subject_id"
