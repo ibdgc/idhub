@@ -65,6 +65,7 @@ class Settings:
         "cedarssinai_medica": "Cedars-Sinai",
         "johns_hopkins_univ": "Johns Hopkins",
         "emory_university": "Emory",
+        "university_of_toro": "Toronto",
     }
 
     # Fuzzy matching threshold (0.0-1.0)
