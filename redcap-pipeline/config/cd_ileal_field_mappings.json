@@ -187,15 +187,17 @@
     },
     {
       "source_field": "tib_rna_id",
-      "target_table": "sequence",
+      "target_table": "specimen",
       "target_field": "sample_id",
-      "sample_type": "rna_bulk"
+      "sample_type": "biopsy",
+      "region_location": "terminal_ileum"
     },
     {
       "source_field": "tib_rna_id2",
-      "target_table": "sequence",
+      "target_table": "specimen",
       "target_field": "sample_id",
-      "sample_type": "rna_bulk"
+      "sample_type": "biopsy",
+      "region_location": "terminal_ileum"
     },
     {
       "source_field": "tib_dna_id1",
@@ -212,16 +214,25 @@
       "region_location": "terminal_ileum"
     },
     {
-      "source_field": "cb_rna_id",
-      "target_table": "sequence",
+      "source_field": "tib_hist_id1",
+      "target_table": "specimen",
       "target_field": "sample_id",
-      "sample_type": "rna_bulk"
+      "sample_type": "histology",
+      "region_location": "terminal_ileum"
+    },
+    {
+      "source_field": "cb_rna_id",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "biopsy",
+      "region_location": "colon"
     },
     {
       "source_field": "cb_rna_id2",
-      "target_table": "sequence",
+      "target_table": "specimen",
       "target_field": "sample_id",
-      "sample_type": "rna_bulk"
+      "sample_type": "biopsy",
+      "region_location": "colon"
     },
     {
       "source_field": "cb_dna_id1",
@@ -238,16 +249,25 @@
       "region_location": "colon"
     },
     {
-      "source_field": "rsb_rna_id",
-      "target_table": "sequence",
+      "source_field": "cb_hist_id1",
+      "target_table": "specimen",
       "target_field": "sample_id",
-      "sample_type": "rna_bulk"
+      "sample_type": "histology",
+      "region_location": "colon"
+    },
+    {
+      "source_field": "rsb_rna_id",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "biopsy",
+      "region_location": "sigmoid_rectum"
     },
     {
       "source_field": "rsb_rna_id2",
-      "target_table": "sequence",
+      "target_table": "specimen",
       "target_field": "sample_id",
-      "sample_type": "rna_bulk"
+      "sample_type": "biopsy",
+      "region_location": "sigmoid_rectum"
     },
     {
       "source_field": "rsb_dna_id1",
@@ -264,6 +284,13 @@
       "region_location": "sigmoid_rectum"
     },
     {
+      "source_field": "rsb_hist_id1",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "histology",
+      "region_location": "sigmoid_rectum"
+    },
+    {
       "source_field": "dna_repo",
       "target_table": "specimen",
       "target_field": "sample_id",
@@ -274,6 +301,251 @@
       "target_table": "specimen",
       "target_field": "sample_id",
       "sample_type": "dna_local"
+    },
+    {
+      "source_field": "uninv_ileal_trizol1",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_uninv",
+      "region_location": "ileal"
+    },
+    {
+      "source_field": "uninv_ileal_trizol2",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_uninv",
+      "region_location": "ileal"
+    },
+    {
+      "source_field": "uninv_ileal_empty1",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_uninv",
+      "region_location": "ileal"
+    },
+    {
+      "source_field": "uninv_ileal_empty2",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_uninv",
+      "region_location": "ileal"
+    },
+    {
+      "source_field": "uninv_ileal_empty3",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_uninv",
+      "region_location": "ileal"
+    },
+    {
+      "source_field": "uninv_ileum_myo_id",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_uninv_myofib",
+      "region_location": "ileal"
+    },
+    {
+      "source_field": "uninv_colonic_trizol1",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_uninv",
+      "region_location": "colon"
+    },
+    {
+      "source_field": "uninv_colonic_trizol2",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_uninv",
+      "region_location": "colon"
+    },
+    {
+      "source_field": "uninv_colonic_empty1",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_uninv",
+      "region_location": "colon"
+    },
+    {
+      "source_field": "uninv_colonic_empty2",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_uninv",
+      "region_location": "colon"
+    },
+    {
+      "source_field": "uninv_colonic_empty3",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_uninv",
+      "region_location": "colon"
+    },
+    {
+      "source_field": "uninv_colon_myo_id",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_uninv_myofib",
+      "region_location": "colon"
+    },
+    {
+      "source_field": "inv_ileum_trizol1",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_inv",
+      "region_location": "ileal"
+    },
+    {
+      "source_field": "inv_ileum_trizol2",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_inv",
+      "region_location": "ileal"
+    },
+    {
+      "source_field": "inv_ileum_empty1",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_inv",
+      "region_location": "ileal"
+    },
+    {
+      "source_field": "inv_ileum_empty2",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_inv",
+      "region_location": "ileal"
+    },
+    {
+      "source_field": "inv_ileum_empty3",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_inv",
+      "region_location": "ileal"
+    },
+    {
+      "source_field": "inv_ileum_myo_id",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_inv_myofib",
+      "region_location": "ileal"
+    },
+    {
+      "source_field": "inv_colon_trizol1",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_inv",
+      "region_location": "colon"
+    },
+    {
+      "source_field": "inv_colon_trizol2",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_inv",
+      "region_location": "colon"
+    },
+    {
+      "source_field": "inv_colon_empty1",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_inv",
+      "region_location": "colon"
+    },
+    {
+      "source_field": "inv_colon_empty2",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_inv",
+      "region_location": "colon"
+    },
+    {
+      "source_field": "inv_colon_empty3",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_inv",
+      "region_location": "colon"
+    },
+    {
+      "source_field": "inv_colon_myo_id",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_inv_myofib",
+      "region_location": "colon"
+    },
+    {
+      "source_field": "mesfat_trizol1",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_mesfat",
+      "region_location": "mesfat"
+    },
+    {
+      "source_field": "mesfat_trizol2",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_mesfat",
+      "region_location": "mesfat"
+    },
+    {
+      "source_field": "mesfat_empty1",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_mesfat",
+      "region_location": "mesfat"
+    },
+    {
+      "source_field": "mesfat_empty2",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_mesfat",
+      "region_location": "mesfat"
+    },
+    {
+      "source_field": "mesfat_empty3",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_mesfat",
+      "region_location": "mesfat"
+    },
+    {
+      "source_field": "mesfat_fat_myo_id",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "surg_myofib",
+      "region_location": "mesfat"
+    },
+    {
+      "source_field": "pbmc1_id",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "pbmc",
+      "region_location": ""
+    },
+    {
+      "source_field": "pbmc2_id",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "pbmc",
+      "region_location": ""
+    },
+    {
+      "source_field": "stool_aid1",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "stool",
+      "region_location": ""
+    },
+    {
+      "source_field": "stool_aid2",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "stool",
+      "region_location": ""
+    },
+    {
+      "source_field": "stool_aid3",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "stool",
+      "region_location": ""
     },
     {
       "source_field": "consortium_id",

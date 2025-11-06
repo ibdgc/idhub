@@ -198,6 +198,164 @@
       "sample_type": "dna_local"
     },
     {
+      "source_field": "sc_aid",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "stool",
+      "region_location": ""
+    },
+    {
+      "source_field": "sc_aid2",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "stool",
+      "region_location": ""
+    },
+    {
+      "source_field": "sc_aid3",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "stool",
+      "region_location": ""
+    },
+    {
+      "source_field": "cecum_rna_id",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "biopsy",
+      "region_location": "cecum"
+    },
+    {
+      "source_field": "cecum_dna_id1",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "dna_microbe",
+      "region_location": "cecum"
+    },
+    {
+      "source_field": "cecum_dna_id2",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "dna_microbe",
+      "region_location": "cecum"
+    },
+    {
+      "source_field": "cecum_hist_id1",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "histology",
+      "region_location": "cecum"
+    },
+    {
+      "source_field": "cecum_hist_id2",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "histology",
+      "region_location": "cecum"
+    },
+    {
+      "source_field": "cecum_enteroid",
+      "target_table": "enteroid",
+      "target_field": "sample_id",
+      "region_location": "cecum"
+    },
+    {
+      "source_field": "rectum_rna_id",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "biopsy",
+      "region_location": "rectum"
+    },
+    {
+      "source_field": "rectum_dna_id1",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "dna_microbe",
+      "region_location": "rectum"
+    },
+    {
+      "source_field": "rectum_dna_id2",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "dna_microbe",
+      "region_location": "rectum"
+    },
+    {
+      "source_field": "rectum_hist_id1",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "histology",
+      "region_location": "rectum"
+    },
+    {
+      "source_field": "rectum_hist_id2",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "histology",
+      "region_location": "rectum"
+    },
+    {
+      "source_field": "rectum_enteroid",
+      "target_table": "enteroid",
+      "target_field": "sample_id",
+      "region_location": "rectum"
+    },
+    {
+      "source_field": "colon_rna_id",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "biopsy",
+      "region_location": "colon"
+    },
+    {
+      "source_field": "colon_dna_id1",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "dna_microbe",
+      "region_location": "colon"
+    },
+    {
+      "source_field": "colon_dna_id2",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "dna_microbe",
+      "region_location": "colon"
+    },
+    {
+      "source_field": "colon_hist_id1",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "histology",
+      "region_location": "colon"
+    },
+    {
+      "source_field": "colon_hist_id2",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "histology",
+      "region_location": "colon"
+    },
+    {
+      "source_field": "colon_enteroid",
+      "target_table": "enteroid",
+      "target_field": "sample_id",
+      "region_location": "colon"
+    },
+    {
+      "source_field": "pbmc1_id",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "pbmc",
+      "region_location": ""
+    },
+    {
+      "source_field": "pbmc2_id",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "pbmc",
+      "region_location": ""
+    },
+    {
       "source_field": "consortium_id",
       "target_table": "local_subject_ids",
       "target_field": "local_subject_id"
