@@ -112,60 +112,76 @@ jobs:
           # Execute deployment on server
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_HOST} << 'ENDSSH'
             set -e
-            
             echo "=== Starting deployment to ${{ steps.env.outputs.environment }} ==="
-            
+
             # Navigate to project directory
             cd /opt/idhub
-            
+
             # Verify .env file exists
             if [ ! -f .env ]; then
               echo "ERROR: .env file not found"
               exit 1
             fi
-            
+
+            # Load environment variables
+            export $(grep -v '^#' .env | xargs)
+
             # Show environment being deployed
-            echo "Environment: $(grep ENVIRONMENT .env | cut -d'=' -f2)"
-            echo "Domain: $(grep DOMAIN .env | cut -d'=' -f2)"
-            echo "S3 Bucket: $(grep S3_BUCKET .env | cut -d'=' -f2)"
-            
+            echo "Environment: $ENVIRONMENT"
+            echo "Domain: $DOMAIN"
+            echo "S3 Bucket: $S3_BUCKET"
+
             # Backup current state
             echo "Creating backup..."
             BACKUP_DIR="/opt/idhub/backups/$(date +%Y%m%d_%H%M%S)"
             mkdir -p "$BACKUP_DIR"
             docker-compose config > "$BACKUP_DIR/docker-compose.backup.yml" 2>/dev/null || true
             cp .env "$BACKUP_DIR/.env.backup"
-            
+
             # Pull latest code
             echo "Pulling latest code from ${{ github.ref_name }}..."
             git fetch origin
             git checkout ${{ github.ref_name }}
             git pull origin ${{ github.ref_name }}
-            
+
+            # Process nginx configs with envsubst
+            echo "Processing nginx configuration files..."
+            for conf_file in nginx/conf.d/${ENVIRONMENT}/*.conf; do
+              if [ -f "$conf_file" ]; then
+                echo "  Processing: $conf_file"
+                envsubst '${DOMAIN}' < "$conf_file" > "${conf_file}.processed"
+                mv "${conf_file}.processed" "$conf_file"
+              fi
+            done
+
+            # Fix http2 deprecation warning
+            echo "Updating http2 syntax..."
+            sed -i 's/listen 443 ssl http2;/listen 443 ssl;\n    http2 on;/g' nginx/conf.d/${ENVIRONMENT}/*.conf
+
             # Stop services gracefully
             echo "Stopping services..."
             docker-compose down --timeout 30
-            
+
             # Prune old images to save space
             echo "Cleaning up old Docker images..."
             docker image prune -f --filter "until=168h"
-            
+
             # Build services
             echo "Building services..."
             docker-compose build gsid-service redcap-pipeline fragment-validator table-loader
-            
+
             # Start services
             echo "Starting services..."
             docker-compose up -d
-            
+
             # Wait for services to initialize
             echo "Waiting for services to initialize..."
             sleep 10
-            
+
             # Verify services are running
             echo "Verifying deployment..."
             docker-compose ps
-            
+
             # Check GSID service health
             echo "Checking GSID service health..."
             for i in {1..30}; do
@@ -181,7 +197,7 @@ jobs:
               fi
               sleep 2
             done
-            
+
             # Check NocoDB health
             echo "Checking NocoDB health..."
             for i in {1..30}; do
@@ -197,7 +213,7 @@ jobs:
               fi
               sleep 2
             done
-            
+
             # Check nginx
             echo "Checking nginx configuration..."
             if docker-compose exec -T nginx nginx -t 2>&1; then
@@ -207,7 +223,6 @@ jobs:
               docker-compose logs --tail=50 nginx
               exit 1
             fi
-            
             echo "=== Deployment completed successfully ==="
           ENDSSH
       - name: Cleanup SSH key
