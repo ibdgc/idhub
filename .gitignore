@@ -2,6 +2,7 @@ data/
 postgres_data/
 .env
 ssl/
+backups/
 
 # Logs
 *.log
