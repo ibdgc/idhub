@@ -89,6 +89,7 @@ class DataProcessor:
     def extract_registration_year(self, record: Dict) -> Optional[date]:
         """
         Extract and convert registration_year from REDCap record.
+        Always normalizes to January 1st of the year.
         Looks for field mapped to 'registration_year' in target_field.
         """
         # Find the registration_year field from mappings
@@ -114,39 +115,42 @@ class DataProcessor:
             f"[{self.project_key}] Found registration field '{reg_field}' = '{reg_value}'"
         )
 
-        # If it's already a date object
-        if isinstance(reg_value, date):
-            return reg_value
+        year = None
 
-        # If it's a datetime object
-        if isinstance(reg_value, datetime):
-            return reg_value.date()
+        # If it's already a date object, extract year
+        if isinstance(reg_value, date):
+            year = reg_value.year
+
+        # If it's a datetime object, extract year
+        elif isinstance(reg_value, datetime):
+            year = reg_value.year
 
         # If it's a string
-        if isinstance(reg_value, str):
+        elif isinstance(reg_value, str):
             reg_value = reg_value.strip()
 
             if not reg_value:
                 return None
 
             try:
-                # Try full date format (YYYY-MM-DD)
+                # Try full date format (YYYY-MM-DD) - extract year only
                 if len(reg_value) >= 10 and "-" in reg_value:
-                    date_str = reg_value[:10]
-                    return date.fromisoformat(date_str)
+                    year_str = reg_value.split("-")[0]
+                    year = int(year_str)
 
                 # Try just year (YYYY)
-                if len(reg_value) == 4 and reg_value.isdigit():
+                elif len(reg_value) == 4 and reg_value.isdigit():
                     year = int(reg_value)
-                    if 1900 <= year <= 2100:
-                        return date(year, 1, 1)
 
-                # Try parsing with various formats
-                for fmt in ["%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%Y/%m/%d"]:
-                    try:
-                        return datetime.strptime(reg_value, fmt).date()
-                    except ValueError:
-                        continue
+                # Try parsing with various formats - extract year only
+                else:
+                    for fmt in ["%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%Y/%m/%d"]:
+                        try:
+                            parsed_date = datetime.strptime(reg_value, fmt)
+                            year = parsed_date.year
+                            break
+                        except ValueError:
+                            continue
 
             except (ValueError, IndexError) as e:
                 logger.warning(
@@ -155,12 +159,19 @@ class DataProcessor:
                 return None
 
         # If it's an integer year
-        if isinstance(reg_value, int):
-            if 1900 <= reg_value <= 2100:
-                return date(reg_value, 1, 1)
+        elif isinstance(reg_value, int):
+            year = reg_value
+
+        # Validate year and convert to January 1st
+        if year and 1900 <= year <= 2100:
+            normalized_date = date(year, 1, 1)
+            logger.debug(
+                f"[{self.project_key}] Normalized '{reg_value}' to {normalized_date}"
+            )
+            return normalized_date
 
         logger.warning(
-            f"[{self.project_key}] Unhandled registration_year type: {type(reg_value)} = {reg_value}"
+            f"[{self.project_key}] Invalid year extracted: {year} from {reg_value}"
         )
         return None
 
