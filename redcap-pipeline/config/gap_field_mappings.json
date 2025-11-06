@@ -302,7 +302,7 @@
       "target_field": "family_id"
     },
     {
-      "source_field": "control",
+      "source_field": "control___1",
       "target_table": "subjects",
       "target_field": "control"
     },
