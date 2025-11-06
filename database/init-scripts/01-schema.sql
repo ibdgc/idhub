@@ -21,7 +21,7 @@ CREATE TABLE family (
 CREATE TABLE subjects (
     global_subject_id VARCHAR(21) PRIMARY KEY,
     center_id INT NOT NULL REFERENCES centers(center_id),
-    registration_year INTEGER,
+    registration_year DATE,
     control BOOLEAN DEFAULT FALSE,
     withdrawn BOOLEAN DEFAULT FALSE,
     family_id VARCHAR REFERENCES family(family_id),
@@ -67,7 +67,7 @@ CREATE TABLE specimen (
     sample_id VARCHAR PRIMARY KEY,
     global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
     sample_type VARCHAR,
-    year_collected INTEGER,
+    year_collected DATE,
     redcap_event VARCHAR,
     region_location VARCHAR,
     sample_available BOOLEAN DEFAULT TRUE,

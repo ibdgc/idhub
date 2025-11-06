@@ -86,6 +86,114 @@ class DataProcessor:
 
         return value
 
+    def extract_registration_year(self, record: Dict) -> Optional[date]:
+        """
+        Extract and convert registration_year from REDCap record.
+        Looks for field mapped to 'registration_year' in target_field.
+        """
+        # Find the registration_year field from mappings
+        reg_field = None
+        for mapping in self.field_mappings.get("mappings", []):
+            if (
+                mapping.get("target_table") == "subjects"
+                and mapping.get("target_field") == "registration_year"
+            ):
+                reg_field = mapping.get("source_field")
+                break
+
+        if not reg_field:
+            logger.debug(f"[{self.project_key}] No registration_year field mapped")
+            return None
+
+        reg_value = record.get(reg_field)
+
+        if not reg_value:
+            return None
+
+        logger.debug(
+            f"[{self.project_key}] Found registration field '{reg_field}' = '{reg_value}'"
+        )
+
+        # If it's already a date object
+        if isinstance(reg_value, date):
+            return reg_value
+
+        # If it's a datetime object
+        if isinstance(reg_value, datetime):
+            return reg_value.date()
+
+        # If it's a string
+        if isinstance(reg_value, str):
+            reg_value = reg_value.strip()
+
+            if not reg_value:
+                return None
+
+            try:
+                # Try full date format (YYYY-MM-DD)
+                if len(reg_value) >= 10 and "-" in reg_value:
+                    date_str = reg_value[:10]
+                    return date.fromisoformat(date_str)
+
+                # Try just year (YYYY)
+                if len(reg_value) == 4 and reg_value.isdigit():
+                    year = int(reg_value)
+                    if 1900 <= year <= 2100:
+                        return date(year, 1, 1)
+
+                # Try parsing with various formats
+                for fmt in ["%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%Y/%m/%d"]:
+                    try:
+                        return datetime.strptime(reg_value, fmt).date()
+                    except ValueError:
+                        continue
+
+            except (ValueError, IndexError) as e:
+                logger.warning(
+                    f"[{self.project_key}] Could not parse registration_date '{reg_value}': {e}"
+                )
+                return None
+
+        # If it's an integer year
+        if isinstance(reg_value, int):
+            if 1900 <= reg_value <= 2100:
+                return date(reg_value, 1, 1)
+
+        logger.warning(
+            f"[{self.project_key}] Unhandled registration_year type: {type(reg_value)} = {reg_value}"
+        )
+        return None
+
+    def extract_control_status(self, record: Dict) -> bool:
+        """
+        Extract control status from REDCap record.
+        Looks for field mapped to 'control' in target_field.
+        """
+        # Find the control field from mappings
+        control_field = None
+        for mapping in self.field_mappings.get("mappings", []):
+            if (
+                mapping.get("target_table") == "subjects"
+                and mapping.get("target_field") == "control"
+            ):
+                control_field = mapping.get("source_field")
+                break
+
+        if not control_field:
+            return False
+
+        control_value = record.get(control_field, False)
+
+        # Handle various representations of boolean
+        if isinstance(control_value, bool):
+            return control_value
+        if isinstance(control_value, str):
+            return control_value.lower() in ["1", "true", "yes", "y"]
+        if isinstance(control_value, int):
+            return control_value == 1
+
+        return False
+
     def extract_subject_ids(self, record: Dict) -> List[Dict[str, str]]:
         """Extract all available subject IDs from record based on field mappings"""
         subject_ids = []
@@ -106,10 +214,10 @@ class DataProcessor:
         self,
         subject_ids: List[Dict[str, str]],
         center_id: int,
+        record: Dict,  # ADD THIS PARAMETER
     ) -> Dict[str, Any]:
         """
         Decide which GSID the *set* of local-subject-IDs belongs to.
-
         Steps
         -----
         1. Query local_subject_ids for each ID to discover existing GSIDs.
@@ -122,11 +230,21 @@ class DataProcessor:
         if not subject_ids:
             raise ValueError("No valid subject IDs found in record")
 
+        # Extract metadata from record
+        registration_year = self.extract_registration_year(record)
+        control = self.extract_control_status(record)
+
+        logger.debug(
+            f"[{self.project_key}] Extracted metadata: "
+            f"registration_year={registration_year}, control={control}"
+        )
+
         # ------------------------------------------------------------------
         # 1. Look-up every ID in our own database first
         # ------------------------------------------------------------------
         conn = get_db_connection()
         gsids_found: Dict[str, str] = {}  # {local_id: gsid}
+
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 for id_info in subject_ids:
@@ -159,6 +277,9 @@ class DataProcessor:
                 center_id=center_id,
                 local_subject_id=primary_id["local_subject_id"],
                 identifier_type=primary_id["identifier_type"],
+                registration_year=registration_year,  # ADD THIS
+                control=control,  # ADD THIS
+                created_by=self.project_key,
             )
             gsid = result["gsid"]
             action = result["action"]  # will be 'create_new'
@@ -184,7 +305,7 @@ class DataProcessor:
             action = "conflict_detected"
             conflict = True
             conflicting_gsids = unique_gsids
-            # Use the first subject-ID as ‘primary’ for logging
+            # Use the first subject-ID as 'primary' for logging
             identifier_type = subject_ids[0]["identifier_type"]
             local_subject_id = subject_ids[0]["local_subject_id"]
 
@@ -198,6 +319,8 @@ class DataProcessor:
             "local_subject_id": local_subject_id,
             "conflict": conflict,
             "conflicting_gsids": conflicting_gsids,
+            "registration_year": registration_year,  # ADD THIS
+            "control": control,  # ADD THIS
         }
 
     def register_all_local_ids(
@@ -522,7 +645,7 @@ class DataProcessor:
             )
 
             # Resolve against GSID service (checks all IDs for existing matches)
-            resolution = self.resolve_subject_ids(subject_ids, center_id)
+            resolution = self.resolve_subject_ids(subject_ids, center_id, record)
             gsid = resolution["gsid"]
 
             # Log resolution

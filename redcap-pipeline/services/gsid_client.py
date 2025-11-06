@@ -1,5 +1,6 @@
 # redcap-pipeline/services/gsid_client.py
 import logging
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -22,7 +23,7 @@ class GSIDClient:
         center_id: int,
         local_subject_id: str,
         identifier_type: str = "primary",
-        registration_year: Optional[int] = None,
+        registration_year: Optional[date] = None,
         control: bool = False,
         created_by: str = "redcap_pipeline",
     ) -> Dict[str, Any]:
@@ -31,7 +32,9 @@ class GSIDClient:
             "center_id": center_id,
             "local_subject_id": local_subject_id,
             "identifier_type": identifier_type,
-            "registration_year": registration_year,
+            "registration_year": registration_year.isoformat()
+            if registration_year
+            else None,
             "control": control,
             "created_by": created_by,
         }
@@ -44,7 +47,8 @@ class GSIDClient:
             result = response.json()
             logger.info(
                 f"[{created_by}] Registered {local_subject_id} ({identifier_type}) -> "
-                f"GSID {result['gsid']} ({result['action']})"
+                f"GSID {result['gsid']} ({result['action']}) "
+                f"[reg_year={registration_year}, control={control}]"
             )
             return result
         except requests.exceptions.RequestException as e:
@@ -54,7 +58,6 @@ class GSIDClient:
     def register_batch(self, subjects: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Register multiple subjects in batch"""
         payload = {"requests": subjects}
-
         try:
             response = self.session.post(
                 f"{self.base_url}/register/batch", json=payload, timeout=60
@@ -64,4 +67,3 @@ class GSIDClient:
         except requests.exceptions.RequestException as e:
             logger.error(f"Batch registration failed: {e}")
             raise
-
