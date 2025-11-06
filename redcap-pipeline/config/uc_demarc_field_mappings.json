@@ -6,7 +6,7 @@
       "target_field": "name"
     },
     {
-      "source_field": "pax_repo",
+      "source_field": "pax_fbs",
       "target_table": "specimen",
       "target_field": "sample_id",
       "sample_type": "pax_repo"
