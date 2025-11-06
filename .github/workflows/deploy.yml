@@ -38,84 +38,136 @@ jobs:
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H ${{ secrets[format('SSH_HOST_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }} >> ~/.ssh/known_hosts
+      - name: Create environment configuration
+        env:
+          ENV_NAME: ${{ steps.env.outputs.environment }}
+        run: |
+          # Determine environment-specific values
+          if [ "$ENV_NAME" = "prod" ]; then
+            DOMAIN="idhub.ibdgc.org"
+            S3_BUCKET="idhub-prod"
+          else
+            DOMAIN="qa.idhub.ibdgc.org"
+            S3_BUCKET="idhub-qa"
+          fi
+
+          # Create .env file
+          cat > .env.deploy << EOF
+          # ============================================================================
+          # Environment Configuration
+          # ============================================================================
+          ENVIRONMENT=$ENV_NAME
+          DOMAIN=$DOMAIN
+
+          # ============================================================================
+          # NocoDB Configuration (shared across environments)
+          # ============================================================================
+          NOCODB_DB_PASSWORD=${{ secrets.NOCODB_DB_PASSWORD }}
+          NOCODB_API_TOKEN=${{ secrets.NOCODB_API_TOKEN }}
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
+
+          # ============================================================================
+          # IDHub Database Configuration
+          # ============================================================================
+          DB_HOST=idhub_db
+          IDHUB_DB_NAME=idhub
+          IDHUB_DB_USER=idhub_user
+          IDHUB_DB_PASSWORD=${{ secrets[format('DB_PASSWORD_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+
+          # ============================================================================
+          # GSID Service Configuration
+          # ============================================================================
+          GSID_API_KEY=${{ secrets[format('GSID_API_KEY_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+
+          # ============================================================================
+          # AWS Configuration (shared across environments)
+          # ============================================================================
+          AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION=${{ secrets.AWS_DEFAULT_REGION }}
+          S3_BUCKET=$S3_BUCKET
+
+          # ============================================================================
+          # REDCap Configuration (shared API URL, environment-specific tokens)
+          # ============================================================================
+          REDCAP_API_URL=${{ secrets.REDCAP_API_URL }}
+          REDCAP_API_TOKEN_CD_ILEAL=${{ secrets[format('REDCAP_API_TOKEN_CD_ILEAL_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          REDCAP_API_TOKEN_GAP=${{ secrets[format('REDCAP_API_TOKEN_GAP_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          REDCAP_API_TOKEN_UC_DEMARC=${{ secrets[format('REDCAP_API_TOKEN_UC_DEMARC_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          EOF
+          echo "✓ Environment configuration created for $ENV_NAME"
       - name: Deploy to server
         env:
           SSH_HOST: ${{ secrets[format('SSH_HOST_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
           SSH_USER: ${{ secrets[format('SSH_USER_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
           ENV_NAME: ${{ steps.env.outputs.environment }}
         run: |
-          # Create environment-specific .env file
-          cat > .env.deploy << EOF
-          # Database
-          IDHUB_DB_NAME=${{ secrets[format('DB_NAME_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          IDHUB_DB_USER=${{ secrets[format('DB_USER_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          IDHUB_DB_PASSWORD=${{ secrets[format('DB_PASSWORD_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-
-          # GSID Service
-          GSID_API_KEY=${{ secrets[format('GSID_API_KEY_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-
-          # REDCap
-          REDCAP_API_TOKEN_CD_ILEAL=${{ secrets[format('REDCAP_API_TOKEN_CD_ILEAL_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          REDCAP_API_TOKEN_GAP=${{ secrets[format('REDCAP_API_TOKEN_GAP_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          REDCAP_API_TOKEN_UC_DEMARC=${{ secrets[format('REDCAP_API_TOKEN_UC_DEMARC_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          EOF
-
           # Copy .env file to server
+          echo "Copying environment configuration to server..."
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no .env.deploy ${SSH_USER}@${SSH_HOST}:/opt/idhub/.env
 
           # Remove local copy
           rm .env.deploy
+
+          # Execute deployment on server
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_HOST} << 'ENDSSH'
             set -e
+            
             echo "=== Starting deployment to ${{ steps.env.outputs.environment }} ==="
-
+            
             # Navigate to project directory
             cd /opt/idhub
-
+            
             # Verify .env file exists
             if [ ! -f .env ]; then
               echo "ERROR: .env file not found"
               exit 1
             fi
-
+            
+            # Show environment being deployed
+            echo "Environment: $(grep ENVIRONMENT .env | cut -d'=' -f2)"
+            echo "Domain: $(grep DOMAIN .env | cut -d'=' -f2)"
+            echo "S3 Bucket: $(grep S3_BUCKET .env | cut -d'=' -f2)"
+            
             # Backup current state
             echo "Creating backup..."
             BACKUP_DIR="/opt/idhub/backups/$(date +%Y%m%d_%H%M%S)"
             mkdir -p "$BACKUP_DIR"
-            docker-compose config > "$BACKUP_DIR/docker-compose.backup.yml"
+            docker-compose config > "$BACKUP_DIR/docker-compose.backup.yml" 2>/dev/null || true
             cp .env "$BACKUP_DIR/.env.backup"
-
+            
             # Pull latest code
             echo "Pulling latest code from ${{ github.ref_name }}..."
             git fetch origin
             git checkout ${{ github.ref_name }}
             git pull origin ${{ github.ref_name }}
-
+            
             # Stop services gracefully
             echo "Stopping services..."
             docker-compose down --timeout 30
-
+            
             # Prune old images to save space
             echo "Cleaning up old Docker images..."
             docker image prune -f --filter "until=168h"
-
+            
             # Build services
             echo "Building services..."
             docker-compose build gsid-service redcap-pipeline fragment-validator table-loader
-
+            
             # Start services
             echo "Starting services..."
             docker-compose up -d
-
-            # Wait for health checks
-            echo "Waiting for services to be healthy..."
+            
+            # Wait for services to initialize
+            echo "Waiting for services to initialize..."
             sleep 10
-
+            
             # Verify services are running
             echo "Verifying deployment..."
             docker-compose ps
-
+            
             # Check GSID service health
+            echo "Checking GSID service health..."
             for i in {1..30}; do
               if docker-compose exec -T gsid-service wget -q -O - http://localhost:8000/health > /dev/null 2>&1; then
                 echo "✓ GSID service is healthy"
@@ -123,11 +175,39 @@ jobs:
               fi
               if [ $i -eq 30 ]; then
                 echo "✗ GSID service health check failed"
+                echo "=== GSID Service Logs ==="
                 docker-compose logs --tail=50 gsid-service
                 exit 1
               fi
               sleep 2
             done
+            
+            # Check NocoDB health
+            echo "Checking NocoDB health..."
+            for i in {1..30}; do
+              if docker-compose exec -T nocodb wget -q -O - http://localhost:8080/api/v1/health > /dev/null 2>&1; then
+                echo "✓ NocoDB is healthy"
+                break
+              fi
+              if [ $i -eq 30 ]; then
+                echo "✗ NocoDB health check failed"
+                echo "=== NocoDB Logs ==="
+                docker-compose logs --tail=50 nocodb
+                exit 1
+              fi
+              sleep 2
+            done
+            
+            # Check nginx
+            echo "Checking nginx configuration..."
+            if docker-compose exec -T nginx nginx -t 2>&1; then
+              echo "✓ Nginx configuration is valid"
+            else
+              echo "✗ Nginx configuration test failed"
+              docker-compose logs --tail=50 nginx
+              exit 1
+            fi
+            
             echo "=== Deployment completed successfully ==="
           ENDSSH
       - name: Cleanup SSH key
@@ -139,18 +219,36 @@ jobs:
         run: |
           echo "## ✅ Deployment Successful" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Environment**: ${{ steps.env.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "### Deployment Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: \`${{ steps.env.outputs.environment }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Triggered by**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Timestamp**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Services Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✓ GSID Service" >> $GITHUB_STEP_SUMMARY
+          echo "- ✓ NocoDB" >> $GITHUB_STEP_SUMMARY
+          echo "- ✓ Nginx" >> $GITHUB_STEP_SUMMARY
+          echo "- ✓ REDCap Pipeline" >> $GITHUB_STEP_SUMMARY
+          echo "- ✓ Fragment Validator" >> $GITHUB_STEP_SUMMARY
+          echo "- ✓ Table Loader" >> $GITHUB_STEP_SUMMARY
       - name: Deployment failure notification
         if: failure()
         run: |-
           echo "## ❌ Deployment Failed" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Environment**: ${{ steps.env.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "### Deployment Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: \`${{ steps.env.outputs.environment }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Check the workflow logs for details." >> $GITHUB_STEP_SUMMARY
+          echo "### Troubleshooting" >> $GITHUB_STEP_SUMMARY
+          echo "1. Check the workflow logs above for detailed error messages" >> $GITHUB_STEP_SUMMARY
+          echo "2. SSH into the server to inspect service logs:" >> $GITHUB_STEP_SUMMARY
+          echo "   \`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "   cd /opt/idhub" >> $GITHUB_STEP_SUMMARY
+          echo "   docker-compose logs --tail=100" >> $GITHUB_STEP_SUMMARY
+          echo "   \`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "3. Check backup in \`/opt/idhub/backups/\` to rollback if needed" >> $GITHUB_STEP_SUMMARY
