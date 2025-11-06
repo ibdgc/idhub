@@ -201,6 +201,11 @@
       "source_field": "consortium_id",
       "target_table": "local_subject_ids",
       "target_field": "local_subject_id"
+    },
+    {
+      "source_field": "recruitment_date",
+      "target_table": "subjects",
+      "target_field": "registration_year"
     }
   ]
 }
