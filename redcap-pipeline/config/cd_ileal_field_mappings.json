@@ -189,37 +189,91 @@
       "source_field": "tib_rna_id",
       "target_table": "sequence",
       "target_field": "sample_id",
-      "sample_type": "bulk_rna"
+      "sample_type": "rna_bulk"
     },
     {
       "source_field": "tib_rna_id2",
       "target_table": "sequence",
       "target_field": "sample_id",
-      "sample_type": "bulk_rna"
+      "sample_type": "rna_bulk"
+    },
+    {
+      "source_field": "tib_dna_id1",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "dna_microbe",
+      "region_location": "terminal_ileum"
+    },
+    {
+      "source_field": "tib_dna_id2",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "dna_microbe",
+      "region_location": "terminal_ileum"
     },
     {
       "source_field": "cb_rna_id",
       "target_table": "sequence",
       "target_field": "sample_id",
-      "sample_type": "bulk_rna"
+      "sample_type": "rna_bulk"
     },
     {
       "source_field": "cb_rna_id2",
       "target_table": "sequence",
       "target_field": "sample_id",
-      "sample_type": "bulk_rna"
+      "sample_type": "rna_bulk"
+    },
+    {
+      "source_field": "cb_dna_id1",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "dna_microbe",
+      "region_location": "colon"
+    },
+    {
+      "source_field": "cb_dna_id2",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "dna_microbe",
+      "region_location": "colon"
     },
     {
       "source_field": "rsb_rna_id",
       "target_table": "sequence",
       "target_field": "sample_id",
-      "sample_type": "bulk_rna"
+      "sample_type": "rna_bulk"
     },
     {
       "source_field": "rsb_rna_id2",
       "target_table": "sequence",
       "target_field": "sample_id",
-      "sample_type": "bulk_rna"
+      "sample_type": "rna_bulk"
+    },
+    {
+      "source_field": "rsb_dna_id1",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "dna_microbe",
+      "region_location": "sigmoid_rectum"
+    },
+    {
+      "source_field": "rsb_dna_id2",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "dna_microbe",
+      "region_location": "sigmoid_rectum"
+    },
+    {
+      "source_field": "dna_repo",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "dna_feinstein"
+    },
+    {
+      "source_field": "dna_local",
+      "target_table": "specimen",
+      "target_field": "sample_id",
+      "sample_type": "dna_local"
     },
     {
       "source_field": "consortium_id",

@@ -314,14 +314,38 @@ class DataProcessor:
                         sample_type = mapping.get("sample_type", "unknown")
 
                         if record.get(source_field):
+                            # Extract optional fields from mapping
+                            region_location = mapping.get("region_location")
+                            year_collected = None
+                            sample_available = True
+
+                            # Try to extract year from record if available
+                            if record.get("year_collected"):
+                                year_collected = self.transform_value(
+                                    "year_collected", record.get("year_collected")
+                                )
+
                             cur.execute(
                                 """
-                                INSERT INTO specimen (sample_id, global_subject_id, sample_type, redcap_event, project)
-                                VALUES (%s, %s, %s, %s, %s)
+                                INSERT INTO specimen (
+                                    sample_id, 
+                                    global_subject_id, 
+                                    sample_type, 
+                                    redcap_event, 
+                                    project,
+                                    region_location,
+                                    year_collected,
+                                    sample_available
+                                )
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                                 ON CONFLICT (sample_id) DO UPDATE SET
+                                    global_subject_id = EXCLUDED.global_subject_id,
                                     sample_type = EXCLUDED.sample_type,
                                     redcap_event = EXCLUDED.redcap_event,
-                                    project = EXCLUDED.project
+                                    project = EXCLUDED.project,
+                                    region_location = EXCLUDED.region_location,
+                                    year_collected = EXCLUDED.year_collected,
+                                    sample_available = EXCLUDED.sample_available
                                 """,
                                 (
                                     record[source_field],
@@ -329,11 +353,15 @@ class DataProcessor:
                                     sample_type,
                                     record.get("redcap_event_name"),
                                     self.project_name,
+                                    region_location,
+                                    year_collected,
+                                    sample_available,
                                 ),
                             )
                             logger.debug(
                                 f"[{self.project_key}] Inserted specimen: "
-                                f"{record[source_field]} (type: {sample_type})"
+                                f"{record[source_field]} (type: {sample_type}, "
+                                f"region: {region_location})"
                             )
 
                     # Process all sequence mappings from config
@@ -396,7 +424,6 @@ class DataProcessor:
                     )
 
                 conn.commit()
-
         except Exception as e:
             if conn:
                 conn.rollback()
