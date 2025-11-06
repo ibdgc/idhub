@@ -106,8 +106,6 @@ services:
     memswap_limit: 256m
     environment:
       - REDCAP_API_URL=${REDCAP_API_URL}
-      - REDCAP_API_TOKEN=${REDCAP_API_TOKEN}
-      - REDCAP_PROJECT_ID=${REDCAP_PROJECT_ID}
       - GSID_SERVICE_URL=http://gsid-service:8000
       - DB_HOST=idhub_db
       - DB_NAME=${IDHUB_DB_NAME}
