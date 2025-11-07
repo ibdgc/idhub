@@ -25,3 +25,12 @@ coverage.xml
 .pytest_cache/
 *.pyc
 __pycache__/
+
+# Coverage and test reports (root level)
+/.coverage
+/coverage.xml
+/htmlcov/
+/test-reports/
+
+# Temporary scripts
+analyze_*.py
