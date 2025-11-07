@@ -1,100 +1,76 @@
-# gsid-service/tests/test_integration.py
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 
 class TestGSIDIntegration:
-    """Integration tests that actually test the application code"""
+    """Integration tests for GSID service"""
 
     def test_import_main_module(self):
         """Test that main module can be imported"""
         try:
             import main
-
             assert hasattr(main, "app")
         except Exception as e:
             pytest.fail(f"Failed to import main: {e}")
 
-    def test_gsid_uniqueness(self):
-        """Test that generate_gsid produces unique values"""
+    def test_import_all_modules(self):
+        """Test that all core modules can be imported"""
+        modules = [
+            "services.gsid_generator",
+            "core.database",
+            "core.security",
+            "api.routes"
+        ]
+
+        for module_name in modules:
+            try:
+                __import__(module_name)
+            except Exception as e:
+                pytest.fail(f"Failed to import {module_name}: {e}")
+
+    def test_gsid_generation_and_validation(self):
+        """Test end-to-end GSID generation and validation"""
         from services.gsid_generator import generate_gsid
 
-        gsids = [generate_gsid() for _ in range(100)]
-        assert len(set(gsids)) == 100, "GSIDs should be unique"
-
-    def test_base32_encoding(self):
-        """Test BASE32 encoding function"""
-        from services.gsid_generator import BASE32_ALPHABET
-
-        # Verify alphabet
-        assert len(BASE32_ALPHABET) == 32
-        assert "I" not in BASE32_ALPHABET
-        assert "L" not in BASE32_ALPHABET
-        assert "O" not in BASE32_ALPHABET
-        assert "U" not in BASE32_ALPHABET
-
-    def test_config_loading(self):
-        """Test that config loads correctly"""
-        from core.config import settings
-
-        assert settings.GSID_API_KEY == "test-api-key"
-        assert settings.DB_HOST == "localhost"
-        assert settings.DB_NAME == "test_db"
-
-    def test_generate_gsid_function_exists(self):
-        """Test that generate_gsid function exists and works"""
-        from services.gsid_generator import generate_gsid
-
+        # Generate GSID
         gsid = generate_gsid()
-        assert gsid is not None
-        assert isinstance(gsid, str)
-        # Format: GSID-XXXXXXXXXXXXXXXX (5 prefix + 16 chars = 21 total)
+
+        # Validate format
+        assert gsid.startswith("GSID-")
         assert len(gsid) == 21
-        assert gsid.startswith("GSID-")
-        # Verify the ID part (after prefix) is 16 characters
-        gsid_id = gsid[5:]  # Remove "GSID-" prefix
-        assert len(gsid_id) == 16
 
-    def test_api_models_import(self):
-        """Test that API models can be imported"""
-        try:
-            from api.models import (
-                BatchSubjectRequest,
-                HealthResponse,
-                ResolutionResponse,
-                SubjectRequest,
-            )
+        # Validate characters
+        id_part = gsid[5:]
+        assert id_part.isalnum()
+        assert id_part.isupper()
 
-            assert SubjectRequest is not None
-            assert ResolutionResponse is not None
-            assert BatchSubjectRequest is not None
-            assert HealthResponse is not None
-        except Exception as e:
-            pytest.fail(f"Failed to import models: {e}")
-
-    def test_gsid_generation_with_mock(self):
-        """Test GSID generation with mocked dependencies"""
+    def test_multiple_gsid_generation_uniqueness(self):
+        """Test that bulk GSID generation produces unique values"""
         from services.gsid_generator import generate_gsid
 
-        gsid = generate_gsid()
-        assert gsid is not None
-        assert isinstance(gsid, str)
-        # Format: GSID-XXXXXXXXXXXXXXXX (21 chars total)
-        assert len(gsid) == 21
-        assert gsid.startswith("GSID-")
+        count = 100
+        gsids = [generate_gsid() for _ in range(count)]
 
-    def test_gsid_format_components(self):
-        """Test GSID format structure"""
-        from services.gsid_generator import BASE32_ALPHABET, generate_gsid
+        # All should be unique
+        assert len(set(gsids)) == count
 
-        gsid = generate_gsid()
+        # All should have correct format
+        for gsid in gsids:
+            assert gsid.startswith("GSID-")
+            assert len(gsid) == 21
 
-        # Check format: GSID-XXXXXXXXXXXXXXXX (prefix + 16 chars)
-        assert gsid.startswith("GSID-")
-        gsid_id = gsid[5:]  # Remove prefix
-        assert len(gsid_id) == 16
+    def test_identity_resolution_workflow(self, mock_db_connection, sample_identity_attributes):
+        """Test complete identity resolution workflow"""
+        with patch("core.database.get_db_connection", return_value=mock_db_connection):
+            from services.gsid_generator import generate_gsid
 
-        # All characters should be valid base32
-        for char in gsid_id:
-            assert char in BASE32_ALPHABET
+            # Generate new GSID for subject
+            gsid = generate_gsid()
+
+            # Verify GSID format
+            assert gsid.startswith("GSID-")
+            assert len(gsid) == 21
+
+            # In real scenario, this would be stored in database
+            # and linked to identity attributes

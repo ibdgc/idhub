@@ -1,22 +1,16 @@
-# fragment-validator/tests/test_validator.py
 import pandas as pd
 import pytest
 
 
 class TestFragmentValidator:
+    """Unit tests for FragmentValidator - basic data validation tests"""
+
     def test_validate_data_types(self):
         """Test data type validation"""
-        df = pd.DataFrame(
-            {
-                "int_col": [1, 2, 3],
-                "str_col": ["a", "b", "c"],
-                "float_col": [1.1, 2.2, 3.3],
-            }
-        )
+        df = pd.DataFrame({"col1": [1, 2, 3], "col2": ["a", "b", "c"]})
 
-        assert df["int_col"].dtype == "int64"
-        assert df["str_col"].dtype == "object"
-        assert df["float_col"].dtype == "float64"
+        assert df["col1"].dtype == "int64"
+        assert df["col2"].dtype == "object"
 
     def test_validate_null_values(self):
         """Test null value detection"""

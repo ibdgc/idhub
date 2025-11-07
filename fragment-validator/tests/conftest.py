@@ -1,90 +1,232 @@
-# fragment-validator/tests/conftest.py
-import os
-from unittest.mock import MagicMock, patch
+import io
+import json
+from unittest.mock import Mock, patch
 
 import pandas as pd
 import pytest
-
-# Set test environment variables
-os.environ.update(
-    {
-        "S3_BUCKET": "test-bucket",
-        "AWS_ACCESS_KEY_ID": "test-key",
-        "AWS_SECRET_ACCESS_KEY": "test-secret",
-        "AWS_DEFAULT_REGION": "us-east-1",
-        "GSID_SERVICE_URL": "http://localhost:8000",
-        "GSID_API_KEY": "test-api-key",
-        "NOCODB_URL": "http://localhost:8080",
-        "NOCODB_API_TOKEN": "test-token",
-        "NOCODB_BASE_ID": "test-base-id",
-    }
+from services import (
+    FragmentValidator,
+    GSIDClient,
+    NocoDBClient,
+    S3Client,
 )
 
 
 # ============================================================================
-# MOCK AWS/S3
+# MOCK CLIENT FIXTURES
 # ============================================================================
 @pytest.fixture
 def mock_s3_client():
-    """Mock boto3 S3 client"""
-    with patch("boto3.client") as mock:
-        s3 = MagicMock()
-        s3.put_object.return_value = {"ETag": "test-etag"}
+    """Mock S3 client"""
+    with patch("boto3.client") as mock_boto:
+        mock_client = Mock()
+        mock_boto.return_value = mock_client
 
-        # Fix: Properly mock the Body.read() method for pandas
-        def mock_get_object(*args, **kwargs):
-            import io
+        # Mock list_objects_v2 response
+        mock_client.list_objects_v2.return_value = {"Contents": []}
 
-            csv_data = b"col1,col2\nval1,val2"
-            return {"Body": io.BytesIO(csv_data)}
+        # Mock get_object for download_dataframe
+        csv_data = "col1,col2\nval1,val2\n"
+        mock_client.get_object.return_value = {"Body": io.BytesIO(csv_data.encode())}
 
-        s3.get_object.side_effect = mock_get_object
-
-        s3.list_objects_v2.return_value = {"Contents": [{"Key": "test.csv"}]}
-        mock.return_value = s3
-        yield s3
-
-
-# ============================================================================
-# TEST DATA FIXTURES
-# ============================================================================
-@pytest.fixture
-def sample_blood_data():
-    """Sample blood table data"""
-    return pd.DataFrame(
-        {
-            "consortium_id": ["IBDGC001", "IBDGC002", "IBDGC003"],
-            "sample_id": ["BLD001", "BLD002", "BLD003"],
-            "sample_type": ["Whole Blood", "Plasma", "Serum"],
-            "date_collected": ["2024-01-15", "2024-02-20", "2024-03-10"],
-            "center_name": ["Mount Sinai", "Cedars-Sinai", "Johns Hopkins"],
-        }
-    )
+        yield mock_client
 
 
 @pytest.fixture
-def sample_lcl_data():
-    """Sample LCL table data"""
-    return pd.DataFrame(
-        {
-            "consortium_id": ["IBDGC004", "IBDGC005"],
-            "knumber": ["K12345", "K67890"],
-            "niddk_no": ["N11111", "N22222"],
-        }
-    )
+def mock_nocodb_client():
+    """Mock NocoDB client"""
+    mock = Mock(spec=NocoDBClient)
+
+    # Define schemas for different tables
+    table_schemas = {
+        "blood": {
+            "columns": [
+                {
+                    "title": "Id",
+                    "column_name": "Id",
+                    "uidt": "ID",
+                    "pk": True,
+                    "ai": True,
+                    "rqd": False,
+                },
+                {
+                    "title": "global_subject_id",
+                    "column_name": "global_subject_id",
+                    "uidt": "SingleLineText",
+                    "pk": False,
+                    "ai": False,
+                    "rqd": False,
+                },
+                {
+                    "title": "sample_id",
+                    "column_name": "sample_id",
+                    "uidt": "SingleLineText",
+                    "pk": False,
+                    "ai": False,
+                    "rqd": True,
+                },
+                {
+                    "title": "sample_type",
+                    "column_name": "sample_type",
+                    "uidt": "SingleLineText",
+                    "pk": False,
+                    "ai": False,
+                    "rqd": False,
+                },
+                {
+                    "title": "date_collected",
+                    "column_name": "date_collected",
+                    "uidt": "Date",
+                    "pk": False,
+                    "ai": False,
+                    "rqd": False,
+                },
+                {
+                    "title": "created_at",
+                    "column_name": "created_at",
+                    "uidt": "DateTime",
+                    "pk": False,
+                    "ai": False,
+                    "rqd": False,
+                },
+            ]
+        },
+        "lcl": {
+            "columns": [
+                {
+                    "title": "Id",
+                    "column_name": "Id",
+                    "uidt": "ID",
+                    "pk": True,
+                    "ai": True,
+                    "rqd": False,
+                },
+                {
+                    "title": "global_subject_id",
+                    "column_name": "global_subject_id",
+                    "uidt": "SingleLineText",
+                    "pk": False,
+                    "ai": False,
+                    "rqd": False,
+                },
+                {
+                    "title": "knumber",
+                    "column_name": "knumber",
+                    "uidt": "SingleLineText",
+                    "pk": False,
+                    "ai": False,
+                    "rqd": False,
+                },
+                {
+                    "title": "niddk_no",
+                    "column_name": "niddk_no",
+                    "uidt": "SingleLineText",
+                    "pk": False,
+                    "ai": False,
+                    "rqd": False,
+                },
+            ]
+        },
+        "dna": {
+            "columns": [
+                {
+                    "title": "Id",
+                    "column_name": "Id",
+                    "uidt": "ID",
+                    "pk": True,
+                    "ai": True,
+                    "rqd": False,
+                },
+                {
+                    "title": "global_subject_id",
+                    "column_name": "global_subject_id",
+                    "uidt": "SingleLineText",
+                    "pk": False,
+                    "ai": False,
+                    "rqd": False,
+                },
+                {
+                    "title": "sample_id",
+                    "column_name": "sample_id",
+                    "uidt": "SingleLineText",
+                    "pk": False,
+                    "ai": False,
+                    "rqd": True,
+                },
+                {
+                    "title": "concentration",
+                    "column_name": "concentration",
+                    "uidt": "Number",
+                    "pk": False,
+                    "ai": False,
+                    "rqd": False,
+                },
+            ]
+        },
+    }
+
+    def get_table_metadata(table_name):
+        """Return schema based on table name"""
+        return table_schemas.get(table_name, table_schemas["blood"])
+
+    mock.get_table_metadata.side_effect = get_table_metadata
+
+    # Mock get_all_records for local_id cache
+    mock.get_all_records.return_value = []
+
+    # Mock table_id
+    mock.get_table_id.return_value = "table_123"
+
+    return mock
 
 
 @pytest.fixture
-def sample_dna_data():
-    """Sample DNA table data"""
-    return pd.DataFrame(
-        {
-            "consortium_id": ["IBDGC006", "IBDGC007"],
-            "local_id": ["LOCAL123", "LOCAL456"],
-            "dna_sample_id": ["DNA001", "DNA002"],
-            "center_id": [1, 2],
-        }
-    )
+def mock_gsid_client():
+    """Mock GSID client"""
+    mock = Mock(spec=GSIDClient)
+
+    def mock_register_batch(requests_list, batch_size=100, timeout=60):
+        """Mock batch registration - matches actual API structure"""
+        results = []
+        for req in requests_list:
+            local_subject_id = req["local_subject_id"]
+            center_id = req.get("center_id", 0)
+
+            # Simulate existing GSID for known IDs
+            if "IBDGC" in local_subject_id:
+                results.append(
+                    {
+                        "gsid": f"GSID-{local_subject_id}",
+                        "local_subject_id": local_subject_id,
+                        "center_id": center_id,
+                        "action": "existing",
+                    }
+                )
+            else:
+                # Mint new GSID
+                results.append(
+                    {
+                        "gsid": f"GSID-NEW-{local_subject_id}",
+                        "local_subject_id": local_subject_id,
+                        "center_id": center_id,
+                        "action": "create_new",
+                    }
+                )
+        return results
+
+    mock.register_batch.side_effect = mock_register_batch
+    return mock
+
+
+@pytest.fixture
+def validator(mock_s3_client, mock_nocodb_client, mock_gsid_client):
+    """FragmentValidator instance with mocked dependencies"""
+    s3_client = S3Client("test-bucket")
+
+    # Mock the upload_dataframe method that doesn't exist yet
+    s3_client.upload_dataframe = Mock()
+
+    return FragmentValidator(s3_client, mock_nocodb_client, mock_gsid_client)
 
 
 # ============================================================================
@@ -120,138 +262,69 @@ def lcl_mapping_config():
 def dna_mapping_config():
     """DNA table mapping configuration"""
     return {
-        "field_mapping": {"sample_id": "dna_sample_id"},
-        "subject_id_candidates": ["consortium_id", "local_id"],
+        "field_mapping": {
+            "sample_id": "sample_id",
+            "concentration": "concentration",
+        },
+        "subject_id_candidates": ["consortium_id"],
         "center_id_field": "center_id",
-        "default_center_id": 1,
+        "default_center_id": 0,
     }
 
 
 # ============================================================================
-# NOCODB MOCK FIXTURES
+# SAMPLE DATA FIXTURES
 # ============================================================================
 @pytest.fixture
-def mock_nocodb_client():
-    """Mock NocoDB client with realistic responses"""
-    client = MagicMock()
-
-    # Mock base ID detection
-    client._get_base_id.return_value = "test-base-id"
-
-    # Mock table ID lookup - return different IDs per table
-    def mock_get_table_id(table_name):
-        return f"test-{table_name}-id"
-
-    client.get_table_id.side_effect = mock_get_table_id
-
-    # Mock table metadata - return different schemas per table
-    def mock_get_table_metadata(table_name):
-        # Define table-specific schemas
-        schemas = {
-            "blood": {
-                "id": "test-blood-id",
-                "table_name": "blood",
-                "columns": [
-                    {"column_name": "Id", "pk": True, "ai": True},
-                    {"column_name": "global_subject_id", "rqd": True},
-                    {"column_name": "sample_id", "rqd": True},
-                    {"column_name": "sample_type", "rqd": False},
-                    {"column_name": "date_collected", "rqd": False},
-                    {"column_name": "created_at", "rqd": False},
-                ],
-            },
-            "lcl": {
-                "id": "test-lcl-id",
-                "table_name": "lcl",
-                "columns": [
-                    {"column_name": "Id", "pk": True, "ai": True},
-                    {"column_name": "global_subject_id", "rqd": True},
-                    {"column_name": "knumber", "rqd": True},
-                    {"column_name": "niddk_no", "rqd": False},
-                    {"column_name": "created_at", "rqd": False},
-                ],
-            },
-            "dna": {
-                "id": "test-dna-id",
-                "table_name": "dna",
-                "columns": [
-                    {"column_name": "Id", "pk": True, "ai": True},
-                    {"column_name": "global_subject_id", "rqd": True},
-                    {"column_name": "sample_id", "rqd": True},
-                    {"column_name": "center_id", "rqd": False},
-                    {"column_name": "created_at", "rqd": False},
-                ],
-            },
+def sample_blood_data():
+    """Sample blood table data"""
+    return pd.DataFrame(
+        {
+            "consortium_id": ["IBDGC001", "IBDGC002", "IBDGC003"],
+            "sample_id": ["SMP001", "SMP002", "SMP003"],
+            "sample_type": ["Blood", "Plasma", "Serum"],
+            "date_collected": ["2024-01-01", "2024-01-02", "2024-01-03"],
         }
-
-        # Return table-specific schema, or default to blood
-        return schemas.get(table_name, schemas["blood"])
-
-    client.get_table_metadata.side_effect = mock_get_table_metadata
-
-    # Mock local ID cache
-    client.load_local_id_cache.return_value = {
-        (0, "IBDGC001", "consortium_id"): "GSID-01HQXYZ123",
-        (1, "LOCAL123", "local_id"): "GSID-01HQABC456",
-    }
-
-    return client
+    )
 
 
-# ============================================================================
-# GSID SERVICE MOCK FIXTURES
-# ============================================================================
 @pytest.fixture
-def mock_gsid_client():
-    """Mock GSID client with realistic responses"""
-    client = MagicMock()
-
-    # Mock batch registration
-    def mock_register_batch(requests_list, **kwargs):
-        results = []
-        for i, req in enumerate(requests_list):
-            local_id = req["local_subject_id"]
-            # Simulate existing vs new GSIDs
-            if local_id == "IBDGC001":
-                results.append(
-                    {
-                        "gsid": "GSID-01HQXYZ123",
-                        "action": "existing_match",
-                        "matched_by": "consortium_id",
-                    }
-                )
-            else:
-                results.append({"gsid": f"GSID-01HQ{i:012d}", "action": "create_new"})
-        return results
-
-    client.register_batch.side_effect = mock_register_batch
-
-    # Mock single registration
-    client.register_single.return_value = {
-        "gsid": "GSID-01HQTEST123",
-        "action": "create_new",
-    }
-
-    return client
+def sample_lcl_data():
+    """Sample LCL table data"""
+    return pd.DataFrame(
+        {
+            "consortium_id": ["IBDGC001", "IBDGC002"],
+            "knumber": ["K001", "K002"],
+            "niddk_no": ["NIDDK001", "NIDDK002"],
+        }
+    )
 
 
-# ============================================================================
-# TEMP FILE FIXTURES
-# ============================================================================
+@pytest.fixture
+def sample_dna_data():
+    """Sample DNA table data"""
+    return pd.DataFrame(
+        {
+            "consortium_id": ["IBDGC001", "IBDGC002"],
+            "sample_id": ["DNA001", "DNA002"],
+            "concentration": [50.5, 75.3],
+            "center_id": [1, 2],
+        }
+    )
+
+
 @pytest.fixture
 def temp_csv_file(tmp_path, sample_blood_data):
-    """Create a temporary CSV file for testing"""
-    csv_file = tmp_path / "test_blood.csv"
+    """Temporary CSV file with sample data"""
+    csv_file = tmp_path / "test_data.csv"
     sample_blood_data.to_csv(csv_file, index=False)
-    return str(csv_file)
+    return csv_file
 
 
 @pytest.fixture
 def temp_mapping_config(tmp_path, blood_mapping_config):
-    """Create a temporary mapping config JSON file"""
-    import json
-
-    config_file = tmp_path / "blood_mapping.json"
+    """Temporary mapping config JSON file"""
+    config_file = tmp_path / "mapping_config.json"
     with open(config_file, "w") as f:
         json.dump(blood_mapping_config, f)
-    return str(config_file)
+    return config_file

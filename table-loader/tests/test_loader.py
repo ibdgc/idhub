@@ -1,109 +1,162 @@
 # table-loader/tests/test_loader.py
-import pytest
+import json
+from io import BytesIO
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
+import pytest
+from botocore.exceptions import ClientError
 from services.loader import TableLoader
 
 
-class TestTableLoader:
-    """Test TableLoader orchestration"""
+@pytest.fixture
+def mock_s3_client():
+    """Mock S3 client"""
+    with patch("services.loader.S3Client") as mock_cls:
+        mock_instance = MagicMock()
+        mock_cls.return_value = mock_instance
+        yield mock_instance
 
-    def test_init(self, mock_s3_client):
+
+@pytest.fixture
+def sample_validation_report():
+    """Sample validation report"""
+    return {
+        "status": "VALIDATED",
+        "exclude_fields": ["identifier_type", "action", "local_subject_id"],
+    }
+
+
+@pytest.fixture
+def mock_db_connection():
+    """Mock database connection"""
+    conn = MagicMock()
+    cursor = MagicMock()
+    cursor.__enter__ = MagicMock(return_value=cursor)
+    cursor.__exit__ = MagicMock(return_value=False)
+    conn.cursor.return_value = cursor
+    conn.__enter__ = MagicMock(return_value=conn)
+    conn.__exit__ = MagicMock(return_value=False)
+    return conn, cursor
+
+
+class TestTableLoader:
+    """Unit tests for TableLoader"""
+
+    def test_init(self):
         """Test TableLoader initialization"""
         loader = TableLoader()
-
         assert loader.s3_client is not None
 
     def test_get_exclude_fields_from_report(
         self, mock_s3_client, sample_validation_report
     ):
-        """Test extracting exclude fields from validation report"""
-        batch_id = "batch_20240115_120000"
+        """Test loading exclude fields from validation report"""
+        mock_s3_client.download_validation_report.return_value = (
+            sample_validation_report
+        )
 
-        # Mock S3 to return validation report
-        with patch.object(
-            TableLoader, "_get_exclude_fields", return_value={"consortium_id", "action"}
-        ):
-            loader = TableLoader()
-            exclude_fields = loader._get_exclude_fields(batch_id)
+        loader = TableLoader()
+        exclude_fields = loader._get_exclude_fields("batch_20240115_120000")
 
-            assert "consortium_id" in exclude_fields
-            assert "action" in exclude_fields
+        assert "identifier_type" in exclude_fields
+        assert "action" in exclude_fields
 
     def test_get_exclude_fields_default(self, mock_s3_client):
         """Test default exclude fields when report not found"""
-        batch_id = "batch_nonexistent"
-
-        # Mock S3 to raise exception
-        with patch.object(
-            mock_s3_client, "get_object", side_effect=Exception("Not found")
-        ):
-            loader = TableLoader()
-            exclude_fields = loader._get_exclude_fields(batch_id)
-
-            # Should return default exclusions
-            assert "identifier_type" in exclude_fields
-            assert "action" in exclude_fields
-
-    def test_preview_load(self, s3_with_fragments, sample_fragment_data):
-        """Test preview load (dry run)"""
-        batch_id = "batch_20240115_120000"
+        error_response = {
+            "Error": {
+                "Code": "NoSuchKey",
+                "Message": "The specified key does not exist.",
+            }
+        }
+        mock_s3_client.download_validation_report.side_effect = ClientError(
+            error_response, "GetObject"
+        )
 
         loader = TableLoader()
+        exclude_fields = loader._get_exclude_fields("batch_nonexistent")
 
-        with patch.object(loader, "_get_exclude_fields", return_value=set()):
-            results = loader.preview_load(batch_id)
+        # Should return defaults
+        assert "identifier_type" in exclude_fields
+        assert "action" in exclude_fields
 
-            assert "blood" in results
-            assert results["blood"]["status"] == "preview"
-            assert results["blood"]["rows"] == 2
+    def test_preview_load(
+        self, mock_s3_client, sample_validation_report, mock_db_connection
+    ):
+        """Test preview load"""
+        batch_id = "batch_20240115_120000"
+
+        mock_s3_client.list_batch_fragments.return_value = [
+            {"Key": f"staging/validated/{batch_id}/blood.csv"}
+        ]
+
+        csv_data = pd.DataFrame(
+            {"global_subject_id": ["GSID-001"], "sample_id": ["SMP001"]}
+        )
+        mock_s3_client.download_fragment.return_value = csv_data
+        mock_s3_client.download_validation_report.return_value = (
+            sample_validation_report
+        )
+
+        loader = TableLoader()
+        results = loader.preview_load(batch_id)
+
+        assert "blood" in results
+        # LoadStrategy returns "preview" status for dry_run=True
+        assert results["blood"]["status"] == "preview"
+        assert results["blood"]["rows"] == 1
 
     def test_preview_load_no_fragments(self, mock_s3_client):
-        """Test preview load with no fragments"""
-        batch_id = "batch_empty"
-
-        mock_s3_client.list_objects_v2.return_value = {}
+        """Test preview with no fragments"""
+        mock_s3_client.list_batch_fragments.return_value = []
 
         loader = TableLoader()
 
         with pytest.raises(ValueError, match="No table fragments found"):
-            loader.preview_load(batch_id)
+            loader.preview_load("batch_empty")
 
-    @patch("services.load_strategy.db_manager")  # Patch where load_strategy imports it
     def test_execute_load(
-        self, mock_db_manager, s3_with_fragments, mock_db_connection
+        self, mock_s3_client, sample_validation_report, mock_db_connection
     ):
         """Test execute load"""
         batch_id = "batch_20240115_120000"
         conn, cursor = mock_db_connection
 
-        # Configure db_manager mock
-        mock_db_manager.get_connection.return_value.__enter__.return_value = conn
-        mock_db_manager.get_connection.return_value.__exit__.return_value = False
+        mock_s3_client.list_batch_fragments.return_value = [
+            {"Key": f"staging/validated/{batch_id}/blood.csv"}
+        ]
 
-        loader = TableLoader()
+        csv_data = pd.DataFrame(
+            {"global_subject_id": ["GSID-001"], "sample_id": ["SMP001"]}
+        )
+        mock_s3_client.download_fragment.return_value = csv_data
+        mock_s3_client.download_validation_report.return_value = (
+            sample_validation_report
+        )
 
-        with patch.object(loader, "_get_exclude_fields", return_value=set()):
+        with patch("services.load_strategy.db_manager") as mock_db_manager:
+            mock_db_manager.get_connection.return_value.__enter__.return_value = conn
+            mock_db_manager.get_connection.return_value.__exit__.return_value = False
+
+            loader = TableLoader()
             results = loader.execute_load(batch_id)
 
-            assert results["batch_id"] == batch_id
-            assert "blood" in results["tables"]
             assert results["tables"]["blood"]["status"] == "success"
+            assert results["tables"]["blood"]["rows_loaded"] == 1
 
-            # Should call bulk_insert (StandardLoadStrategy uses this)
-            mock_db_manager.bulk_insert.assert_called()
-
-    @patch("services.load_strategy.db_manager")  # Patch where it's imported
-    def test_execute_load_stops_on_error(self, mock_db_manager, s3_with_fragments):
+    def test_execute_load_stops_on_error(self, mock_s3_client):
         """Test that execute_load stops on first error"""
         batch_id = "batch_20240115_120000"
 
-        # Mock db_manager to raise error
-        mock_db_manager.get_connection.side_effect = Exception("Database error")
+        mock_s3_client.list_batch_fragments.return_value = [
+            {"Key": f"staging/validated/{batch_id}/blood.csv"}
+        ]
+
+        # Simulate download error
+        mock_s3_client.download_fragment.side_effect = Exception("Database error")
 
         loader = TableLoader()
 
-        with patch.object(loader, "_get_exclude_fields", return_value=set()):
-            # Should raise exception and stop
-            with pytest.raises(Exception, match="Database error"):
-                loader.execute_load(batch_id)
+        with pytest.raises(Exception, match="Database error"):
+            loader.execute_load(batch_id)

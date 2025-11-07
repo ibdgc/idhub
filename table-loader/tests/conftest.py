@@ -95,22 +95,35 @@ def mock_execute_values():
 # S3 FIXTURES
 # ============================================================================
 @pytest.fixture
-def mock_s3_client():
-    """Mock boto3 S3 client"""
+def mock_boto3_s3():
+    """Mock boto3 S3 client (low-level)"""
     with patch("boto3.client") as mock_boto:
         s3 = MagicMock()
         mock_boto.return_value = s3
 
         # Default responses
         s3.list_objects_v2.return_value = {"Contents": []}
-        s3.get_object.return_value = {
-            "Body": BytesIO(b"col1,col2\nval1,val2")
-        }
+        s3.get_object.return_value = {"Body": BytesIO(b"col1,col2\nval1,val2")}
         s3.put_object.return_value = {}
         s3.copy_object.return_value = {}
         s3.delete_object.return_value = {}
 
         yield s3
+
+
+@pytest.fixture
+def mock_s3_client():
+    """Mock S3Client class for TableLoader tests"""
+    with patch("services.loader.S3Client") as mock_cls:
+        mock_instance = MagicMock()
+        mock_cls.return_value = mock_instance
+
+        # Default return values
+        mock_instance.list_batch_fragments.return_value = []
+        mock_instance.download_fragment.return_value = pd.DataFrame()
+        mock_instance.download_validation_report.return_value = {}
+
+        yield mock_instance
 
 
 # ============================================================================
@@ -158,7 +171,7 @@ def sample_validation_report():
         "row_count": 2,
         "subject_id_candidates": ["consortium_id"],
         "center_id_field": None,
-        "exclude_from_load": ["consortium_id", "identifier_type", "action"],
+        "exclude_fields": ["consortium_id", "identifier_type", "action"],
         "resolution_summary": {
             "existing_matches": 1,
             "new_gsids_minted": 1,
@@ -182,12 +195,12 @@ def sample_dataframe():
 # S3 MOCK HELPERS
 # ============================================================================
 @pytest.fixture
-def s3_with_fragments(mock_s3_client, sample_fragment_data, sample_validation_report):
+def s3_with_fragments(mock_boto3_s3, sample_fragment_data, sample_validation_report):
     """S3 client with pre-configured fragment data"""
     batch_id = "batch_20240115_120000"
 
     # Mock list_objects_v2 to return fragment files
-    mock_s3_client.list_objects_v2.return_value = {
+    mock_boto3_s3.list_objects_v2.return_value = {
         "Contents": [
             {"Key": f"staging/validated/{batch_id}/blood.csv"},
             {"Key": f"staging/validated/{batch_id}/validation_report.json"},
@@ -203,9 +216,9 @@ def s3_with_fragments(mock_s3_client, sample_fragment_data, sample_validation_re
         else:
             return {"Body": BytesIO(csv_data.encode())}
 
-    mock_s3_client.get_object.side_effect = mock_get_object
+    mock_boto3_s3.get_object.side_effect = mock_get_object
 
-    return mock_s3_client
+    return mock_boto3_s3
 
 
 # ============================================================================

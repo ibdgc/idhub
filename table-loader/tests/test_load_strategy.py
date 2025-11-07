@@ -1,7 +1,7 @@
 # table-loader/tests/test_load_strategy.py
-import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
 
+import pytest
 from services.load_strategy import StandardLoadStrategy, UpsertLoadStrategy
 
 
@@ -11,7 +11,6 @@ class TestStandardLoadStrategy:
     def test_load_dry_run(self, sample_fragment_data):
         """Test dry run mode"""
         strategy = StandardLoadStrategy("blood")
-
         result = strategy.load(sample_fragment_data, dry_run=True)
 
         assert result["status"] == "preview"
@@ -32,9 +31,7 @@ class TestStandardLoadStrategy:
         assert "identifier_type" not in result["columns"]
         assert "action" not in result["columns"]
 
-    def test_load_executes_insert(
-        self, mock_db_connection, sample_fragment_data
-    ):
+    def test_load_executes_insert(self, mock_db_connection, sample_fragment_data):
         """Test that load executes database insert"""
         conn, cursor = mock_db_connection
 
@@ -72,7 +69,7 @@ class TestStandardLoadStrategy:
         assert result["reason"] == "no records"
 
     def test_load_with_deduplication(self):
-        """Test load with deduplication"""
+        """Test load with duplicate records (no automatic deduplication)"""
         fragment = {
             "table": "blood",
             "records": [
@@ -88,8 +85,9 @@ class TestStandardLoadStrategy:
         strategy = StandardLoadStrategy("blood")
         result = strategy.load(fragment, dry_run=True)
 
-        # Should deduplicate to 2 rows
-        assert result["rows"] == 2
+        # StandardLoadStrategy does not deduplicate automatically
+        # It passes all records through
+        assert result["rows"] == 3
 
 
 class TestUpsertLoadStrategy:

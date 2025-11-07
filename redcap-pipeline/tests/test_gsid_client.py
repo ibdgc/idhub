@@ -1,26 +1,46 @@
-# redcap-pipeline/tests/test_gsid_client.py
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 
 class TestGSIDClient:
-    def test_generate_gsids_success(self, mock_requests):
-        """Test GSID generation request"""
-        mock_requests.return_value.json.return_value = {
-            "gsids": ["GSID1", "GSID2", "GSID3"],
-            "count": 3,
-        }
+    """Test GSIDClient functionality"""
 
-        response = mock_requests.return_value
-        data = response.json()
+    def test_register_subject_success(self):
+        """Test successful subject registration"""
+        from services.gsid_client import GSIDClient
 
-        assert data["count"] == 3
-        assert len(data["gsids"]) == 3
+        with patch("requests.Session") as mock_session:
+            mock_response = MagicMock()
+            mock_response.json.return_value = {
+                "gsid": "GSID-TEST123456789",
+                "action": "create_new",
+            }
+            mock_response.status_code = 200
+            mock_session.return_value.post.return_value = mock_response
 
-    def test_generate_gsids_error(self, mock_requests):
-        """Test GSID generation error"""
-        mock_requests.return_value.status_code = 500
+            client = GSIDClient()
+            result = client.register_subject(
+                center_id=1,
+                local_subject_id="TEST001",
+                identifier_type="primary",
+            )
 
-        response = mock_requests.return_value
-        assert response.status_code == 500
+            assert result["gsid"] == "GSID-TEST123456789"
+            assert result["action"] == "create_new"
+
+    def test_register_subject_error(self):
+        """Test subject registration error handling"""
+        from services.gsid_client import GSIDClient
+        import requests
+
+        with patch("requests.Session") as mock_session:
+            mock_session.return_value.post.side_effect = requests.exceptions.RequestException("Error")
+
+            client = GSIDClient()
+
+            with pytest.raises(requests.exceptions.RequestException):
+                client.register_subject(
+                    center_id=1,
+                    local_subject_id="TEST001",
+                )

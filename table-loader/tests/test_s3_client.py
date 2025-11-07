@@ -1,20 +1,29 @@
-# table-loader/tests/test_s3_client.py
 import json
 from io import BytesIO
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
+from botocore.exceptions import ClientError
 
 from services.s3_client import S3Client
 
 
+@pytest.fixture
+def mock_s3_client():
+    """Mock boto3 S3 client"""
+    with patch("boto3.client") as mock_client:
+        mock_s3 = MagicMock()
+        mock_client.return_value = mock_s3
+        yield mock_s3
+
+
 class TestS3Client:
-    """Test S3Client functionality"""
+    """Unit tests for S3Client"""
 
     def test_init(self, mock_s3_client):
         """Test S3Client initialization"""
-        client = S3Client()
-
+        client = S3Client("test-bucket")
         assert client.bucket == "test-bucket"
         assert client.s3_client is not None
 
@@ -22,114 +31,101 @@ class TestS3Client:
         """Test listing batch fragments"""
         batch_id = "batch_20240115_120000"
 
-        # Mock S3 response
         mock_s3_client.list_objects_v2.return_value = {
             "Contents": [
                 {"Key": f"staging/validated/{batch_id}/blood.csv"},
                 {"Key": f"staging/validated/{batch_id}/lcl.csv"},
-                {"Key": f"staging/validated/{batch_id}/validation_report.json"},
                 {"Key": f"staging/validated/{batch_id}/local_subject_ids.csv"},
+                {"Key": f"staging/validated/{batch_id}/validation_report.json"},
             ]
         }
 
-        client = S3Client()
+        client = S3Client("test-bucket")
         fragments = client.list_batch_fragments(batch_id)
 
-        # Should only return table fragments, not metadata files
-        assert len(fragments) == 2
-        assert "blood" in fragments
-        assert "lcl" in fragments
+        # Should only return CSV files (excluding validation_report.json)
+        assert len(fragments) == 3
+        assert all(f["Key"].endswith(".csv") for f in fragments)
 
     def test_list_batch_fragments_empty(self, mock_s3_client):
-        """Test listing fragments when none exist"""
+        """Test listing when no fragments exist"""
         mock_s3_client.list_objects_v2.return_value = {}
 
-        client = S3Client()
+        client = S3Client("test-bucket")
         fragments = client.list_batch_fragments("batch_nonexistent")
 
         assert fragments == []
 
     def test_download_fragment(self, mock_s3_client):
         """Test downloading a fragment"""
-        batch_id = "batch_20240115_120000"
-
-        # Mock CSV data
         csv_data = pd.DataFrame(
-            {
-                "global_subject_id": ["GSID-001"],
-                "sample_id": ["SMP001"],
-            }
+            {"global_subject_id": ["GSID-001"], "sample_id": ["SMP001"]}
         ).to_csv(index=False)
 
         mock_s3_client.get_object.return_value = {
             "Body": BytesIO(csv_data.encode())
         }
 
-        client = S3Client()
-        fragment = client.download_fragment(batch_id, "blood")
+        client = S3Client("test-bucket")
+        df = client.download_fragment("batch_20240115_120000", "blood")
 
-        assert fragment["table"] == "blood"
-        assert len(fragment["records"]) == 1
-        assert fragment["records"][0]["global_subject_id"] == "GSID-001"
+        assert len(df) == 1
+        assert "global_subject_id" in df.columns
+        assert df.iloc[0]["global_subject_id"] == "GSID-001"
 
     def test_download_fragment_not_found(self, mock_s3_client):
         """Test downloading non-existent fragment"""
-        from botocore.exceptions import ClientError
+        error_response = {
+            'Error': {
+                'Code': 'NoSuchKey',
+                'Message': 'The specified key does not exist.'
+            }
+        }
+        mock_s3_client.get_object.side_effect = ClientError(error_response, 'GetObject')
 
-        mock_s3_client.get_object.side_effect = ClientError(
-            {"Error": {"Code": "NoSuchKey"}}, "GetObject"
-        )
-        mock_s3_client.exceptions.NoSuchKey = ClientError
+        client = S3Client("test-bucket")
 
-        client = S3Client()
-
-        with pytest.raises(ClientError):
+        with pytest.raises(FileNotFoundError, match="Fragment not found"):
             client.download_fragment("batch_nonexistent", "blood")
 
-    def test_download_validation_report(self, mock_s3_client, sample_validation_report):
+    def test_download_validation_report(self, mock_s3_client):
         """Test downloading validation report"""
-        batch_id = "batch_20240115_120000"
+        report_data = {"status": "VALIDATED", "row_count": 100}
 
         mock_s3_client.get_object.return_value = {
-            "Body": BytesIO(json.dumps(sample_validation_report).encode())
+            "Body": BytesIO(json.dumps(report_data).encode())
         }
 
-        client = S3Client()
-        report = client.download_validation_report(batch_id)
+        client = S3Client("test-bucket")
+        report = client.download_validation_report("batch_20240115_120000")
 
-        assert report["batch_id"] == batch_id
         assert report["status"] == "VALIDATED"
+        assert report["row_count"] == 100
 
     def test_download_validation_report_not_found(self, mock_s3_client):
         """Test downloading non-existent validation report"""
-        from botocore.exceptions import ClientError
+        error_response = {
+            'Error': {
+                'Code': 'NoSuchKey',
+                'Message': 'The specified key does not exist.'
+            }
+        }
+        mock_s3_client.get_object.side_effect = ClientError(error_response, 'GetObject')
 
-        mock_s3_client.get_object.side_effect = ClientError(
-            {"Error": {"Code": "NoSuchKey"}}, "GetObject"
-        )
-        mock_s3_client.exceptions.NoSuchKey = ClientError
+        client = S3Client("test-bucket")
 
-        client = S3Client()
-        report = client.download_validation_report("batch_nonexistent")
-
-        # Should return empty dict on not found
-        assert report == {}
+        with pytest.raises(FileNotFoundError, match="Validation report not found"):
+            client.download_validation_report("batch_nonexistent")
 
     def test_mark_fragment_loaded(self, mock_s3_client):
         """Test marking fragment as loaded"""
-        batch_id = "batch_20240115_120000"
+        client = S3Client("test-bucket")
+        client.mark_fragment_loaded("batch_20240115_120000", "blood")
 
-        # Mock list response
-        mock_s3_client.list_objects_v2.return_value = {
-            "Contents": [
-                {"Key": f"staging/validated/{batch_id}/blood.csv"},
-                {"Key": f"staging/validated/{batch_id}/validation_report.json"},
-            ]
-        }
+        # Should call copy_object once and delete_object once
+        assert mock_s3_client.copy_object.call_count == 1
+        assert mock_s3_client.delete_object.call_count == 1
 
-        client = S3Client()
-        client.mark_fragment_loaded(batch_id, "blood")
-
-        # Should copy and delete files
-        assert mock_s3_client.copy_object.call_count == 2
-        assert mock_s3_client.delete_object.call_count == 2
+        # Verify copy was to correct location
+        copy_call = mock_s3_client.copy_object.call_args
+        assert "staging/loaded/" in copy_call.kwargs["Key"]

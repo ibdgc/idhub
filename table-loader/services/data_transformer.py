@@ -1,6 +1,6 @@
 # table-loader/services/data_transformer.py
 import logging
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Union
 
 import pandas as pd
 
@@ -14,13 +14,31 @@ class DataTransformer:
         self.table_name = table_name
         self.exclude_fields = exclude_fields or set()
 
-    def transform_records(self, fragment: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Transform fragment records for database insertion"""
-        records = fragment.get("records", [])
+    def transform_records(
+        self, fragment: Union[pd.DataFrame, Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Transform fragment records for database insertion
 
-        if not records:
-            logger.warning(f"No records found in fragment for {self.table_name}")
-            return []
+        Args:
+            fragment: Either a DataFrame or a dict with 'records' key
+
+        Returns:
+            List of record dictionaries ready for database insertion
+        """
+        # Handle DataFrame input
+        if isinstance(fragment, pd.DataFrame):
+            if fragment.empty:
+                logger.warning(f"No records found in fragment for {self.table_name}")
+                return []
+
+            # Convert DataFrame to list of dicts
+            records = fragment.to_dict("records")
+        else:
+            # Handle dict input (legacy format)
+            records = fragment.get("records", [])
+            if not records:
+                logger.warning(f"No records found in fragment for {self.table_name}")
+                return []
 
         # Get the first record to determine fields
         sample_record = records[0]
@@ -67,4 +85,5 @@ class DataTransformer:
         """Prepare DataFrame for bulk insert"""
         columns = list(df.columns)
         values = [tuple(row) for row in df.values]
+
         return columns, values
