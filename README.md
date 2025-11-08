@@ -1,6 +1,6 @@
 # IBDGC IDhub
 
-# idHub - IBDGC Data Hub
+# IDhub - IBDGC Data Hub
 
 [![Tests](https://github.com/ibdgc/idhub/actions/workflows/tests.yml/badge.svg)](https://github.com/ibdgc/idhub/actions/workflows/tests.yml)
 [![Code Coverage](https://github.com/ibdgc/idhub/actions/workflows/coverage.yml/badge.svg)](https://github.com/ibdgc/idhub/actions/workflows/coverage.yml)
@@ -208,7 +208,7 @@ Branch name pattern: main
 
 set -e
 
-echo "🧪 Running idHub Test Suite"
+echo "🧪 Running IDhub Test Suite"
 echo "======================================"
 
 # Colors
@@ -382,7 +382,7 @@ Nginx (Port 80/443)
 ↓ ↓
 NocoDB Container GSID Service (FastAPI)
 ↓ ↓
-NocoDB PostgreSQL idHub PostgreSQL
+NocoDB PostgreSQL IDhub PostgreSQL
 ↑
 │
 ┌─────────────────────┴─────────────────────┐
@@ -473,7 +473,7 @@ Two-stage process for loading curated sample data from S3 into PostgreSQL:
 - **Port**: 8080 (internal), 443 (external)
 - **Purpose**: User interface for data viewing and management
 - **Database**: Separate PostgreSQL instance
-- **Note**: Automatically syncs with idHub PostgreSQL data
+- **Note**: Automatically syncs with IDhub PostgreSQL data
 
 ### 6. Nginx Reverse Proxy
 
@@ -537,7 +537,7 @@ Two-stage process for loading curated sample data from S3 into PostgreSQL:
 
 ### Overview
 
-The fragment ingestion process loads curated sample data from S3 into the idHub database. It consists of two stages: validation and loading.
+The fragment ingestion process loads curated sample data from S3 into the IDhub database. It consists of two stages: validation and loading.
 
 ### Prerequisites
 
@@ -972,7 +972,7 @@ AWS_SECRET_ACCESS_KEY=<aws_secret>
 AWS_DEFAULT_REGION=us-east-1
 S3_BUCKET=idhub-curated-fragments
 
-# idHub Database
+# IDhub Database
 IDHUB_DB_NAME=idhub
 IDHUB_DB_USER=idhub_user
 
@@ -1051,7 +1051,7 @@ sudo journalctl -u docker -f
 ## Backup Strategy
 
 - **Automated**: Daily backups via cron (30-day retention)
-- **Scope**: Both NocoDB and idHub databases
+- **Scope**: Both NocoDB and IDhub databases
 - **Location**: `/opt/idhub/backups/`
 - **Script**: `./backup-idhub.sh`
 

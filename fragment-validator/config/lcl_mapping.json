@@ -5,6 +5,6 @@
   },
   "subject_id_candidates": ["consortium_id"],
   "center_id_field": null,
-  "default_center_id": 0,
+  "default_center_id": 1,
   "exclude_from_load": ["consortium_id", "center_id"]
 }
