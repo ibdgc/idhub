@@ -166,7 +166,7 @@ LOG_LEVEL=INFO
 
 ## GSID Format Specification
 
-GSIDs follow a standardized format:
+GSIDs follow a standardized format (truncated ULID):
 
 - **Prefix**: `GSID-`
 - **ID Length**: 16 characters (uppercase alphanumeric)
