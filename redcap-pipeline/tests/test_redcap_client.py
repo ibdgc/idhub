@@ -1,7 +1,9 @@
 # redcap-pipeline/tests/test_redcap_client.py
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
 
 class TestREDCapClient:
@@ -259,3 +261,74 @@ class TestREDCapClient:
         token = resolve_api_token("${REDCAP_API_TOKEN_UNKNOWN}")
 
         assert token == "${REDCAP_API_TOKEN_UNKNOWN}"
+
+    def test_resolve_api_token_gap_project(self):
+        """Test resolving GAP project token"""
+        from services.redcap_client import resolve_api_token
+
+        with patch.dict(os.environ, {"REDCAP_API_TOKEN_GAP": "gap_token_123"}):
+            result = resolve_api_token("${REDCAP_API_TOKEN_GAP}")
+            assert result == "gap_token_123"
+
+    def test_resolve_api_token_cd_ileal_project(self):
+        """Test resolving CD_ILEAL project token"""
+        from services.redcap_client import resolve_api_token
+
+        with patch.dict(os.environ, {"REDCAP_API_TOKEN_CD_ILEAL": "cd_token_456"}):
+            result = resolve_api_token("${REDCAP_API_TOKEN_CD_ILEAL}")
+            assert result == "cd_token_456"
+
+    def test_resolve_api_token_uc_demarc_project(self):
+        """Test resolving UC DEMARC project token"""
+        from services.redcap_client import resolve_api_token
+
+        with patch.dict(os.environ, {"REDCAP_API_TOKEN_UC_DEMARC": "uc_token_789"}):
+            result = resolve_api_token("${REDCAP_API_TOKEN_UC_DEMARC}")
+            assert result == "uc_token_789"
+
+    def test_resolve_api_token_multiple_replacements(self):
+        """Test resolving multiple tokens in one string"""
+        from services.redcap_client import resolve_api_token
+
+        with patch.dict(
+            os.environ,
+            {"REDCAP_API_TOKEN_GAP": "gap_123", "REDCAP_API_TOKEN": "default_456"},
+        ):
+            result = resolve_api_token("${REDCAP_API_TOKEN_GAP}-${REDCAP_API_TOKEN}")
+            assert result == "gap_123-default_456"
+
+    def test_resolve_api_token_missing_env_var(self):
+        """Test resolving token when env var is missing"""
+        from services.redcap_client import resolve_api_token
+
+        with patch.dict(os.environ, {}, clear=True):
+            result = resolve_api_token("${REDCAP_API_TOKEN_GAP}")
+            assert result == ""  # Should replace with empty string
+
+    def test_fetch_records_batch_exponential_backoff(self, sample_project_config):
+        """Test exponential backoff on timeout"""
+        from services.redcap_client import REDCapClient
+
+        with (
+            patch("requests.Session") as mock_session,
+            patch("time.sleep") as mock_sleep,
+        ):
+            # Simulate 2 timeouts, then success
+            mock_response_success = MagicMock()
+            mock_response_success.json.return_value = [{"record_id": "1"}]
+            mock_response_success.status_code = 200
+
+            mock_session.return_value.post.side_effect = [
+                requests.exceptions.Timeout("Timeout 1"),
+                requests.exceptions.Timeout("Timeout 2"),
+                mock_response_success,
+            ]
+
+            client = REDCapClient(sample_project_config)
+            result = client.fetch_records_batch(batch_size=10, offset=0)
+
+            assert len(result) == 1
+            assert mock_sleep.call_count == 2
+            # Verify exponential backoff: 5s, then 10s
+            mock_sleep.assert_any_call(5)
+            mock_sleep.assert_any_call(10)

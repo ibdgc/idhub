@@ -64,6 +64,35 @@ def sample_project_config():
 
 
 @pytest.fixture
+def sample_projects_config():
+    """Sample projects configuration - matches structure from config/projects.json"""
+    return {
+        "projects": {
+            "gap": {
+                "name": "GAP",
+                "redcap_project_id": "16894",
+                "api_token": "test_token_gap",
+                "field_mappings": "gap_field_mappings.json",
+                "schedule": "continuous",
+                "batch_size": 50,
+                "enabled": True,
+                "description": "Main biobank project",
+            },
+            "uc_demarc": {
+                "name": "uc_demarc",
+                "redcap_project_id": "16895",
+                "api_token": "test_token_uc",
+                "field_mappings": "uc_demarc_field_mappings.json",
+                "schedule": "manual",
+                "batch_size": 50,
+                "enabled": False,
+                "description": "Legacy sample collection",
+            },
+        }
+    }
+
+
+@pytest.fixture
 def temp_field_mappings_file(tmp_path):
     """Create temporary field mappings file"""
     mappings = {
@@ -72,62 +101,13 @@ def temp_field_mappings_file(tmp_path):
                 "source_field": "subject_id",
                 "target_table": "local_subject_ids",
                 "target_field": "local_subject_id",
-                "identifier_type": "primary",
-            },
-            {
-                "source_field": "alternate_id",
-                "target_table": "local_subject_ids",
-                "target_field": "local_subject_id",
-                "identifier_type": "alternate",
-            },
-            {
-                "source_field": "registration_date",
-                "target_table": "subjects",
-                "target_field": "registration_year",
-            },
-            {
-                "source_field": "control",
-                "target_table": "subjects",
-                "target_field": "control",
-            },
-            {
-                "source_field": "blood_sample_id",
-                "target_table": "specimen",
-                "target_field": "sample_id",
-                "sample_type": "blood",
-            },
-            {
-                "source_field": "dna_sample_id",
-                "target_table": "specimen",
-                "target_field": "sample_id",
-                "sample_type": "dna",
-            },
-            {
-                "source_field": "wgs_sample_id",
-                "target_table": "sequence",
-                "target_field": "sample_id",
-                "sample_type": "wgs",
-            },
-        ],
-        "transformations": {
-            "registration_date": {"type": "extract_year"},
-            "control": {
-                "type": "boolean",
-                "true_values": ["1", "true", "yes"],
-                "false_values": ["0", "false", "no"],
-            },
-        },
+            }
+        ]
     }
 
-    # Create in config directory
-    config_dir = tmp_path / "config"
-    config_dir.mkdir(exist_ok=True)
-
-    file_path = config_dir / "test_field_mappings.json"
-    with open(file_path, "w") as f:
-        json.dump(mappings, f)
-
-    return file_path
+    mappings_file = tmp_path / "test_field_mappings.json"
+    mappings_file.write_text(json.dumps(mappings))
+    return mappings_file
 
 
 @pytest.fixture
@@ -135,13 +115,16 @@ def sample_redcap_record():
     """Sample REDCap record"""
     return {
         "record_id": "1",
-        "redcap_data_access_group": "mount_sinai",
-        "subject_id": "MSSM001",
-        "alternate_id": "ALT001",
-        "registration_date": "2024-01-15",
+        "subject_id": "TEST001",
+        "center": "MSSM",
+        "enrollment_date": "2024-01-15",
         "control": "0",
-        "blood_sample_id": "BLOOD001",
-        "dna_sample_id": "DNA001",
-        "wgs_sample_id": "WGS001",
-        "family_id": "FAM001",
     }
+
+
+@pytest.fixture
+def setup_logs_dir():
+    """Ensure logs directory exists"""
+    logs_dir = Path("logs")
+    logs_dir.mkdir(exist_ok=True)
+    yield logs_dir

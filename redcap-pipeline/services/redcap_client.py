@@ -19,7 +19,7 @@ def resolve_api_token(token_template: str) -> str:
         "${REDCAP_API_TOKEN}": os.getenv("REDCAP_API_TOKEN", ""),
         "${REDCAP_API_TOKEN_GAP}": os.getenv("REDCAP_API_TOKEN_GAP", ""),
         "${REDCAP_API_TOKEN_CD_ILEAL}": os.getenv("REDCAP_API_TOKEN_CD_ILEAL", ""),
-        "${REDCAP_API_TOKEN_UC_DEMARC": os.getenv("REDCAP_API_TOKEN_UC_DEMARC", ""),
+        "${REDCAP_API_TOKEN_UC_DEMARC}": os.getenv("REDCAP_API_TOKEN_UC_DEMARC", ""),
     }
 
     for placeholder, value in replacements.items():
