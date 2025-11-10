@@ -45,7 +45,7 @@ jobs:
             echo "::warning::Running in LIVE mode - data will be loaded to ${{ github.event.inputs.environment }} database"
           fi
   ingest:
-    name: Load Fragment Data
+    name: Load Fragment Data (${{ github.event.inputs.environment }})
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -53,15 +53,21 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.environment }}
+        # Remove the 'ref' parameter - use default branch
+      - name: Display environment info
+        run: |
+          echo "::notice::Target Environment: ${{ github.event.inputs.environment }}"
+          echo "::notice::Batch ID: ${{ github.event.inputs.batch_id }}"
+          echo "::notice::Mode: ${{ needs.validate.outputs.mode }}"
+          echo "::notice::Branch: ${{ github.ref_name }}"
       - name: Set up SSH tunnel to database
         env:
-          SSH_PRIVATE_KEY: ${{ secrets[format('SSH_PRIVATE_KEY_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          SSH_HOST: ${{ secrets[format('SSH_HOST_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          SSH_USER: ${{ secrets[format('SSH_USER_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          SSH_PRIVATE_KEY: ${{ secrets[format('SSH_PRIVATE_KEY_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          SSH_HOST: ${{ secrets[format('SSH_HOST_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          SSH_USER: ${{ secrets[format('SSH_USER_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
         run: |
-          echo "::group::Setting up SSH tunnel"
+          echo "::group::Setting up SSH tunnel to ${{ github.event.inputs.environment }}"
+          echo "Connecting to: $SSH_HOST"
           mkdir -p ~/.ssh
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
@@ -75,7 +81,7 @@ jobs:
           echo "Waiting for tunnel..."
           for i in {1..30}; do
             if nc -zv 127.0.0.1 5432 2>&1 | grep -q succeeded; then
-              echo "✓ SSH tunnel established successfully"
+              echo "✓ SSH tunnel established successfully to ${{ github.event.inputs.environment }}"
               echo "::endgroup::"
               exit 0
             fi
@@ -87,21 +93,24 @@ jobs:
           exit 1
       - name: Verify database connectivity
         env:
-          PGPASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          DB_USER: ${{ secrets[format('DB_USER_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          DB_NAME: ${{ secrets[format('DB_NAME_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          PGPASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_USER: ${{ secrets[format('DB_USER_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_NAME: ${{ secrets[format('DB_NAME_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
         run: |
-          echo "::group::Testing database connection"
+          echo "::group::Testing database connection to ${{ github.event.inputs.environment }}"
           sudo apt-get update -qq
           sudo apt-get install -y postgresql-client
+          echo "Database: $DB_NAME"
+          echo "User: $DB_USER"
           psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -c "SELECT version();"
-          echo "✓ Database connection verified"
+          psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -c "SELECT current_database();"
+          echo "✓ Database connection verified for ${{ github.event.inputs.environment }}"
           echo "::endgroup::"
       - name: Verify fragment_resolutions table exists
         env:
-          PGPASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          DB_USER: ${{ secrets[format('DB_USER_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          DB_NAME: ${{ secrets[format('DB_NAME_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          PGPASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_USER: ${{ secrets[format('DB_USER_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_NAME: ${{ secrets[format('DB_NAME_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
         run: |
           echo "::group::Verifying fragment_resolutions table"
           TABLE_EXISTS=$(psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -tAc \
@@ -143,9 +152,10 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: us-east-1
-          S3_BUCKET: ${{ needs.validate.outputs.environment == 'prod' && 'idhub-curated-fragments' || 'idhub-curated-fragments-qa' }}
+          S3_BUCKET: ${{ github.event.inputs.environment == 'prod' && 'idhub-curated-fragments' || 'idhub-curated-fragments-qa' }}
         run: |
           echo "::group::Verifying S3 batch exists"
+          echo "Target S3 Bucket: $S3_BUCKET (environment: ${{ github.event.inputs.environment }})"
           pip install awscli
           BATCH_ID="${{ github.event.inputs.batch_id }}"
           PREFIX="staging/validated/${BATCH_ID}/"
@@ -153,7 +163,7 @@ jobs:
           echo ""
           if aws s3 ls "s3://$S3_BUCKET/$PREFIX" 2>/dev/null; then
             echo ""
-            echo "✓ Found batch: $BATCH_ID"
+            echo "✓ Found batch: $BATCH_ID in $S3_BUCKET"
             echo ""
             echo "Files in batch:"
             aws s3 ls "s3://$S3_BUCKET/$PREFIX"
@@ -183,7 +193,7 @@ jobs:
               echo "::warning::validation_report.json not found - will use default exclusions"
             fi
           else
-            echo "::error::Batch not found: $BATCH_ID"
+            echo "::error::Batch not found: $BATCH_ID in bucket $S3_BUCKET"
             echo ""
             echo "Available batches in staging/validated/:"
             aws s3 ls "s3://$S3_BUCKET/staging/validated/" || echo "Cannot list staging/validated/"
@@ -194,16 +204,20 @@ jobs:
         id: load
         env:
           DB_HOST: localhost
-          DB_NAME: ${{ secrets[format('DB_NAME_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          DB_USER: ${{ secrets[format('DB_USER_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          DB_PASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_NAME: ${{ secrets[format('DB_NAME_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_USER: ${{ secrets[format('DB_USER_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_PASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
           DB_PORT: 5432
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: us-east-1
-          S3_BUCKET: ${{ needs.validate.outputs.environment == 'prod' && 'idhub-curated-fragments' || 'idhub-curated-fragments-qa' }}
+          S3_BUCKET: ${{ github.event.inputs.environment == 'prod' && 'idhub-curated-fragments' || 'idhub-curated-fragments-qa' }}
         run: |
           echo "::group::Running table loader"
+          echo "Environment: ${{ github.event.inputs.environment }}"
+          echo "S3 Bucket: $S3_BUCKET"
+          echo "Database: $DB_NAME"
+          echo ""
           cd table-loader
           CMD="python main.py --batch-id ${{ github.event.inputs.batch_id }}"
           if [[ "${{ github.event.inputs.dry_run }}" == "false" ]]; then
@@ -236,9 +250,9 @@ jobs:
       - name: Query fragment resolutions
         if: always()
         env:
-          PGPASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          DB_USER: ${{ secrets[format('DB_USER_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          DB_NAME: ${{ secrets[format('DB_NAME_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          PGPASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_USER: ${{ secrets[format('DB_USER_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_NAME: ${{ secrets[format('DB_NAME_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
         run: |
           echo "::group::Fragment Resolution Summary"
 
@@ -302,9 +316,9 @@ jobs:
       - name: Export resolution report
         if: always() && github.event.inputs.dry_run == 'false'
         env:
-          PGPASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          DB_USER: ${{ secrets[format('DB_USER_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          DB_NAME: ${{ secrets[format('DB_NAME_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          PGPASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_USER: ${{ secrets[format('DB_USER_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_NAME: ${{ secrets[format('DB_NAME_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
         run: |
           echo "::group::Exporting resolution report"
           TABLE_EXISTS=$(psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -tAc \
@@ -338,7 +352,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: loader-logs-${{ needs.validate.outputs.environment }}-${{ github.event.inputs.batch_id
+          name: loader-logs-${{ github.event.inputs.environment }}-${{ github.event.inputs.batch_id
             }}
           path: |
             table-loader/logs/
@@ -350,7 +364,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: load-report-${{ needs.validate.outputs.environment }}-${{ github.event.inputs.batch_id
+          name: load-report-${{ github.event.inputs.environment }}-${{ github.event.inputs.batch_id
             }}
           path: |
             table-loader/loader_output.log
@@ -365,14 +379,14 @@ jobs:
       - name: Notify on failure
         if: failure() && github.event.inputs.dry_run == 'false'
         run: |
-          echo "::error::Fragment ingestion failed for batch ${{ github.event.inputs.batch_id }} in ${{ needs.validate.outputs.environment }}"
+          echo "::error::Fragment ingestion failed for batch ${{ github.event.inputs.batch_id }} in ${{ github.event.inputs.environment }}"
           echo "Check the uploaded logs for details"
       - name: Check for review requirements
         if: success() && github.event.inputs.dry_run == 'false'
         env:
-          PGPASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          DB_USER: ${{ secrets[format('DB_USER_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          DB_NAME: ${{ secrets[format('DB_NAME_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          PGPASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_USER: ${{ secrets[format('DB_USER_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_NAME: ${{ secrets[format('DB_NAME_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
         run: |
           TABLE_EXISTS=$(psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -tAc \
             "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'fragment_resolutions');")
@@ -390,13 +404,13 @@ jobs:
       - name: Summary
         if: always()
         env:
-          PGPASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          DB_USER: ${{ secrets[format('DB_USER_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          DB_NAME: ${{ secrets[format('DB_NAME_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          PGPASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_USER: ${{ secrets[format('DB_USER_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_NAME: ${{ secrets[format('DB_NAME_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
         run: |-
           echo "## Fragment Ingestion Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Environment**: ${{ needs.validate.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Batch ID**: \`${{ github.event.inputs.batch_id }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Mode**: ${{ needs.validate.outputs.mode }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
