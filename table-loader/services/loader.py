@@ -39,9 +39,10 @@ class TableLoader:
         """Get fields to exclude from validation report"""
         try:
             report = self.s3_client.download_validation_report(batch_id)
-            exclude_fields = set(report.get("exclude_fields", []))
+            # Changed from "exclude_fields" to "exclude_from_load"
+            exclude_fields = set(report.get("exclude_from_load", []))
             logger.info(
-                f"Loaded exclude_fields from validation report: {exclude_fields}"
+                f"Loaded exclude_from_load from validation report: {exclude_fields}"
             )
             return exclude_fields
         except (FileNotFoundError, ClientError) as e:
@@ -55,6 +56,11 @@ class TableLoader:
                 "local_subject_id",
                 "consortium_id",
                 "local_id",
+                "match_strategy",
+                "confidence",
+                "Id",
+                "created_at",
+                "updated_at",
             }
         except Exception as e:
             logger.warning(
@@ -66,6 +72,11 @@ class TableLoader:
                 "local_subject_id",
                 "consortium_id",
                 "local_id",
+                "match_strategy",
+                "confidence",
+                "Id",
+                "created_at",
+                "updated_at",
             }
 
     def _determine_review_requirement(
@@ -138,6 +149,8 @@ class TableLoader:
             raise ValueError(f"No table fragments found for batch {batch_id}")
 
         exclude_fields = self._get_exclude_fields(batch_id)
+        logger.info(f"Preview using exclude_fields: {exclude_fields}")
+
         results = {}
 
         for fragment in fragments:
@@ -183,6 +196,7 @@ class TableLoader:
             raise ValueError(f"No table fragments found for batch {batch_id}")
 
         exclude_fields = self._get_exclude_fields(batch_id)
+        logger.info(f"Execute load using exclude_fields: {exclude_fields}")
 
         results = {
             "batch_id": batch_id,
