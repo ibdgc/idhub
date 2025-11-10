@@ -97,6 +97,29 @@ jobs:
           psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -c "SELECT version();"
           echo "✓ Database connection verified"
           echo "::endgroup::"
+      - name: Verify fragment_resolutions table exists
+        env:
+          PGPASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_USER: ${{ secrets[format('DB_USER_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_NAME: ${{ secrets[format('DB_NAME_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+        run: |
+          echo "::group::Verifying fragment_resolutions table"
+          TABLE_EXISTS=$(psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -tAc \
+            "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'fragment_resolutions');")
+          if [ "$TABLE_EXISTS" = "t" ]; then
+            echo "✓ fragment_resolutions table exists"
+            # Show recent resolutions for this batch if any
+            echo ""
+            echo "Previous load attempts for this batch:"
+            psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -c \
+              "SELECT resolution_id, table_name, load_status, rows_loaded, created_at 
+               FROM fragment_resolutions 
+               WHERE batch_id = '${{ github.event.inputs.batch_id }}' 
+               ORDER BY created_at DESC LIMIT 5;" || echo "No previous attempts found"
+          else
+            echo "::warning::fragment_resolutions table does not exist - tracking will be disabled"
+          fi
+          echo "::endgroup::"
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -210,6 +233,107 @@ jobs:
             echo "Records processed: $RECORDS"
             echo "::endgroup::"
           fi
+      - name: Query fragment resolutions
+        if: always()
+        env:
+          PGPASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_USER: ${{ secrets[format('DB_USER_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_NAME: ${{ secrets[format('DB_NAME_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+        run: |
+          echo "::group::Fragment Resolution Summary"
+
+          # Check if table exists
+          TABLE_EXISTS=$(psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -tAc \
+            "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'fragment_resolutions');")
+          if [ "$TABLE_EXISTS" = "t" ]; then
+            echo "=== Load Statistics for Batch: ${{ github.event.inputs.batch_id }} ==="
+            echo ""
+            
+            # Overall statistics
+            psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -c \
+              "SELECT 
+                COUNT(*) as total_fragments,
+                SUM(rows_loaded) as total_rows_loaded,
+                SUM(rows_failed) as total_rows_failed,
+                COUNT(*) FILTER (WHERE load_status = 'success') as successful,
+                COUNT(*) FILTER (WHERE load_status = 'failed') as failed,
+                COUNT(*) FILTER (WHERE requires_review = TRUE) as needs_review,
+                ROUND(AVG(execution_time_ms)::numeric, 2) as avg_time_ms
+               FROM fragment_resolutions 
+               WHERE batch_id = '${{ github.event.inputs.batch_id }}';"
+            
+            echo ""
+            echo "=== Per-Table Results ==="
+            psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -c \
+              "SELECT 
+                table_name,
+                load_status,
+                load_strategy,
+                rows_loaded,
+                rows_failed,
+                execution_time_ms,
+                requires_review,
+                CASE WHEN requires_review THEN review_reason ELSE '' END as review_reason
+               FROM fragment_resolutions 
+               WHERE batch_id = '${{ github.event.inputs.batch_id }}'
+               ORDER BY created_at;"
+            
+            echo ""
+            echo "=== Items Requiring Review ==="
+            REVIEW_COUNT=$(psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -tAc \
+              "SELECT COUNT(*) FROM fragment_resolutions 
+               WHERE batch_id = '${{ github.event.inputs.batch_id }}' 
+               AND requires_review = TRUE;")
+            
+            if [ "$REVIEW_COUNT" -gt "0" ]; then
+              echo "::warning::$REVIEW_COUNT fragment(s) require manual review"
+              psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -c \
+                "SELECT resolution_id, table_name, review_reason, error_message 
+                 FROM fragment_resolutions 
+                 WHERE batch_id = '${{ github.event.inputs.batch_id }}' 
+                 AND requires_review = TRUE;"
+            else
+              echo "✓ No fragments require review"
+            fi
+          else
+            echo "::warning::fragment_resolutions table not found - skipping resolution summary"
+          fi
+          echo "::endgroup::"
+      - name: Export resolution report
+        if: always() && github.event.inputs.dry_run == 'false'
+        env:
+          PGPASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_USER: ${{ secrets[format('DB_USER_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_NAME: ${{ secrets[format('DB_NAME_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+        run: |
+          echo "::group::Exporting resolution report"
+          TABLE_EXISTS=$(psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -tAc \
+            "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'fragment_resolutions');")
+          if [ "$TABLE_EXISTS" = "t" ]; then
+            mkdir -p table-loader/reports
+            psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -c \
+              "COPY (
+                SELECT 
+                  resolution_id,
+                  batch_id,
+                  table_name,
+                  load_status,
+                  load_strategy,
+                  rows_attempted,
+                  rows_loaded,
+                  rows_failed,
+                  execution_time_ms,
+                  requires_review,
+                  review_reason,
+                  error_message,
+                  created_at
+                FROM fragment_resolutions 
+                WHERE batch_id = '${{ github.event.inputs.batch_id }}'
+                ORDER BY created_at
+              ) TO STDOUT WITH CSV HEADER" > table-loader/reports/fragment_resolutions_${{ github.event.inputs.batch_id }}.csv
+            echo "✓ Resolution report exported"
+          fi
+          echo "::endgroup::"
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -219,6 +343,7 @@ jobs:
           path: |
             table-loader/logs/
             table-loader/loader_output.log
+            table-loader/reports/
           retention-days: 30
           if-no-files-found: warn
       - name: Upload load report
@@ -227,8 +352,11 @@ jobs:
         with:
           name: load-report-${{ needs.validate.outputs.environment }}-${{ github.event.inputs.batch_id
             }}
-          path: table-loader/loader_output.log
+          path: |
+            table-loader/loader_output.log
+            table-loader/reports/fragment_resolutions_*.csv
           retention-days: 90
+          if-no-files-found: warn
       - name: Cleanup SSH tunnel
         if: always()
         run: |
@@ -239,8 +367,32 @@ jobs:
         run: |
           echo "::error::Fragment ingestion failed for batch ${{ github.event.inputs.batch_id }} in ${{ needs.validate.outputs.environment }}"
           echo "Check the uploaded logs for details"
+      - name: Check for review requirements
+        if: success() && github.event.inputs.dry_run == 'false'
+        env:
+          PGPASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_USER: ${{ secrets[format('DB_USER_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_NAME: ${{ secrets[format('DB_NAME_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+        run: |
+          TABLE_EXISTS=$(psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -tAc \
+            "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'fragment_resolutions');")
+          if [ "$TABLE_EXISTS" = "t" ]; then
+            REVIEW_COUNT=$(psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -tAc \
+              "SELECT COUNT(*) FROM fragment_resolutions 
+               WHERE batch_id = '${{ github.event.inputs.batch_id }}' 
+               AND requires_review = TRUE;")
+            
+            if [ "$REVIEW_COUNT" -gt "0" ]; then
+              echo "::warning::⚠️  $REVIEW_COUNT fragment(s) require manual review"
+              echo "::warning::Please review fragment_resolutions table for batch ${{ github.event.inputs.batch_id }}"
+            fi
+          fi
       - name: Summary
         if: always()
+        env:
+          PGPASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_USER: ${{ secrets[format('DB_USER_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_NAME: ${{ secrets[format('DB_NAME_{0}', needs.validate.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
         run: |-
           echo "## Fragment Ingestion Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -250,6 +402,44 @@ jobs:
           echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Triggered by**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Add resolution statistics if available
+          TABLE_EXISTS=$(psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -tAc \
+            "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'fragment_resolutions');" || echo "f")
+          if [ "$TABLE_EXISTS" = "t" ]; then
+            echo "### Load Statistics" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            STATS=$(psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -tAc \
+              "SELECT 
+                COALESCE(SUM(rows_loaded), 0) || '|' || 
+                COALESCE(SUM(rows_failed), 0) || '|' || 
+                COALESCE(COUNT(*) FILTER (WHERE load_status = 'success'), 0) || '|' ||
+                COALESCE(COUNT(*) FILTER (WHERE requires_review = TRUE), 0)
+               FROM fragment_resolutions 
+               WHERE batch_id = '${{ github.event.inputs.batch_id }}';" || echo "0|0|0|0")
+            
+            IFS='|' read -r ROWS_LOADED ROWS_FAILED SUCCESS_COUNT REVIEW_COUNT <<< "$STATS"
+            
+            echo "- **Rows Loaded**: $ROWS_LOADED" >> $GITHUB_STEP_SUMMARY
+            echo "- **Rows Failed**: $ROWS_FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "- **Successful Tables**: $SUCCESS_COUNT" >> $GITHUB_STEP_SUMMARY
+            echo "- **Requires Review**: $REVIEW_COUNT" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            if [ "$REVIEW_COUNT" -gt "0" ]; then
+              echo "### ⚠️ Items Requiring Review" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -tA \
+                "SELECT table_name || ': ' || review_reason 
+                 FROM fragment_resolutions 
+                 WHERE batch_id = '${{ github.event.inputs.batch_id }}' 
+                 AND requires_review = TRUE;" >> $GITHUB_STEP_SUMMARY || true
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
           if [ -f table-loader/loader_output.log ]; then
             echo "### Load Details" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

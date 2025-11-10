@@ -127,6 +127,30 @@ CREATE TABLE sample_resolutions (
     CONSTRAINT valid_source_table CHECK (source_table IN ('specimen', 'lcl', 'enteroid', 'sequence', 'genotype', 'olink'))
 );
 
+CREATE TABLE fragment_resolutions (
+    resolution_id SERIAL PRIMARY KEY,
+    batch_id VARCHAR NOT NULL,
+    table_name VARCHAR NOT NULL,
+    fragment_key VARCHAR NOT NULL,
+    load_status VARCHAR NOT NULL,
+    load_strategy VARCHAR NOT NULL,
+    rows_attempted INT DEFAULT 0,
+    rows_loaded INT DEFAULT 0,
+    rows_failed INT DEFAULT 0,
+    execution_time_ms INT,
+    error_message TEXT,
+    requires_review BOOLEAN DEFAULT FALSE,
+    review_reason TEXT,
+    reviewed_by VARCHAR,
+    reviewed_at TIMESTAMP,
+    resolution_notes TEXT,
+    metadata JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR DEFAULT 'table_loader',
+    CONSTRAINT valid_load_status CHECK (load_status IN ('success', 'partial', 'failed', 'skipped', 'preview')),
+    CONSTRAINT valid_load_strategy CHECK (load_strategy IN ('standard_insert', 'upsert'))
+);
+
 -- Indexes
 CREATE INDEX idx_subjects_center ON subjects(center_id);
 CREATE INDEX idx_subjects_family ON subjects(family_id);
@@ -141,6 +165,12 @@ CREATE INDEX idx_sample_resolutions_review ON sample_resolutions(requires_review
 CREATE INDEX idx_sample_resolutions_sample ON sample_resolutions(sample_id, source_table);
 CREATE INDEX idx_sample_resolutions_gsid ON sample_resolutions(global_subject_id);
 CREATE INDEX idx_sample_resolutions_source ON sample_resolutions(source_table);
+CREATE INDEX idx_fragment_resolutions_batch ON fragment_resolutions(batch_id);
+CREATE INDEX idx_fragment_resolutions_table ON fragment_resolutions(table_name);
+CREATE INDEX idx_fragment_resolutions_status ON fragment_resolutions(load_status);
+CREATE INDEX idx_fragment_resolutions_review ON fragment_resolutions(requires_review) WHERE requires_review = TRUE;
+CREATE INDEX idx_fragment_resolutions_created ON fragment_resolutions(created_at DESC);
+CREATE UNIQUE INDEX idx_fragment_resolutions_unique ON fragment_resolutions(batch_id, table_name, fragment_key);
 
 -- Triggers
 CREATE OR REPLACE FUNCTION update_updated_at()
