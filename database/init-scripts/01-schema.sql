@@ -1,6 +1,4 @@
 -- database/init-scripts/01-schema.sql
--- Full schema with ULID-based GSIDs
-
 CREATE TABLE centers (
     center_id SERIAL PRIMARY KEY,
     name VARCHAR NOT NULL,
@@ -113,6 +111,22 @@ CREATE TABLE olink (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE sample_resolutions (
+    resolution_id SERIAL PRIMARY KEY,
+    sample_id VARCHAR NOT NULL,
+    sample_type VARCHAR NOT NULL,
+    source_table VARCHAR NOT NULL,
+    global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
+    requires_review BOOLEAN DEFAULT FALSE,
+    review_reason TEXT,
+    reviewed_by VARCHAR,
+    reviewed_at TIMESTAMP,
+    resolution_notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR DEFAULT 'system',
+    CONSTRAINT valid_source_table CHECK (source_table IN ('specimen', 'lcl', 'enteroid', 'sequence', 'genotype', 'olink'))
+);
+
 -- Indexes
 CREATE INDEX idx_subjects_center ON subjects(center_id);
 CREATE INDEX idx_subjects_family ON subjects(family_id);
@@ -123,6 +137,10 @@ CREATE INDEX idx_subjects_flagged ON subjects(flagged_for_review) WHERE flagged_
 CREATE INDEX idx_resolutions_review ON identity_resolutions(requires_review) WHERE requires_review = TRUE;
 CREATE INDEX idx_resolutions_gsid ON identity_resolutions(matched_gsid);
 CREATE INDEX idx_resolutions_input ON identity_resolutions(input_center_id, input_local_id);
+CREATE INDEX idx_sample_resolutions_review ON sample_resolutions(requires_review) WHERE requires_review = TRUE;
+CREATE INDEX idx_sample_resolutions_sample ON sample_resolutions(sample_id, source_table);
+CREATE INDEX idx_sample_resolutions_gsid ON sample_resolutions(global_subject_id);
+CREATE INDEX idx_sample_resolutions_source ON sample_resolutions(source_table);
 
 -- Triggers
 CREATE OR REPLACE FUNCTION update_updated_at()
