@@ -2,7 +2,7 @@
 name: REDCap Sync Pipeline
 on:
   schedule:
-    - cron: 0 2 * * *  # Daily at 2 AM UTC (runs on default branch)
+    - cron: 0 6 * * *
   workflow_dispatch:
     inputs:
       environment:
@@ -10,7 +10,7 @@ on:
         required: true
         type: choice
         options: [qa, prod]
-        default: qa
+        default: prod
       project_key:
         description: Specific project to sync (leave empty for all enabled projects)
         required: false
@@ -22,7 +22,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        # Remove the 'ref' parameter - use the branch selected in the UI
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'prod' || github.ref }}
       - name: Determine environment
         id: env
         run: |
@@ -64,7 +65,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
           cache: pip
           cache-dependency-path: redcap-pipeline/requirements.txt
       - name: Install dependencies
@@ -104,7 +105,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pipeline-logs-${{ steps.env.outputs.environment }}-${{ github.run_id
+          name:
+            pipeline-logs-${{ steps.env.outputs.environment }}-${{ github.run_id
             }}
           path: redcap-pipeline/logs/
           retention-days: 30
