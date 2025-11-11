@@ -5,7 +5,6 @@ from typing import Dict, List
 
 from botocore.exceptions import ClientError
 
-from .data_transformer import DataTransformer
 from .fragment_resolution import FragmentResolutionService
 from .load_strategy import LoadStrategy, StandardLoadStrategy, UpsertLoadStrategy
 from .s3_client import S3Client
@@ -16,8 +15,12 @@ logger = logging.getLogger(__name__)
 class TableLoader:
     """Orchestrates loading of validated data fragments into database"""
 
-    # Tables that should use upsert strategy
-    UPSERT_TABLES = {"subject"}
+    # Tables that should use upsert strategy with their conflict columns
+    UPSERT_TABLES = {
+        "subject": ["global_subject_id"],
+        "lcl": ["niddk_no"],
+        "local_subject_ids": ["center_id", "local_subject_id", "identifier_type"],
+    }
 
     def __init__(self):
         self.s3_client = S3Client()
@@ -28,7 +31,7 @@ class TableLoader:
         if table_name in self.UPSERT_TABLES:
             return UpsertLoadStrategy(
                 table_name=table_name,
-                conflict_columns=["global_subject_id"],
+                conflict_columns=self.UPSERT_TABLES[table_name],
                 exclude_fields=exclude_fields,
             )
         return StandardLoadStrategy(
@@ -39,123 +42,104 @@ class TableLoader:
         """Get fields to exclude from validation report"""
         try:
             report = self.s3_client.download_validation_report(batch_id)
-            # Changed from "exclude_fields" to "exclude_from_load"
             exclude_fields = set(report.get("exclude_from_load", []))
+
+            # Always exclude system fields
+            exclude_fields.update({"Id", "created_at", "updated_at"})
+
             logger.info(
                 f"Loaded exclude_from_load from validation report: {exclude_fields}"
             )
             return exclude_fields
+
         except (FileNotFoundError, ClientError) as e:
             logger.warning(
-                f"Could not load validation report: {e}. Using default exclusions."
+                f"Could not load validation report for {batch_id}: {e}. Using defaults."
             )
-            # Default exclusions if report not found
+            # Default exclusions for GSID resolution fields
             return {
-                "identifier_type",
-                "action",
-                "local_subject_id",
-                "consortium_id",
-                "local_id",
-                "match_strategy",
-                "confidence",
                 "Id",
                 "created_at",
                 "updated_at",
-            }
-        except Exception as e:
-            logger.warning(
-                f"Could not load validation report: {e}. Using default exclusions."
-            )
-            return {
+                "consortium_id",
                 "identifier_type",
                 "action",
                 "local_subject_id",
-                "consortium_id",
-                "local_id",
-                "match_strategy",
-                "confidence",
-                "Id",
-                "created_at",
-                "updated_at",
             }
 
-    def _determine_review_requirement(
-        self, load_result: Dict, table_name: str
-    ) -> tuple[bool, str]:
-        """Determine if a load result requires manual review
-
-        Returns:
-            (requires_review, review_reason)
-        """
-        # Failed loads always require review
-        if load_result.get("status") == "failed":
-            return (
-                True,
-                f"Load failed: {load_result.get('error_message', 'Unknown error')}",
-            )
-
-        # Partial loads (some rows failed) require review
-        rows_failed = load_result.get("rows_failed", 0)
-        if rows_failed > 0:
-            rows_attempted = load_result.get("rows_attempted", 0)
-            return True, f"Partial load: {rows_failed}/{rows_attempted} rows failed"
-
-        # No rows loaded might require review
-        rows_loaded = load_result.get("rows_loaded", 0)
-        if rows_loaded == 0 and load_result.get("status") != "skipped":
-            return True, "No rows loaded despite non-skipped status"
-
-        return False, None
+    def _extract_table_name(self, s3_key: str) -> str:
+        """Extract table name from S3 key"""
+        # Example: staging/validated/batch_123/blood.csv -> blood
+        filename = s3_key.split("/")[-1]
+        return filename.replace(".csv", "")
 
     def _track_fragment_load(
-        self, batch_id: str, table_name: str, fragment_key: str, load_result: Dict
+        self,
+        batch_id: str,
+        table_name: str,
+        fragment_key: str,
+        load_result: dict,
     ):
         """Track fragment load in fragment_resolutions table"""
-        requires_review, review_reason = self._determine_review_requirement(
-            load_result, table_name
-        )
-
-        # Extract metadata
-        metadata = {
-            "s3_key": fragment_key,
-            "columns": load_result.get("columns", []),
-            "sample_data": load_result.get("sample", []),
-        }
-
         try:
+            # Determine load strategy from result
+            load_strategy = load_result.get("strategy", "standard_insert")
+
+            # Map strategy names to valid database values
+            strategy_mapping = {
+                "insert": "standard_insert",
+                "upsert": "upsert",
+                "standard": "standard_insert",
+                "standard_insert": "standard_insert",
+            }
+
+            # Normalize the strategy value
+            load_strategy = strategy_mapping.get(load_strategy, "standard_insert")
+
             self.resolution_service.create_resolution(
                 batch_id=batch_id,
                 table_name=table_name,
                 fragment_key=fragment_key,
                 load_status=load_result.get("status", "unknown"),
-                load_strategy=load_result.get("strategy", "unknown"),
-                rows_attempted=load_result.get("rows_attempted", 0),
+                load_strategy=load_strategy,
+                rows_attempted=load_result.get("rows", 0),
                 rows_loaded=load_result.get("rows_loaded", 0),
                 rows_failed=load_result.get("rows_failed", 0),
-                execution_time_ms=load_result.get("execution_time_ms"),
-                error_message=load_result.get("error_message"),
-                requires_review=requires_review,
-                review_reason=review_reason,
-                metadata=metadata,
+                error_message=load_result.get("error"),
+                requires_review=load_result.get("status") == "failed",
+                review_reason=f"Load failed: {load_result.get('error')}"
+                if load_result.get("status") == "failed"
+                else None,
+                metadata={
+                    "s3_key": fragment_key,
+                    "columns": load_result.get("columns", []),
+                },
             )
         except Exception as e:
             logger.error(f"Failed to track fragment load: {e}")
-            # Don't fail the entire load if tracking fails
 
     def preview_load(self, batch_id: str) -> Dict:
-        """Preview what would be loaded without executing"""
+        """Preview load without executing database operations"""
+        logger.info(f"Previewing load for batch: {batch_id}")
+
+        # Get list of fragments
         fragments = self.s3_client.list_batch_fragments(batch_id)
         if not fragments:
             raise ValueError(f"No table fragments found for batch {batch_id}")
 
+        # Get exclude fields
         exclude_fields = self._get_exclude_fields(batch_id)
         logger.info(f"Preview using exclude_fields: {exclude_fields}")
 
         results = {}
 
         for fragment in fragments:
-            table_name = fragment["Key"].split("/")[-1].replace(".csv", "")
-            fragment_key = fragment["Key"]
+            s3_key = fragment["Key"]
+            table_name = self._extract_table_name(s3_key)
+
+            # Skip validation report
+            if table_name == "validation_report":
+                continue
 
             try:
                 # Download fragment
@@ -163,38 +147,30 @@ class TableLoader:
 
                 # Get strategy and preview
                 strategy = self._get_load_strategy(table_name, exclude_fields)
-                preview = strategy.load(data, dry_run=True)
+                preview_result = strategy.load(data, dry_run=True)
 
-                # Track preview
-                self._track_fragment_load(batch_id, table_name, fragment_key, preview)
-
-                results[table_name] = preview
+                results[table_name] = preview_result
 
             except Exception as e:
                 logger.error(f"Error previewing {table_name}: {e}")
-                error_result = {
+                results[table_name] = {
                     "status": "error",
                     "error": str(e),
-                    "strategy": "unknown",
-                    "rows_attempted": 0,
-                    "rows_loaded": 0,
-                    "rows_failed": 0,
+                    "table": table_name,
                 }
-                results[table_name] = error_result
-
-                # Track error
-                self._track_fragment_load(
-                    batch_id, table_name, fragment_key, error_result
-                )
 
         return results
 
     def execute_load(self, batch_id: str) -> Dict:
-        """Execute actual data load"""
+        """Execute load of validated fragments into database"""
+        logger.info(f"Executing load for batch: {batch_id}")
+
+        # Get list of fragments
         fragments = self.s3_client.list_batch_fragments(batch_id)
         if not fragments:
             raise ValueError(f"No table fragments found for batch {batch_id}")
 
+        # Get exclude fields
         exclude_fields = self._get_exclude_fields(batch_id)
         logger.info(f"Execute load using exclude_fields: {exclude_fields}")
 
@@ -205,8 +181,12 @@ class TableLoader:
         }
 
         for fragment in fragments:
-            table_name = fragment["Key"].split("/")[-1].replace(".csv", "")
-            fragment_key = fragment["Key"]
+            s3_key = fragment["Key"]
+            table_name = self._extract_table_name(s3_key)
+
+            # Skip validation report
+            if table_name == "validation_report":
+                continue
 
             try:
                 # Download fragment
@@ -217,9 +197,7 @@ class TableLoader:
                 load_result = strategy.load(data, dry_run=False)
 
                 # Track the load
-                self._track_fragment_load(
-                    batch_id, table_name, fragment_key, load_result
-                )
+                self._track_fragment_load(batch_id, table_name, s3_key, load_result)
 
                 # Mark as loaded in S3
                 self.s3_client.mark_fragment_loaded(batch_id, table_name)
@@ -227,8 +205,6 @@ class TableLoader:
                 results["tables"][table_name] = {
                     "status": load_result["status"],
                     "rows_loaded": load_result.get("rows_loaded", 0),
-                    "rows_failed": load_result.get("rows_failed", 0),
-                    "execution_time_ms": load_result.get("execution_time_ms"),
                     "timestamp": datetime.utcnow().isoformat(),
                 }
 
@@ -238,31 +214,28 @@ class TableLoader:
 
             except Exception as e:
                 logger.error(f"Error loading {table_name}: {e}")
+
+                # Track the failed load
                 error_result = {
                     "status": "failed",
-                    "error_message": str(e),
-                    "strategy": "unknown",
-                    "rows_attempted": 0,
+                    "error": str(e),
+                    "rows": 0,
                     "rows_loaded": 0,
                     "rows_failed": 0,
                 }
-
-                # Track the error
-                self._track_fragment_load(
-                    batch_id, table_name, fragment_key, error_result
-                )
+                self._track_fragment_load(batch_id, table_name, s3_key, error_result)
 
                 results["tables"][table_name] = {
-                    "status": "error",
+                    "status": "failed",
                     "error": str(e),
                     "timestamp": datetime.utcnow().isoformat(),
                 }
 
-                # Stop on first error
+                # Re-raise to stop processing
                 raise
 
         # Add summary statistics
         stats = self.resolution_service.get_load_statistics(batch_id)
-        results["statistics"] = stats
+        results["summary"] = stats
 
         return results
