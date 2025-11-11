@@ -19,6 +19,19 @@ logger = logging.getLogger(__name__)
 class FragmentValidator:
     """Main validator orchestrating the validation pipeline"""
 
+    # Fields that should never be loaded into target tables
+    # These are used for resolution/tracking but aren't part of the target schema
+    SYSTEM_EXCLUDE_FIELDS = {
+        "consortium_id",
+        "identifier_type",
+        "action",
+        "match_strategy",
+        "confidence",
+        "Id",
+        "created_at",
+        "updated_at",
+    }
+
     def __init__(
         self,
         s3_client: S3Client,
@@ -68,14 +81,26 @@ class FragmentValidator:
         # Generate batch ID
         batch_id = f"batch_{timestamp}"
 
+        # Get user-specified exclusions from config
+        user_exclude_fields = set(mapping_config.get("exclude_from_load", []))
+
+        # Combine with system exclusions
+        all_exclude_fields = self.SYSTEM_EXCLUDE_FIELDS | user_exclude_fields
+
+        # Also exclude any subject_id_candidates that aren't the resolved global_subject_id
+        subject_id_candidates = mapping_config.get("subject_id_candidates", [])
+        all_exclude_fields.update(subject_id_candidates)
+
         # Prepare report
         report = {
             "batch_id": batch_id,
             "table_name": table_name,
             "source_name": source_name,
-            "subject_id_candidates": mapping_config.get("subject_id_candidates", []),
+            "subject_id_candidates": subject_id_candidates,
             "center_id_field": mapping_config.get("center_id_field"),
-            "exclude_from_load": mapping_config.get("exclude_from_load", []),
+            "exclude_from_load": sorted(
+                list(all_exclude_fields)
+            ),  # Convert to sorted list for JSON
             "timestamp": datetime.now().isoformat(),
             "input_file": local_file_path,
             "s3_location": s3_key,
@@ -166,6 +191,7 @@ class FragmentValidator:
         print(f"Source: {report['source_name']}")
         print(f"Rows: {report['row_count']}")
         print(f"Status: {report['status']}")
+        print(f"Exclude from load: {', '.join(report['exclude_from_load'])}")
 
         if report["status"] == "VALIDATED":
             stats = report["resolution_summary"]

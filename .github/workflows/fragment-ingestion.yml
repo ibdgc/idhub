@@ -381,26 +381,6 @@ jobs:
         run: |
           echo "::error::Fragment ingestion failed for batch ${{ github.event.inputs.batch_id }} in ${{ github.event.inputs.environment }}"
           echo "Check the uploaded logs for details"
-      - name: Check for review requirements
-        if: success() && github.event.inputs.dry_run == 'false'
-        env:
-          PGPASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          DB_USER: ${{ secrets[format('DB_USER_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          DB_NAME: ${{ secrets[format('DB_NAME_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
-        run: |
-          TABLE_EXISTS=$(psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -tAc \
-            "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'fragment_resolutions');")
-          if [ "$TABLE_EXISTS" = "t" ]; then
-            REVIEW_COUNT=$(psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -tAc \
-              "SELECT COUNT(*) FROM fragment_resolutions 
-               WHERE batch_id = '${{ github.event.inputs.batch_id }}' 
-               AND requires_review = TRUE;")
-            
-            if [ "$REVIEW_COUNT" -gt "0" ]; then
-              echo "::warning::⚠️  $REVIEW_COUNT fragment(s) require manual review"
-              echo "::warning::Please review fragment_resolutions table for batch ${{ github.event.inputs.batch_id }}"
-            fi
-          fi
       - name: Summary
         if: always()
         env:
