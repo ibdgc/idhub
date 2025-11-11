@@ -171,7 +171,7 @@ def sample_validation_report():
         "row_count": 2,
         "subject_id_candidates": ["consortium_id"],
         "center_id_field": None,
-        "exclude_fields": ["consortium_id", "identifier_type", "action"],
+        "exclude_from_load": ["consortium_id", "identifier_type", "action"],
         "resolution_summary": {
             "existing_matches": 1,
             "new_gsids_minted": 1,
