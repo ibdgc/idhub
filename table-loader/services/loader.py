@@ -1,7 +1,7 @@
 # table-loader/services/loader.py
 import logging
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Set
 
 from botocore.exceptions import ClientError
 
@@ -22,6 +22,18 @@ class TableLoader:
         "local_subject_ids": ["center_id", "local_subject_id", "identifier_type"],
     }
 
+    # Table-specific field requirements (fields that should NEVER be excluded)
+    REQUIRED_FIELDS = {
+        "local_subject_ids": {
+            "center_id",
+            "local_subject_id",
+            "identifier_type",
+            "global_subject_id",
+        },
+        "lcl": {"niddk_no", "global_subject_id"},
+        "subject": {"global_subject_id"},
+    }
+
     def __init__(self):
         self.s3_client = S3Client()
         self.resolution_service = FragmentResolutionService()
@@ -38,8 +50,16 @@ class TableLoader:
             table_name=table_name, exclude_fields=exclude_fields
         )
 
-    def _get_exclude_fields(self, batch_id: str) -> set:
-        """Get fields to exclude from validation report"""
+    def _get_exclude_fields(self, batch_id: str, table_name: str) -> Set[str]:
+        """Get fields to exclude for a specific table
+
+        Args:
+            batch_id: Batch identifier
+            table_name: Target table name
+
+        Returns:
+            Set of field names to exclude from loading
+        """
         try:
             report = self.s3_client.download_validation_report(batch_id)
             exclude_fields = set(report.get("exclude_from_load", []))
@@ -47,9 +67,15 @@ class TableLoader:
             # Always exclude system fields
             exclude_fields.update({"Id", "created_at", "updated_at"})
 
-            logger.info(
-                f"Loaded exclude_from_load from validation report: {exclude_fields}"
-            )
+            # Remove any required fields for this specific table
+            if table_name in self.REQUIRED_FIELDS:
+                required = self.REQUIRED_FIELDS[table_name]
+                exclude_fields = exclude_fields - required
+                logger.info(
+                    f"Preserved required fields for {table_name}: {required & set(report.get('exclude_from_load', []))}"
+                )
+
+            logger.info(f"Exclude fields for {table_name}: {exclude_fields}")
             return exclude_fields
 
         except (FileNotFoundError, ClientError) as e:
@@ -57,15 +83,20 @@ class TableLoader:
                 f"Could not load validation report for {batch_id}: {e}. Using defaults."
             )
             # Default exclusions for GSID resolution fields
-            return {
+            base_exclusions = {
                 "Id",
                 "created_at",
                 "updated_at",
-                "consortium_id",
-                "identifier_type",
                 "action",
-                "local_subject_id",
+                "match_strategy",
+                "confidence",
             }
+
+            # Remove required fields for this table
+            if table_name in self.REQUIRED_FIELDS:
+                base_exclusions = base_exclusions - self.REQUIRED_FIELDS[table_name]
+
+            return base_exclusions
 
     def _extract_table_name(self, s3_key: str) -> str:
         """Extract table name from S3 key"""
@@ -127,10 +158,6 @@ class TableLoader:
         if not fragments:
             raise ValueError(f"No table fragments found for batch {batch_id}")
 
-        # Get exclude fields
-        exclude_fields = self._get_exclude_fields(batch_id)
-        logger.info(f"Preview using exclude_fields: {exclude_fields}")
-
         results = {}
 
         for fragment in fragments:
@@ -142,6 +169,9 @@ class TableLoader:
                 continue
 
             try:
+                # Get table-specific exclude fields
+                exclude_fields = self._get_exclude_fields(batch_id, table_name)
+
                 # Download fragment
                 data = self.s3_client.download_fragment(batch_id, table_name)
 
@@ -170,10 +200,6 @@ class TableLoader:
         if not fragments:
             raise ValueError(f"No table fragments found for batch {batch_id}")
 
-        # Get exclude fields
-        exclude_fields = self._get_exclude_fields(batch_id)
-        logger.info(f"Execute load using exclude_fields: {exclude_fields}")
-
         results = {
             "batch_id": batch_id,
             "timestamp": datetime.utcnow().isoformat(),
@@ -189,6 +215,9 @@ class TableLoader:
                 continue
 
             try:
+                # Get table-specific exclude fields
+                exclude_fields = self._get_exclude_fields(batch_id, table_name)
+
                 # Download fragment
                 data = self.s3_client.download_fragment(batch_id, table_name)
 
