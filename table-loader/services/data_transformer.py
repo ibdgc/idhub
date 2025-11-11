@@ -1,6 +1,6 @@
 # table-loader/services/data_transformer.py
 import logging
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Set, Tuple, Union
 
 import pandas as pd
 
@@ -43,8 +43,13 @@ class DataTransformer:
         # Get the first record to determine fields
         sample_record = records[0]
 
-        # Determine which fields to keep (exclude resolution-only fields)
-        fields_to_keep = set(sample_record.keys()) - self.exclude_fields
+        # Only exclude fields that actually exist in the data
+        # This prevents excluding required fields that aren't in the source
+        fields_present = set(sample_record.keys())
+        exclude_fields_present = self.exclude_fields & fields_present
+
+        # Determine which fields to keep
+        fields_to_keep = fields_present - exclude_fields_present
 
         # Always include global_subject_id if present
         if "global_subject_id" in sample_record:
@@ -52,10 +57,15 @@ class DataTransformer:
 
         logger.info(f"Fields to load for {self.table_name}: {sorted(fields_to_keep)}")
 
-        if self.exclude_fields:
-            excluded_present = self.exclude_fields & set(sample_record.keys())
-            if excluded_present:
-                logger.info(f"Excluded resolution fields: {sorted(excluded_present)}")
+        if exclude_fields_present:
+            logger.info(f"Excluded resolution fields: {sorted(exclude_fields_present)}")
+
+        # Log if exclude_fields contains fields not in the data
+        exclude_fields_not_present = self.exclude_fields - fields_present
+        if exclude_fields_not_present:
+            logger.debug(
+                f"Exclude list contains fields not in data (ignored): {sorted(exclude_fields_not_present)}"
+            )
 
         # Filter records to only include fields we want to load
         transformed_records = []
@@ -85,5 +95,4 @@ class DataTransformer:
         """Prepare DataFrame for bulk insert"""
         columns = list(df.columns)
         values = [tuple(row) for row in df.values]
-
         return columns, values
