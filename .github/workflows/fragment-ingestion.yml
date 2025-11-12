@@ -206,7 +206,7 @@ jobs:
           DB_HOST: localhost
           DB_NAME: ${{ secrets.DB_NAME }}
           DB_USER: ${{ secrets.DB_USER }}
-          DB_PASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_PORT: 5432
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -316,11 +316,7 @@ jobs:
       - name: Export resolution report
         if: always() && github.event.inputs.dry_run == 'false'
         env:
-<<<<<<< HEAD
-          PGPASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
-=======
           PGPASSWORD: ${{ secrets.DB_PASSWORD }}
->>>>>>> main
           DB_USER: ${{ secrets.DB_USER }}
           DB_NAME: ${{ secrets.DB_NAME }}
         run: |
