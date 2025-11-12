@@ -16,6 +16,7 @@ from .models import (
     HealthResponse,
     ResolutionResponse,
     SubjectRequest,
+    UpdateCenterRequest,
 )
 
 logger = logging.getLogger(__name__)

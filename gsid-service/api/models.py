@@ -2,7 +2,7 @@
 from datetime import date
 from typing import List, Optional
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class SubjectRequest(BaseModel):
@@ -67,3 +67,6 @@ class HealthResponse(BaseModel):
     status: str
     database: str
 
+
+class UpdateCenterRequest(BaseModel):
+    center_id: int = Field(..., gt=0, description="New center ID for the subject")
