@@ -45,10 +45,10 @@ jobs:
           # Determine environment-specific values
           if [ "$ENV_NAME" = "prod" ]; then
             DOMAIN="idhub.ibdgc.org"
-            S3_BUCKET="idhub-prod"
+            S3_BUCKET="idhub-curated-fragments"
           else
             DOMAIN="qa.idhub.ibdgc.org"
-            S3_BUCKET="idhub-qa"
+            S3_BUCKET="idhub-curated-fragments-qa"
           fi
 
           # Create .env file
@@ -63,21 +63,21 @@ jobs:
           # NocoDB Configuration (shared across environments)
           # ============================================================================
           NOCODB_DB_PASSWORD=${{ secrets.NOCODB_DB_PASSWORD }}
-          NOCODB_API_TOKEN=${{ secrets.NOCODB_API_TOKEN }}
+          NOCODB_API_TOKEN=${{ secrets[format('NOCODB_API_TOKEN_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
           JWT_SECRET=${{ secrets.JWT_SECRET }}
 
           # ============================================================================
           # IDHub Database Configuration
           # ============================================================================
-          DB_HOST=idhub_db
-          IDHUB_DB_NAME=idhub
-          IDHUB_DB_USER=idhub_user
-          IDHUB_DB_PASSWORD=${{ secrets[format('DB_PASSWORD_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_HOST=${{ secrets.DB_HOST }}
+          DB_NAME=${{ secrets.DB_NAME }}
+          DB_USER=${{ secrets.DB_USER }}
+          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
 
           # ============================================================================
           # GSID Service Configuration
           # ============================================================================
-          GSID_API_KEY=${{ secrets[format('GSID_API_KEY_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          GSID_API_KEY=${{ secrets.GSID_API_KEY }}
 
           # ============================================================================
           # AWS Configuration (shared across environments)
@@ -91,9 +91,9 @@ jobs:
           # REDCap Configuration (shared API URL, environment-specific tokens)
           # ============================================================================
           REDCAP_API_URL=${{ secrets.REDCAP_API_URL }}
-          REDCAP_API_TOKEN_CD_ILEAL=${{ secrets[format('REDCAP_API_TOKEN_CD_ILEAL_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          REDCAP_API_TOKEN_GAP=${{ secrets[format('REDCAP_API_TOKEN_GAP_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          REDCAP_API_TOKEN_UC_DEMARC=${{ secrets[format('REDCAP_API_TOKEN_UC_DEMARC_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          REDCAP_API_TOKEN_CD_ILEAL=${{ secrets.REDCAP_API_TOKEN_CD_ILEAL }}
+          REDCAP_API_TOKEN_GAP=${{ secrets.REDCAP_API_TOKEN_GAP }}
+          REDCAP_API_TOKEN_UC_DEMARC=${{ secrets.REDCAP_API_TOKEN_UC_DEMARC }}
           EOF
           echo "✓ Environment configuration created for $ENV_NAME"
       - name: Deploy to server

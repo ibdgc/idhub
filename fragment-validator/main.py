@@ -1,9 +1,9 @@
 # fragment-validator/main.py
 import argparse
 import logging
-import os
 import sys
 
+import boto3
 from dotenv import load_dotenv
 
 from core.config import settings
@@ -23,43 +23,31 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def get_env_var(base_name: str, environment: str, fallback: str = None) -> str:
-    """
-    Get environment variable with environment suffix.
-
-    Args:
-        base_name: Base variable name (e.g., 'GSID_API_KEY')
-        environment: 'qa' or 'production'
-        fallback: Fallback variable name if env-specific not found
-
-    Returns:
-        Environment variable value or None
-    """
-    env_suffix = "_QA" if environment == "qa" else "_PROD"
-    env_var = f"{base_name}{env_suffix}"
-    value = os.getenv(env_var)
-
-    # If not found and fallback provided, try fallback
-    if value is None and fallback:
-        value = os.getenv(fallback)
-
-    return value
+# Environment-specific configuration
+ENV_CONFIG = {
+    "qa": {
+        "S3_BUCKET": "idhub-curated-fragments-qa",
+        "GSID_SERVICE_URL": "https://api.qa.idhub.ibdgc.org",
+        "NOCODB_URL": "https://qa.idhub.ibdgc.org",
+    },
+    "production": {
+        "S3_BUCKET": "idhub-curated-fragments",
+        "GSID_SERVICE_URL": "https://api.idhub.ibdgc.org",
+        "NOCODB_URL": "https://idhub.ibdgc.org",
+    },
+}
 
 
-def validate_url(url: str, service_name: str) -> bool:
-    """Validate that URL is accessible (basic check)"""
-    if not url:
-        return False
-
-    # Check if it's a Docker hostname (nocodb, gsid-service, etc.)
-    if url.startswith("http://nocodb") or url.startswith("http://gsid-service"):
-        logger.warning(
-            f"{service_name} URL uses Docker hostname: {url}\n"
-            f"  This will only work inside Docker containers.\n"
-            f"  For local development, set the environment variable to use localhost or actual hostname."
-        )
-
-    return True
+def get_aws_credentials():
+    """Get AWS credentials from boto3 session (uses AWS CLI config)"""
+    try:
+        session = boto3.Session()
+        credentials = session.get_credentials()
+        if credentials is None:
+            raise ValueError("No AWS credentials found")
+        return credentials
+    except Exception as e:
+        raise ValueError(f"Failed to load AWS credentials: {e}")
 
 
 def main():
@@ -89,7 +77,7 @@ def main():
     logger.info(f"Running in {env_label} environment")
     logger.info(f"{'=' * 60}")
 
-    # Load mapping config using centralized method
+    # Load mapping config
     try:
         mapping_config = settings.load_mapping_config(args.mapping_config)
         logger.info(f"Loaded mapping config from {args.mapping_config}")
@@ -100,71 +88,56 @@ def main():
         logger.error(f"Invalid JSON in mapping config: {e}")
         sys.exit(1)
 
-    # Get environment-specific variables
-    s3_bucket = get_env_var("S3_BUCKET", args.environment, "S3_BUCKET")
-    gsid_api_key = get_env_var("GSID_API_KEY", args.environment)
-    nocodb_token = get_env_var("NOCODB_API_TOKEN", args.environment)
+    # Get environment-specific configuration
+    env_config = ENV_CONFIG[args.environment]
+    s3_bucket = env_config["S3_BUCKET"]
+    gsid_service_url = env_config["GSID_SERVICE_URL"]
+    nocodb_url = env_config["NOCODB_URL"]
 
-    # Shared variables (no environment suffix)
-    # For local development, these should be overridden in .env
-    gsid_service_url = os.getenv("GSID_SERVICE_URL", "http://gsid-service:8000")
-    nocodb_url = os.getenv("NOCODB_URL", "http://nocodb:8080")
+    # Get user-provided credentials from .env
+    import os
+
+    gsid_api_key = os.getenv("GSID_API_KEY")
+
+    # Get environment-specific NocoDB token
+    env_suffix = "_QA" if args.environment == "qa" else "_PROD"
+    nocodb_token = os.getenv(f"NOCODB_API_TOKEN{env_suffix}")
     nocodb_base = os.getenv("NOCODB_BASE_ID")  # Optional
 
-    # AWS credentials (shared across environments)
-    aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
-    aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
-    aws_region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
-
-    # Validate required environment variables
-    required_vars = {
-        "S3_BUCKET": s3_bucket,
-        "GSID_SERVICE_URL": gsid_service_url,
-        "GSID_API_KEY": gsid_api_key,
-        "NOCODB_URL": nocodb_url,
-        "NOCODB_API_TOKEN": nocodb_token,
-        "AWS_ACCESS_KEY_ID": aws_access_key,
-        "AWS_SECRET_ACCESS_KEY": aws_secret_key,
-    }
-
-    missing_vars = [k for k, v in required_vars.items() if not v]
-    if missing_vars:
-        logger.error(
-            f"Missing required environment variables for {env_label}: {', '.join(missing_vars)}"
-        )
-        logger.error("\nExpected environment variables:")
-        logger.error(f"  - GSID_API_KEY_{env_label.replace('PRODUCTION', 'PROD')}")
-        logger.error(f"  - NOCODB_API_TOKEN_{env_label.replace('PRODUCTION', 'PROD')}")
-        logger.error(
-            f"  - S3_BUCKET_{env_label.replace('PRODUCTION', 'PROD')} (or S3_BUCKET)"
-        )
-        logger.error(f"  - GSID_SERVICE_URL (shared)")
-        logger.error(f"  - NOCODB_URL (shared)")
-        logger.error(f"  - AWS_ACCESS_KEY_ID (shared)")
-        logger.error(f"  - AWS_SECRET_ACCESS_KEY (shared)")
-        logger.error("\nFor local development, create a .env file with:")
-        logger.error(f"  NOCODB_URL=https://qa.idhub.ibdgc.org")
-        logger.error(f"  GSID_SERVICE_URL=https://api-qa.idhub.ibdgc.org")
+    # Validate AWS credentials
+    try:
+        aws_credentials = get_aws_credentials()
+        logger.info("✓ AWS credentials loaded from CLI configuration")
+    except ValueError as e:
+        logger.error(f"✗ {e}")
+        logger.error("\nPlease configure AWS CLI credentials:")
+        logger.error("  aws configure")
         sys.exit(1)
 
-    # Validate URLs
-    validate_url(nocodb_url, "NocoDB")
-    validate_url(gsid_service_url, "GSID Service")
+    # Validate required environment variables
+    if not gsid_api_key:
+        logger.error("Missing required environment variable: GSID_API_KEY")
+        logger.error("Please add to .env file: GSID_API_KEY=your_key_here")
+        sys.exit(1)
 
-    # Log configuration being used (mask sensitive values)
+    if not nocodb_token:
+        logger.error(
+            f"Missing required environment variable: NOCODB_API_TOKEN{env_suffix}"
+        )
+        logger.error(
+            f"Please add to .env file: NOCODB_API_TOKEN{env_suffix}=your_token_here"
+        )
+        sys.exit(1)
+
+    # Log configuration
     logger.info(f"Configuration:")
     logger.info(f"  Environment: {env_label}")
     logger.info(f"  S3 Bucket: {s3_bucket}")
-    logger.info(f"  AWS Region: {aws_region}")
     logger.info(f"  GSID Service: {gsid_service_url}")
     logger.info(f"  NocoDB URL: {nocodb_url}")
     logger.info(f"  NocoDB Base ID: {nocodb_base or 'auto-detect'}")
-    logger.info(
-        f"  GSID API Key: {'*' * 8}{gsid_api_key[-4:] if gsid_api_key else 'NOT SET'}"
-    )
-    logger.info(
-        f"  NocoDB Token: {'*' * 8}{nocodb_token[-4:] if nocodb_token else 'NOT SET'}"
-    )
+    logger.info(f"  GSID API Key: {'*' * 8}{gsid_api_key[-4:]}")
+    logger.info(f"  NocoDB Token: {'*' * 8}{nocodb_token[-4:]}")
     logger.info(f"{'=' * 60}")
 
     try:
@@ -207,12 +180,11 @@ def main():
     except ConnectionError as e:
         logger.error(f"✗ Connection failed: {e}")
         logger.error("\nTroubleshooting:")
-        logger.error("1. Check that service URLs are correct in your .env file")
-        logger.error("2. For local development, use actual hostnames:")
-        logger.error(f"   NOCODB_URL=https://qa.idhub.ibdgc.org")
-        logger.error(f"   GSID_SERVICE_URL=https://api-qa.idhub.ibdgc.org")
-        logger.error("3. Verify network connectivity to the services")
-        logger.error("4. Check that API tokens are valid")
+        logger.error("1. Verify network connectivity to the services")
+        logger.error("2. Check that API tokens are valid")
+        logger.error(f"3. Confirm service URLs are accessible:")
+        logger.error(f"   - {gsid_service_url}")
+        logger.error(f"   - {nocodb_url}")
         sys.exit(1)
     except Exception as e:
         logger.error(f"✗ Validation failed: {e}")
