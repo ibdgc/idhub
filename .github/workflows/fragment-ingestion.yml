@@ -93,7 +93,7 @@ jobs:
           exit 1
       - name: Verify database connectivity
         env:
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          PGPASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_USER: ${{ secrets.DB_USER }}
           DB_NAME: ${{ secrets.DB_NAME }}
         run: |
@@ -108,7 +108,7 @@ jobs:
           echo "::endgroup::"
       - name: Verify fragment_resolutions table exists
         env:
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          PGPASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_USER: ${{ secrets.DB_USER }}
           DB_NAME: ${{ secrets.DB_NAME }}
         run: |
@@ -132,7 +132,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
           cache: pip
           cache-dependency-path: table-loader/requirements.txt
       - name: Install dependencies
@@ -206,7 +206,7 @@ jobs:
           DB_HOST: localhost
           DB_NAME: ${{ secrets.DB_NAME }}
           DB_USER: ${{ secrets.DB_USER }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_PASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
           DB_PORT: 5432
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -250,7 +250,7 @@ jobs:
       - name: Query fragment resolutions
         if: always()
         env:
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          PGPASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_USER: ${{ secrets.DB_USER }}
           DB_NAME: ${{ secrets.DB_NAME }}
         run: |
@@ -316,7 +316,7 @@ jobs:
       - name: Export resolution report
         if: always() && github.event.inputs.dry_run == 'false'
         env:
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          PGPASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
           DB_USER: ${{ secrets.DB_USER }}
           DB_NAME: ${{ secrets.DB_NAME }}
         run: |
@@ -352,8 +352,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name:
-            loader-logs-${{ github.event.inputs.environment }}-${{ github.event.inputs.batch_id
+          name: loader-logs-${{ github.event.inputs.environment }}-${{ github.event.inputs.batch_id
             }}
           path: |
             table-loader/logs/
@@ -365,8 +364,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name:
-            load-report-${{ github.event.inputs.environment }}-${{ github.event.inputs.batch_id
+          name: load-report-${{ github.event.inputs.environment }}-${{ github.event.inputs.batch_id
             }}
           path: |
             table-loader/loader_output.log
@@ -386,7 +384,7 @@ jobs:
       - name: Summary
         if: always()
         env:
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          PGPASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_USER: ${{ secrets.DB_USER }}
           DB_NAME: ${{ secrets[format('DB_NAME_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
         run: |-
