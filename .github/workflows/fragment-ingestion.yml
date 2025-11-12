@@ -93,7 +93,7 @@ jobs:
           exit 1
       - name: Verify database connectivity
         env:
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          PGPASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_USER: ${{ secrets.DB_USER }}
           DB_NAME: ${{ secrets.DB_NAME }}
         run: |
@@ -108,7 +108,7 @@ jobs:
           echo "::endgroup::"
       - name: Verify fragment_resolutions table exists
         env:
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          PGPASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_USER: ${{ secrets.DB_USER }}
           DB_NAME: ${{ secrets.DB_NAME }}
         run: |
@@ -250,7 +250,7 @@ jobs:
       - name: Query fragment resolutions
         if: always()
         env:
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          PGPASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_USER: ${{ secrets.DB_USER }}
           DB_NAME: ${{ secrets.DB_NAME }}
         run: |
@@ -316,7 +316,7 @@ jobs:
       - name: Export resolution report
         if: always() && github.event.inputs.dry_run == 'false'
         env:
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          PGPASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_USER: ${{ secrets.DB_USER }}
           DB_NAME: ${{ secrets.DB_NAME }}
         run: |
@@ -386,9 +386,9 @@ jobs:
       - name: Summary
         if: always()
         env:
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          PGPASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_USER: ${{ secrets.DB_USER }}
-          DB_NAME: ${{ secrets[format('DB_NAME_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_NAME: ${{ secrets.DB_NAME }}
         run: |-
           echo "## Fragment Ingestion Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
