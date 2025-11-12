@@ -225,36 +225,19 @@ class DataProcessor:
         self,
         subject_ids: List[Dict[str, str]],
         center_id: int,
-        record: Dict,  # ADD THIS PARAMETER
+        record: Dict,
     ) -> Dict[str, Any]:
-        """
-        Decide which GSID the *set* of local-subject-IDs belongs to.
-        Steps
-        -----
-        1. Query local_subject_ids for each ID to discover existing GSIDs.
-        2. • If none found  -> create NEW GSID with the FIRST ID.
-           • If one found  -> re-use that GSID (link_existing).
-           • If many found -> *conflict* – pick one, flag for review.
-        3. Return a dict that contains the chosen GSID, the action that was
-           taken, and conflict metadata (if any).
-        """
+        """Resolve which GSID this set of local-subject-IDs belongs to"""
+
         if not subject_ids:
             raise ValueError("No valid subject IDs found in record")
 
-        # Extract metadata from record
         registration_year = self.extract_registration_year(record)
         control = self.extract_control_status(record)
 
-        logger.debug(
-            f"[{self.project_key}] Extracted metadata: "
-            f"registration_year={registration_year}, control={control}"
-        )
-
-        # ------------------------------------------------------------------
-        # 1. Look-up every ID in our own database first
-        # ------------------------------------------------------------------
+        # Check ALL IDs in local database first
         conn = get_db_connection()
-        gsids_found: Dict[str, str] = {}  # {local_id: gsid}
+        gsids_found: Dict[str, str] = {}
 
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -263,8 +246,8 @@ class DataProcessor:
                     cur.execute(
                         """
                         SELECT global_subject_id
-                        FROM   local_subject_ids
-                        WHERE  center_id = %s AND local_subject_id = %s
+                        FROM local_subject_ids
+                        WHERE center_id = %s AND local_subject_id = %s
                         """,
                         (center_id, local_id),
                     )
@@ -275,33 +258,28 @@ class DataProcessor:
             return_db_connection(conn)
 
         unique_gsids = list(set(gsids_found.values()))
-        conflict = False
-        conflicting_gsids: Optional[List[str]] = None
 
-        # ------------------------------------------------------------------
-        # 2. Decision: none / one / many existing GSIDs?
-        # ------------------------------------------------------------------
+        # ✅ Decision based on local findings ONLY
         if len(unique_gsids) == 0:
-            # No match in our DB -> create a NEW GSID with the first ID
+            # No match locally - call GSID service to create new
             primary_id = subject_ids[0]
             result = self.gsid_client.register_subject(
                 center_id=center_id,
                 local_subject_id=primary_id["local_subject_id"],
                 identifier_type=primary_id["identifier_type"],
-                registration_year=registration_year,  # ADD THIS
-                control=control,  # ADD THIS
+                registration_year=registration_year,
+                control=control,
                 created_by=self.project_key,
             )
             gsid = result["gsid"]
-            action = result["action"]  # will be 'create_new'
+            action = result["action"]
             identifier_type = primary_id["identifier_type"]
             local_subject_id = primary_id["local_subject_id"]
 
         elif len(unique_gsids) == 1:
-            # Exactly one GSID already known – re-use it
+            # ✅ Found existing - DON'T call GSID service
             gsid = unique_gsids[0]
             action = "link_existing"
-            # Pick whichever of our IDs triggered the match for logging
             any_local_id = next(iter(gsids_found))
             identifier_type = next(
                 i["identifier_type"]
@@ -311,27 +289,23 @@ class DataProcessor:
             local_subject_id = any_local_id
 
         else:
-            # More than one distinct GSID already linked – true conflict
-            gsid = unique_gsids[0]  # choose one so we can continue
+            # Conflict - multiple GSIDs found
+            gsid = unique_gsids[0]
             action = "conflict_detected"
             conflict = True
             conflicting_gsids = unique_gsids
-            # Use the first subject-ID as 'primary' for logging
             identifier_type = subject_ids[0]["identifier_type"]
             local_subject_id = subject_ids[0]["local_subject_id"]
 
-        # ------------------------------------------------------------------
-        # 3. Return the resolution metadata
-        # ------------------------------------------------------------------
         return {
             "gsid": gsid,
             "action": action,
             "identifier_type": identifier_type,
             "local_subject_id": local_subject_id,
-            "conflict": conflict,
-            "conflicting_gsids": conflicting_gsids,
-            "registration_year": registration_year,  # ADD THIS
-            "control": control,  # ADD THIS
+            "conflict": conflict if len(unique_gsids) > 1 else False,
+            "conflicting_gsids": conflicting_gsids if len(unique_gsids) > 1 else None,
+            "registration_year": registration_year,
+            "control": control,
         }
 
     def register_all_local_ids(
