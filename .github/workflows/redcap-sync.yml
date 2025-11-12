@@ -65,7 +65,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
           cache: pip
           cache-dependency-path: redcap-pipeline/requirements.txt
       - name: Install dependencies
@@ -83,7 +83,7 @@ jobs:
           REDCAP_API_TOKEN_UC_DEMARC: ${{ secrets.REDCAP_API_TOKEN_UC_DEMARC }}
           GSID_SERVICE_URL: ${{ steps.env.outputs.environment == 'prod' && 'https://api.idhub.ibdgc.org' || 'https://api-qa.idhub.ibdgc.org' }}
           GSID_API_KEY: ${{ secrets.GSID_API_KEY }}
-          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_HOST: localhost
           DB_NAME: ${{ secrets.DB_NAME }}
           DB_USER: ${{ secrets.DB_USER }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
@@ -105,8 +105,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name:
-            pipeline-logs-${{ steps.env.outputs.environment }}-${{ github.run_id
+          name: pipeline-logs-${{ steps.env.outputs.environment }}-${{ github.run_id
             }}
           path: redcap-pipeline/logs/
           retention-days: 30
