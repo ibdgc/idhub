@@ -316,7 +316,11 @@ jobs:
       - name: Export resolution report
         if: always() && github.event.inputs.dry_run == 'false'
         env:
+<<<<<<< HEAD
           PGPASSWORD: ${{ secrets[format('DB_PASSWORD_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
+=======
+          PGPASSWORD: ${{ secrets.DB_PASSWORD }}
+>>>>>>> main
           DB_USER: ${{ secrets.DB_USER }}
           DB_NAME: ${{ secrets.DB_NAME }}
         run: |
@@ -386,7 +390,7 @@ jobs:
         env:
           PGPASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_USER: ${{ secrets.DB_USER }}
-          DB_NAME: ${{ secrets[format('DB_NAME_{0}', github.event.inputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          DB_NAME: ${{ secrets.DB_NAME }}
         run: |-
           echo "## Fragment Ingestion Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
