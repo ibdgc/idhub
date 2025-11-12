@@ -152,6 +152,18 @@ async def register_subject(
             )
             resolution["gsid"] = gsid
 
+            log_resolution(
+                conn,
+                local_subject_id=request.local_subject_id,
+                identifier_type=request.identifier_type,
+                action="create_new",
+                gsid=gsid,
+                matched_gsid=None,
+                match_strategy=resolution["match_strategy"],
+                confidence=resolution["confidence"],
+                metadata={"center_id": request.center_id},
+            )
+
         # Handle link to existing subject
         elif resolution["action"] == "link_existing":
             gsid = resolution["gsid"]
@@ -172,28 +184,22 @@ async def register_subject(
                 ),
             )
 
-        # Log the resolution
-        log_resolution(
-            conn,
-            local_subject_id=request.local_subject_id,
-            identifier_type=request.identifier_type,
-            action=resolution["action"],
-            gsid=resolution.get("gsid"),
-            matched_gsid=resolution.get("gsid")
-            if resolution["action"] == "link_existing"
-            else None,
-            match_strategy=resolution["match_strategy"],
-            confidence=resolution["confidence"],
-            metadata={
-                "center_id": request.center_id,
-                "message": resolution.get("message"),
-            },
-        )
+            log_resolution(
+                conn,
+                local_subject_id=request.local_subject_id,
+                identifier_type=request.identifier_type,
+                action="link_existing",
+                gsid=gsid,
+                matched_gsid=gsid,
+                match_strategy=resolution["match_strategy"],
+                confidence=resolution["confidence"],
+                metadata={"center_id": request.center_id},
+            )
 
         conn.commit()
 
         return ResolutionResponse(
-            gsid=resolution["gsid"],
+            gsid=resolution.get("gsid"),
             action=resolution["action"],
             match_strategy=resolution["match_strategy"],
             confidence=resolution["confidence"],
@@ -223,8 +229,12 @@ async def register_subjects_batch(
     try:
         conn = get_db_connection()
 
-        for request in batch.requests:
+        for idx, request in enumerate(batch.requests):
             try:
+                logger.debug(
+                    f"Processing batch item {idx + 1}/{len(batch.requests)}: {request.local_subject_id}"
+                )
+
                 resolution = resolve_identity(
                     conn,
                     request.center_id,
@@ -320,6 +330,18 @@ async def register_subjects_batch(
                     )
                     resolution["gsid"] = gsid
 
+                    log_resolution(
+                        conn,
+                        local_subject_id=request.local_subject_id,
+                        identifier_type=request.identifier_type,
+                        action="create_new",
+                        gsid=gsid,
+                        matched_gsid=None,
+                        match_strategy=resolution["match_strategy"],
+                        confidence=resolution["confidence"],
+                        metadata={"center_id": request.center_id},
+                    )
+
                 # Handle link existing
                 elif resolution["action"] == "link_existing":
                     gsid = resolution["gsid"]
@@ -338,28 +360,21 @@ async def register_subjects_batch(
                         ),
                     )
 
-                # Log resolution for non-promotion cases
-                if resolution["action"] not in ["center_promoted", "review_required"]:
                     log_resolution(
                         conn,
                         local_subject_id=request.local_subject_id,
                         identifier_type=request.identifier_type,
-                        action=resolution["action"],
-                        gsid=resolution.get("gsid"),
-                        matched_gsid=resolution.get("gsid")
-                        if resolution["action"] == "link_existing"
-                        else None,
+                        action="link_existing",
+                        gsid=gsid,
+                        matched_gsid=gsid,
                         match_strategy=resolution["match_strategy"],
                         confidence=resolution["confidence"],
-                        metadata={
-                            "center_id": request.center_id,
-                            "message": resolution.get("message"),
-                        },
+                        metadata={"center_id": request.center_id},
                     )
 
                 results.append(
                     ResolutionResponse(
-                        gsid=resolution["gsid"],
+                        gsid=resolution.get("gsid"),
                         action=resolution["action"],
                         match_strategy=resolution["match_strategy"],
                         confidence=resolution["confidence"],
@@ -371,7 +386,8 @@ async def register_subjects_batch(
 
             except Exception as e:
                 logger.error(
-                    f"Error processing subject {request.local_subject_id}: {e}"
+                    f"Error processing subject {request.local_subject_id} (item {idx + 1}): {e}",
+                    exc_info=True,
                 )
                 # Continue processing other subjects
                 results.append(
@@ -387,6 +403,7 @@ async def register_subjects_batch(
                 )
 
         conn.commit()
+        logger.info(f"Batch processing complete: {len(results)} results")
         return results
 
     except Exception as e:
@@ -400,7 +417,7 @@ async def register_subjects_batch(
 
 
 @router.get("/review-queue")
-async def get_review_queue():
+async def get_review_queue(api_key: str = Depends(verify_api_key)):
     """Get subjects flagged for manual review"""
     conn = None
     try:
