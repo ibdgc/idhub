@@ -303,3 +303,38 @@ async def health():
     finally:
         if conn:
             conn.close()
+
+
+# In gsid-service routes
+@router.patch("/subjects/{gsid}/center")
+async def update_subject_center(
+    gsid: str,
+    request: UpdateCenterRequest,  # Pydantic model with center_id
+    api_key: str = Depends(verify_api_key),
+):
+    """Update center_id for existing subject"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE subjects
+                SET center_id = %s, updated_at = NOW()
+                WHERE global_subject_id = %s
+                RETURNING global_subject_id
+                """,
+                (request.center_id, gsid),
+            )
+
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=404, detail="GSID not found")
+
+            conn.commit()
+
+            return {
+                "gsid": gsid,
+                "center_id": request.center_id,
+                "action": "center_updated",
+            }
+    finally:
+        return_db_connection(conn)

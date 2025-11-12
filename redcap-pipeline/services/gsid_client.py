@@ -67,3 +67,22 @@ class GSIDClient:
         except requests.exceptions.RequestException as e:
             logger.error(f"Batch registration failed: {e}")
             raise
+
+    def update_subject_center(self, gsid: str, new_center_id: int) -> Dict[str, Any]:
+        """Update center_id for an existing GSID"""
+        url = f"{self.base_url}/subjects/{gsid}/center"
+
+        response = requests.patch(
+            url,
+            json={"center_id": new_center_id},
+            headers=self.headers,
+            timeout=30,
+        )
+
+        if response.status_code == 200:
+            return response.json()
+        else:
+            raise Exception(
+                f"Failed to update center for {gsid}: "
+                f"{response.status_code} - {response.text}"
+            )

@@ -235,33 +235,127 @@ class DataProcessor:
         registration_year = self.extract_registration_year(record)
         control = self.extract_control_status(record)
 
-        # Check ALL IDs in local database first
         conn = get_db_connection()
-        gsids_found: Dict[str, str] = {}
+        gsids_by_center: Dict[int, Dict[str, str]] = {}  # center_id → {local_id: gsid}
+
+        logger.debug(
+            f"[{self.project_key}] Checking {len(subject_ids)} IDs for center_id={center_id}"
+        )
 
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 for id_info in subject_ids:
                     local_id = id_info["local_subject_id"]
+
+                    # Check for this ID across ALL centers
                     cur.execute(
                         """
-                        SELECT global_subject_id
+                        SELECT global_subject_id, center_id
                         FROM local_subject_ids
-                        WHERE center_id = %s AND local_subject_id = %s
+                        WHERE local_subject_id = %s
+                        ORDER BY center_id
                         """,
-                        (center_id, local_id),
+                        (local_id,),
                     )
-                    row = cur.fetchone()
-                    if row:
-                        gsids_found[local_id] = row["global_subject_id"]
+                    rows = cur.fetchall()
+
+                    for row in rows:
+                        found_center = row["center_id"]
+                        found_gsid = row["global_subject_id"]
+
+                        if found_center not in gsids_by_center:
+                            gsids_by_center[found_center] = {}
+                        gsids_by_center[found_center][local_id] = found_gsid
+
+                        logger.debug(
+                            f"[{self.project_key}] Found: {local_id} → {found_gsid} "
+                            f"(center_id={found_center})"
+                        )
         finally:
             return_db_connection(conn)
 
-        unique_gsids = list(set(gsids_found.values()))
+        # Decision logic
+        exact_match_gsids = gsids_by_center.get(center_id, {})
+        unknown_center_gsids = gsids_by_center.get(1, {})  # center_id=1 is "Unknown"
+        all_other_gsids = {
+            gsid
+            for cid, gsids in gsids_by_center.items()
+            if cid not in [center_id, 1]
+            for gsid in gsids.values()
+        }
 
-        # ✅ Decision based on local findings ONLY
-        if len(unique_gsids) == 0:
-            # No match locally - call GSID service to create new
+        # Case 1: Exact center match exists
+        if exact_match_gsids:
+            unique_gsids = list(set(exact_match_gsids.values()))
+
+            if len(unique_gsids) == 1:
+                logger.info(
+                    f"[{self.project_key}] Exact center match: {unique_gsids[0]}"
+                )
+                return self._build_response(
+                    gsid=unique_gsids[0],
+                    action="link_existing",
+                    subject_ids=subject_ids,
+                    exact_match_gsids=exact_match_gsids,
+                    registration_year=registration_year,
+                    control=control,
+                )
+            else:
+                logger.warning(
+                    f"[{self.project_key}] Conflict within same center: {unique_gsids}"
+                )
+                return self._build_conflict_response(
+                    unique_gsids, subject_ids, registration_year, control
+                )
+
+        # Case 2: Unknown center exists, incoming has known center → upgrade
+        elif unknown_center_gsids and center_id != 1:
+            unique_gsids = list(set(unknown_center_gsids.values()))
+
+            if len(unique_gsids) == 1:
+                gsid = unique_gsids[0]
+                logger.info(
+                    f"[{self.project_key}] Upgrading {gsid} from Unknown (center=1) "
+                    f"to center={center_id}"
+                )
+
+                # Update center_id in GSID service
+                try:
+                    self.gsid_client.update_subject_center(
+                        gsid=gsid, new_center_id=center_id
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to update center for {gsid}: {e}")
+
+                return self._build_response(
+                    gsid=gsid,
+                    action="link_existing_upgraded_center",
+                    subject_ids=subject_ids,
+                    exact_match_gsids=unknown_center_gsids,
+                    registration_year=registration_year,
+                    control=control,
+                )
+            else:
+                logger.warning(
+                    f"[{self.project_key}] Conflict in Unknown center: {unique_gsids}"
+                )
+                return self._build_conflict_response(
+                    unique_gsids, subject_ids, registration_year, control
+                )
+
+        # Case 3: Match exists but in different (non-Unknown) center → conflict
+        elif all_other_gsids:
+            logger.error(
+                f"[{self.project_key}] Cross-center conflict: "
+                f"ID exists in other centers: {gsids_by_center}"
+            )
+            return self._build_conflict_response(
+                list(all_other_gsids), subject_ids, registration_year, control
+            )
+
+        # Case 4: No match anywhere → create new
+        else:
+            logger.info(f"[{self.project_key}] No existing GSID found - creating new")
             primary_id = subject_ids[0]
             result = self.gsid_client.register_subject(
                 center_id=center_id,
@@ -271,39 +365,61 @@ class DataProcessor:
                 control=control,
                 created_by=self.project_key,
             )
-            gsid = result["gsid"]
-            action = result["action"]
-            identifier_type = primary_id["identifier_type"]
-            local_subject_id = primary_id["local_subject_id"]
 
-        elif len(unique_gsids) == 1:
-            # ✅ Found existing - DON'T call GSID service
-            gsid = unique_gsids[0]
-            action = "link_existing"
-            any_local_id = next(iter(gsids_found))
-            identifier_type = next(
-                i["identifier_type"]
-                for i in subject_ids
-                if i["local_subject_id"] == any_local_id
-            )
-            local_subject_id = any_local_id
+            return {
+                "gsid": result["gsid"],
+                "action": result["action"],
+                "identifier_type": primary_id["identifier_type"],
+                "local_subject_id": primary_id["local_subject_id"],
+                "conflict": False,
+                "conflicting_gsids": None,
+                "registration_year": registration_year,
+                "control": control,
+            }
 
-        else:
-            # Conflict - multiple GSIDs found
-            gsid = unique_gsids[0]
-            action = "conflict_detected"
-            conflict = True
-            conflicting_gsids = unique_gsids
-            identifier_type = subject_ids[0]["identifier_type"]
-            local_subject_id = subject_ids[0]["local_subject_id"]
+    def _build_response(
+        self,
+        gsid: str,
+        action: str,
+        subject_ids: List[Dict[str, str]],
+        exact_match_gsids: Dict[str, str],
+        registration_year: Optional[date],
+        control: bool,
+    ) -> Dict[str, Any]:
+        """Build standard response"""
+        any_local_id = next(iter(exact_match_gsids))
+        identifier_type = next(
+            i["identifier_type"]
+            for i in subject_ids
+            if i["local_subject_id"] == any_local_id
+        )
 
         return {
             "gsid": gsid,
             "action": action,
             "identifier_type": identifier_type,
-            "local_subject_id": local_subject_id,
-            "conflict": conflict if len(unique_gsids) > 1 else False,
-            "conflicting_gsids": conflicting_gsids if len(unique_gsids) > 1 else None,
+            "local_subject_id": any_local_id,
+            "conflict": False,
+            "conflicting_gsids": None,
+            "registration_year": registration_year,
+            "control": control,
+        }
+
+    def _build_conflict_response(
+        self,
+        unique_gsids: List[str],
+        subject_ids: List[Dict[str, str]],
+        registration_year: Optional[date],
+        control: bool,
+    ) -> Dict[str, Any]:
+        """Build conflict response"""
+        return {
+            "gsid": unique_gsids[0],
+            "action": "conflict_detected",
+            "identifier_type": subject_ids[0]["identifier_type"],
+            "local_subject_id": subject_ids[0]["local_subject_id"],
+            "conflict": True,
+            "conflicting_gsids": unique_gsids,
             "registration_year": registration_year,
             "control": control,
         }
