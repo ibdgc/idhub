@@ -2,33 +2,37 @@
 import logging
 from typing import Any, Dict
 
-from core.database import get_db_cursor
-from psycopg2.extras import RealDictCursor
+import psycopg2.extras
 
 logger = logging.getLogger(__name__)
 
 
 def resolve_identity(
     conn, center_id: int, local_subject_id: str, identifier_type: str = "primary"
-) -> dict:
+) -> Dict[str, Any]:
     """
-    Core identity resolution logic - finds existing GSID regardless of identifier_type
-    The same local_subject_id for a given center should ALWAYS map to the same GSID,
-    regardless of what identifier_type it was originally registered with.
+    Resolve subject identity with cross-center duplicate detection and auto-promotion
+
+    Strategy:
+    1. Check if this exact (center_id, local_subject_id, identifier_type) exists
+    2. Check if this local_subject_id exists in ANY center (potential duplicate)
+    3. If found in center_id=1 (Unknown) and incoming center is known, promote the center
+    4. Otherwise flag for review or create new
     """
-    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
     try:
-        # First: Check if this local_subject_id exists for this center (ANY identifier_type)
+        # First: Check if this exact combination exists
         cur.execute(
             """
-            SELECT s.global_subject_id, s.withdrawn, l.identifier_type
+            SELECT s.global_subject_id, s.withdrawn, l.identifier_type, l.center_id
             FROM local_subject_ids l
             JOIN subjects s ON l.global_subject_id = s.global_subject_id
-            WHERE l.center_id = %s AND l.local_subject_id = %s
+            WHERE l.center_id = %s AND l.local_subject_id = %s AND l.identifier_type = %s
             ORDER BY l.created_at ASC
             LIMIT 1
             """,
-            (center_id, local_subject_id),
+            (center_id, local_subject_id, identifier_type),
         )
         exact = cur.fetchone()
 
@@ -37,102 +41,176 @@ def resolve_identity(
                 return {
                     "action": "review_required",
                     "gsid": exact["global_subject_id"],
-                    "match_strategy": f"exact_withdrawn (original type: {exact['identifier_type']})",
+                    "match_strategy": f"exact_withdrawn (type: {exact['identifier_type']})",
                     "confidence": 1.0,
                     "review_reason": "Subject previously withdrawn",
                 }
             return {
                 "action": "link_existing",
                 "gsid": exact["global_subject_id"],
-                "match_strategy": f"exact (original type: {exact['identifier_type']})",
+                "match_strategy": f"exact_match (center: {exact['center_id']}, type: {exact['identifier_type']})",
                 "confidence": 1.0,
-                "review_reason": None,
             }
 
-        # Second: Check subject_alias table
+        # Second: Check if this local_subject_id exists in ANY other center
         cur.execute(
             """
-            SELECT s.global_subject_id, s.withdrawn
-            FROM subject_alias a
-            JOIN subjects s ON a.global_subject_id = s.global_subject_id
-            WHERE a.alias = %s
+            SELECT 
+                s.global_subject_id, 
+                s.withdrawn, 
+                l.identifier_type,
+                l.center_id,
+                l.created_at
+            FROM local_subject_ids l
+            JOIN subjects s ON l.global_subject_id = s.global_subject_id
+            WHERE l.local_subject_id = %s AND l.center_id != %s
+            ORDER BY l.created_at ASC
+            LIMIT 1
             """,
-            (local_subject_id,),
+            (local_subject_id, center_id),
         )
-        alias = cur.fetchone()
+        cross_center = cur.fetchone()
 
-        if alias:
-            if alias["withdrawn"]:
+        if cross_center:
+            existing_center_id = cross_center["center_id"]
+            existing_gsid = cross_center["global_subject_id"]
+
+            # AUTO-PROMOTION LOGIC:
+            # If existing record is in "Unknown" center (center_id=1) and incoming is known
+            if existing_center_id == 1 and center_id != 1:
+                logger.info(
+                    f"Auto-promoting {local_subject_id} from Unknown (center_id=1) "
+                    f"to center_id={center_id}"
+                )
+
+                # Update the existing record's center_id
+                update_cur = conn.cursor()
+                update_cur.execute(
+                    """
+                    UPDATE local_subject_ids
+                    SET center_id = %s, updated_at = CURRENT_TIMESTAMP
+                    WHERE local_subject_id = %s 
+                      AND center_id = 1 
+                      AND identifier_type = %s
+                    """,
+                    (center_id, local_subject_id, cross_center["identifier_type"]),
+                )
+                rows_updated = update_cur.rowcount
+                update_cur.close()
+
+                if rows_updated > 0:
+                    return {
+                        "action": "center_promoted",
+                        "gsid": existing_gsid,
+                        "match_strategy": f"unknown_center_promoted (1 -> {center_id})",
+                        "confidence": 1.0,
+                        "previous_center_id": 1,
+                        "new_center_id": center_id,
+                        "message": f"Updated center from Unknown to {center_id}",
+                    }
+
+            # If incoming is "Unknown" but existing has a known center, link to existing
+            elif center_id == 1 and existing_center_id != 1:
+                logger.info(
+                    f"Incoming Unknown center for {local_subject_id}, "
+                    f"linking to existing center_id={existing_center_id}"
+                )
+                return {
+                    "action": "link_existing",
+                    "gsid": existing_gsid,
+                    "match_strategy": f"defer_to_known_center (existing center: {existing_center_id})",
+                    "confidence": 0.95,
+                    "message": f"Linked to existing record in center {existing_center_id}",
+                }
+
+            # Both are known centers but different - requires review
+            else:
                 return {
                     "action": "review_required",
-                    "gsid": alias["global_subject_id"],
-                    "match_strategy": "alias_withdrawn",
-                    "confidence": 1.0,
-                    "review_reason": "Alias matches withdrawn subject",
+                    "gsid": None,
+                    "match_strategy": f"cross_center_conflict (existing: {existing_center_id}, incoming: {center_id})",
+                    "confidence": 0.8,
+                    "review_reason": (
+                        f"Same local_subject_id '{local_subject_id}' exists in different centers. "
+                        f"Existing: center {existing_center_id} with GSID {existing_gsid}. "
+                        f"Incoming: center {center_id}. Requires manual review."
+                    ),
+                    "existing_gsid": existing_gsid,
+                    "existing_center_id": existing_center_id,
                 }
+
+        # Third: Check for similar identifiers in same center (different type)
+        cur.execute(
+            """
+            SELECT s.global_subject_id, s.withdrawn, l.identifier_type
+            FROM local_subject_ids l
+            JOIN subjects s ON l.global_subject_id = s.global_subject_id
+            WHERE l.center_id = %s AND l.local_subject_id = %s AND l.identifier_type != %s
+            ORDER BY l.created_at ASC
+            LIMIT 1
+            """,
+            (center_id, local_subject_id, identifier_type),
+        )
+        same_center_diff_type = cur.fetchone()
+
+        if same_center_diff_type:
+            # Same local_subject_id in same center but different identifier_type
+            # This is likely the same person, link to existing GSID
             return {
                 "action": "link_existing",
-                "gsid": alias["global_subject_id"],
-                "match_strategy": "alias",
+                "gsid": same_center_diff_type["global_subject_id"],
+                "match_strategy": f"same_center_different_type (existing type: {same_center_diff_type['identifier_type']})",
                 "confidence": 0.95,
-                "review_reason": None,
             }
 
-        # No match found - create new
+        # No matches found - create new subject
         return {
             "action": "create_new",
             "gsid": None,
             "match_strategy": "no_match",
             "confidence": 1.0,
-            "review_reason": None,
         }
+
+    except Exception as e:
+        logger.error(f"Error in resolve_identity: {e}")
+        raise
     finally:
         cur.close()
 
 
-def log_resolution(conn, resolution: Dict[str, Any], request: Any):
-    """
-    Log identity resolution result
-
-    Args:
-        conn: Database connection
-        resolution: Resolution result dictionary
-        request: SubjectRequest Pydantic model or dict
-    """
-    with get_db_cursor(conn, cursor_factory=RealDictCursor) as cur:
-        # Handle both Pydantic models and dicts
-        center_id = (
-            request.center_id
-            if hasattr(request, "center_id")
-            else request.get("center_id")
-        )
-        local_id = (
-            request.local_subject_id
-            if hasattr(request, "local_subject_id")
-            else request.get("local_subject_id")
-        )
-
-        # Determine if review is required
-        requires_review = resolution.get("action") == "review_required"
-
+def log_resolution(
+    conn,
+    local_subject_id: str,
+    identifier_type: str,
+    action: str,
+    gsid: str = None,
+    matched_gsid: str = None,
+    match_strategy: str = None,
+    confidence: float = None,
+    metadata: dict = None,
+):
+    """Log identity resolution decision"""
+    cur = conn.cursor()
+    try:
         cur.execute(
             """
             INSERT INTO identity_resolutions 
-            (input_center_id, input_local_id, matched_gsid, action, match_strategy,
-             confidence_score, requires_review, review_reason, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
-            RETURNING resolution_id
+            (local_subject_id, identifier_type, action, gsid, matched_gsid, match_strategy, confidence, metadata)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
-                center_id,
-                local_id,
-                resolution.get("gsid"),
-                resolution.get("action"),
-                resolution.get("match_strategy"),
-                resolution.get("confidence"),
-                requires_review,
-                resolution.get("review_reason"),
+                local_subject_id,
+                identifier_type,
+                action,
+                gsid,
+                matched_gsid,
+                match_strategy,
+                confidence,
+                psycopg2.extras.Json(metadata) if metadata else None,
             ),
         )
-        result = cur.fetchone()
-        return result["resolution_id"]
+    except Exception as e:
+        logger.error(f"Error logging resolution: {e}")
+        raise
+    finally:
+        cur.close()

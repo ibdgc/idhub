@@ -57,6 +57,7 @@ class ResolutionResponse(BaseModel):
     confidence: float
     requires_review: bool
     review_reason: Optional[str] = None
+    message: Optional[str] = None
 
 
 class BatchSubjectRequest(BaseModel):

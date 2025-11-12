@@ -1,4 +1,5 @@
 -- database/init-scripts/01-schema.sql
+
 CREATE TABLE centers (
     center_id SERIAL PRIMARY KEY,
     name VARCHAR NOT NULL,
@@ -41,22 +42,28 @@ CREATE TABLE local_subject_ids (
     identifier_type VARCHAR DEFAULT 'primary',
     global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (center_id, local_subject_id, identifier_type)
 );
 
 CREATE TABLE identity_resolutions (
     resolution_id SERIAL PRIMARY KEY,
+    local_subject_id VARCHAR,
+    identifier_type VARCHAR,
     input_center_id INT NOT NULL,
     input_local_id VARCHAR NOT NULL,
+    gsid VARCHAR(21),
     matched_gsid VARCHAR(21) REFERENCES subjects(global_subject_id),
     action VARCHAR NOT NULL,
     match_strategy VARCHAR NOT NULL,
-    confidence_score DECIMAL(3,2) NOT NULL,
+    confidence DECIMAL(3,2),
+    confidence_score DECIMAL(3,2),
     requires_review BOOLEAN DEFAULT FALSE,
     review_reason TEXT,
     reviewed_by VARCHAR,
     reviewed_at TIMESTAMP,
     resolution_notes TEXT,
+    metadata JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR DEFAULT 'system'
 );
@@ -161,6 +168,7 @@ CREATE INDEX idx_subjects_flagged ON subjects(flagged_for_review) WHERE flagged_
 CREATE INDEX idx_resolutions_review ON identity_resolutions(requires_review) WHERE requires_review = TRUE;
 CREATE INDEX idx_resolutions_gsid ON identity_resolutions(matched_gsid);
 CREATE INDEX idx_resolutions_input ON identity_resolutions(input_center_id, input_local_id);
+CREATE INDEX idx_identity_resolutions_local_subject_id ON identity_resolutions(local_subject_id);
 CREATE INDEX idx_sample_resolutions_review ON sample_resolutions(requires_review) WHERE requires_review = TRUE;
 CREATE INDEX idx_sample_resolutions_sample ON sample_resolutions(sample_id, source_table);
 CREATE INDEX idx_sample_resolutions_gsid ON sample_resolutions(global_subject_id);
@@ -183,5 +191,10 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER subjects_updated_at
     BEFORE UPDATE ON subjects
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at();
+
+CREATE TRIGGER local_subject_ids_updated_at
+    BEFORE UPDATE ON local_subject_ids
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at();
