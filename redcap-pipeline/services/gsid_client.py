@@ -27,7 +27,20 @@ class GSIDClient:
         control: bool = False,
         created_by: str = "redcap_pipeline",
     ) -> Dict[str, Any]:
-        """Register subject with GSID service"""
+        """
+        Register a single subject with GSID service
+
+        Args:
+            center_id: Research center ID
+            local_subject_id: Local identifier (e.g., consortium_id, local_id)
+            identifier_type: Type of identifier (e.g., "consortium_id", "local_id", "alias")
+            registration_year: Registration date
+            control: Whether this is a control subject
+            created_by: Creator identifier
+
+        Returns:
+            Registration response with gsid, action, match_strategy, etc.
+        """
         payload = {
             "center_id": center_id,
             "local_subject_id": local_subject_id,
@@ -64,12 +77,38 @@ class GSIDClient:
         """
         Register multiple subjects in batch
 
+        Each subject dict should contain:
+        - center_id: int
+        - local_subject_id: str
+        - identifier_type: str (e.g., "consortium_id", "local_id", "alias")
+        - registration_year: Optional[str] (ISO format)
+        - control: bool
+
         Args:
             subjects: List of subject registration requests
             timeout: Request timeout in seconds
 
         Returns:
             List of registration responses
+
+        Example:
+            subjects = [
+                {
+                    "center_id": 2,
+                    "local_subject_id": "IBDGC001",
+                    "identifier_type": "consortium_id",
+                    "registration_year": "2024-01-15",
+                    "control": False
+                },
+                {
+                    "center_id": 2,
+                    "local_subject_id": "LOCAL-123",
+                    "identifier_type": "local_id",
+                    "registration_year": "2024-01-15",
+                    "control": False
+                }
+            ]
+            results = client.register_batch(subjects)
         """
         payload = {"requests": subjects}
 
@@ -84,9 +123,16 @@ class GSIDClient:
             success_count = sum(1 for r in results if r.get("action") != "error")
             error_count = len(results) - success_count
 
+            # Count actions
+            actions = {}
+            for r in results:
+                action = r.get("action", "unknown")
+                actions[action] = actions.get(action, 0) + 1
+
             logger.info(
                 f"Batch registration complete: {success_count} success, {error_count} errors"
             )
+            logger.info(f"Actions: {actions}")
 
             return results
 
@@ -94,112 +140,79 @@ class GSIDClient:
             logger.error(f"Batch registration failed: {e}")
             raise
 
-    def register_multi_candidate(
+    def register_subject_with_multiple_ids(
         self,
         center_id: int,
-        candidate_ids: List[Dict[str, str]],
+        subject_ids: List[Dict[str, str]],
         registration_year: Optional[date] = None,
         control: bool = False,
-        created_by: str = "redcap_pipeline",
     ) -> Dict[str, Any]:
         """
-        Register subject with multiple candidate IDs
+        Register a single subject with multiple local IDs in one call
+
+        This is a convenience method that calls register_batch with multiple
+        entries for the same subject (same center, same metadata, different IDs).
 
         Args:
-            center_id: Center ID
-            candidate_ids: List of dicts with 'local_subject_id' and 'identifier_type'
-            registration_year: Registration year
+            center_id: Research center ID
+            subject_ids: List of dicts with 'local_subject_id' and 'identifier_type'
+                        e.g., [
+                            {"local_subject_id": "IBDGC001", "identifier_type": "consortium_id"},
+                            {"local_subject_id": "LOCAL-123", "identifier_type": "local_id"},
+                            {"local_subject_id": "ALIAS-ABC", "identifier_type": "alias"}
+                        ]
+            registration_year: Registration date
             control: Control status
-            created_by: Creator identifier
 
         Returns:
-            Registration response
+            Dict with:
+            - gsid: The resolved GSID (should be same for all IDs)
+            - results: List of individual registration results
+            - conflicts: List of any GSID conflicts detected
         """
-        payload = {
-            "center_id": center_id,
-            "candidate_ids": candidate_ids,
-            "registration_year": registration_year.isoformat()
-            if registration_year
-            else None,
-            "control": control,
-            "created_by": created_by,
+        if not subject_ids:
+            raise ValueError("subject_ids cannot be empty")
+
+        # Build batch request - one entry per ID
+        batch_requests = []
+        for id_info in subject_ids:
+            batch_requests.append(
+                {
+                    "center_id": center_id,
+                    "local_subject_id": id_info["local_subject_id"],
+                    "identifier_type": id_info["identifier_type"],
+                    "registration_year": registration_year.isoformat()
+                    if registration_year
+                    else None,
+                    "control": control,
+                }
+            )
+
+        # Register all IDs
+        results = self.register_batch(batch_requests)
+
+        # Check for GSID conflicts
+        gsids = set(r.get("gsid") for r in results if r.get("gsid"))
+
+        if len(gsids) > 1:
+            logger.warning(
+                f"GSID conflict detected! Multiple GSIDs returned for same subject: {gsids}"
+            )
+            return {
+                "gsid": None,
+                "results": results,
+                "conflicts": list(gsids),
+                "action": "review_required",
+                "message": f"Multiple GSIDs detected: {gsids}. Manual review required.",
+            }
+
+        # All IDs resolved to same GSID (or all failed)
+        gsid = gsids.pop() if gsids else None
+
+        return {
+            "gsid": gsid,
+            "results": results,
+            "conflicts": [],
+            "action": results[0].get("action") if results else "error",
+            "message": f"Successfully registered {len(subject_ids)} IDs for GSID {gsid}",
         }
-
-        try:
-            response = self.session.post(
-                f"{self.base_url}/register/multi-candidate", json=payload, timeout=30
-            )
-            response.raise_for_status()
-            result = response.json()
-
-            logger.info(
-                f"[{created_by}] Multi-candidate registration: {len(candidate_ids)} IDs -> "
-                f"GSID {result.get('gsid')} ({result.get('action')})"
-            )
-
-            return result
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"[{created_by}] Multi-candidate registration failed: {e}")
-            raise
-
-    def register_batch_multi_candidate(
-        self, requests: List[Dict[str, Any]], timeout: int = 120
-    ) -> List[Dict[str, Any]]:
-        """
-        Register multiple subjects with multiple candidate IDs in batch
-
-        Args:
-            requests: List of multi-candidate registration requests
-            timeout: Request timeout in seconds
-
-        Returns:
-            List of registration responses
-        """
-        payload = {"requests": requests}
-
-        try:
-            response = self.session.post(
-                f"{self.base_url}/register/batch/multi-candidate",
-                json=payload,
-                timeout=timeout,
-            )
-            response.raise_for_status()
-            results = response.json()
-
-            # Log summary
-            success_count = sum(1 for r in results if r.get("action") != "error")
-            error_count = len(results) - success_count
-
-            logger.info(
-                f"Batch multi-candidate registration complete: "
-                f"{success_count} success, {error_count} errors"
-            )
-
-            return results
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Batch multi-candidate registration failed: {e}")
-            raise
-
-    def update_subject_center(self, gsid: str, new_center_id: int) -> Dict[str, Any]:
-        """
-        Update center_id for an existing GSID
-
-        Note: This endpoint may not exist in current GSID service.
-        This is a placeholder for future implementation.
-        """
-        url = f"{self.base_url}/subjects/{gsid}/center"
-
-        try:
-            response = self.session.patch(
-                url,
-                json={"center_id": new_center_id},
-                timeout=30,
-            )
-            response.raise_for_status()
-            return response.json()
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to update center for {gsid}: {e}")
-            raise

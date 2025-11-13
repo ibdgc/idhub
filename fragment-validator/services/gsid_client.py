@@ -18,7 +18,7 @@ class GSIDClient:
     def register_batch(
         self, requests_list: List[Dict], batch_size: int = 100, timeout: int = 60
     ) -> List[Dict]:
-        """Register multiple subject IDs in batches (single candidate per subject)"""
+        """Register multiple subject IDs in batches"""
         results = []
         total_batches = (len(requests_list) + batch_size - 1) // batch_size
 
@@ -34,7 +34,7 @@ class GSIDClient:
 
             try:
                 response = requests.post(
-                    f"{self.service_url}/register/batch",
+                    f"{self.service_url}/register/batch",  # ← Changed from /register/batch/multi-candidate
                     json={"requests": batch},
                     headers=self.headers,
                     timeout=timeout,
@@ -44,73 +44,15 @@ class GSIDClient:
                 results.extend(batch_results)
 
                 logger.info(
-                    f"Batch {batch_num + 1}/{total_batches} complete "
-                    f"({len(batch_results)} results)"
+                    f"Batch {batch_num + 1}/{total_batches}: "
+                    f"Processed {len(batch_results)} records"
                 )
 
             except requests.exceptions.Timeout:
-                logger.error(
-                    f"Batch {batch_num + 1} timed out after {timeout}s. "
-                    f"Consider reducing batch_size or increasing timeout."
-                )
+                logger.error(f"Batch {batch_num + 1} timed out after {timeout}s")
                 raise
             except requests.exceptions.RequestException as e:
                 logger.error(f"Batch {batch_num + 1} failed: {e}")
-                raise
-
-        return results
-
-    def register_batch_multi_candidate(
-        self, requests_list: List[Dict], batch_size: int = 100, timeout: int = 120
-    ) -> List[Dict]:
-        """
-        Register multiple subjects with multiple candidate IDs per subject
-
-        Args:
-            requests_list: List of dicts with 'center_id' and 'candidate_ids'
-            batch_size: Number of subjects per batch
-            timeout: Request timeout in seconds (higher default for multi-candidate)
-
-        Returns:
-            List of resolution results
-        """
-        results = []
-        total_batches = (len(requests_list) + batch_size - 1) // batch_size
-
-        logger.info(
-            f"Processing {len(requests_list)} multi-candidate records in {total_batches} batches "
-            f"(batch_size={batch_size})"
-        )
-
-        for batch_num in range(total_batches):
-            start_idx = batch_num * batch_size
-            end_idx = min(start_idx + batch_size, len(requests_list))
-            batch = requests_list[start_idx:end_idx]
-
-            try:
-                response = requests.post(
-                    f"{self.service_url}/register/batch/multi-candidate",
-                    json={"requests": batch},
-                    headers=self.headers,
-                    timeout=timeout,
-                )
-                response.raise_for_status()
-                batch_results = response.json()
-                results.extend(batch_results)
-
-                logger.info(
-                    f"Multi-candidate batch {batch_num + 1}/{total_batches} complete "
-                    f"({len(batch_results)} results)"
-                )
-
-            except requests.exceptions.Timeout:
-                logger.error(
-                    f"Multi-candidate batch {batch_num + 1} timed out after {timeout}s. "
-                    f"Consider reducing batch_size or increasing timeout."
-                )
-                raise
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Multi-candidate batch {batch_num + 1} failed: {e}")
                 raise
 
         return results
