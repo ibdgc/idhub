@@ -173,13 +173,13 @@ class TableLoader:
                 load_result = strategy.load(data, dry_run=False)
                 execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000
 
-                # Log resolution
+                # Log resolution using the strategy name from the result
                 self.resolution_service.create_resolution(
                     batch_id=batch_id,
                     table_name=table_name,
                     fragment_key=s3_key,
                     load_status="success",
-                    load_strategy=strategy.__class__.__name__,
+                    load_strategy=load_result.get("strategy", "unknown"),
                     rows_attempted=load_result.get("rows_attempted", len(data)),
                     rows_loaded=load_result.get("rows_loaded", 0),
                     rows_failed=load_result.get("rows_failed", 0),
@@ -196,7 +196,7 @@ class TableLoader:
                 results["tables"][table_name] = {
                     "status": "success",
                     "rows_loaded": load_result.get("rows_loaded", 0),
-                    "strategy": strategy.__class__.__name__,
+                    "strategy": load_result.get("strategy", "unknown"),
                 }
 
             except Exception as e:

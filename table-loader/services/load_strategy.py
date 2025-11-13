@@ -27,7 +27,13 @@ class LoadStrategy(ABC):
 
     def _get_strategy_name(self) -> str:
         """Get strategy name for tracking"""
-        return self.__class__.__name__.replace("LoadStrategy", "").lower()
+        # Map class names to database constraint values
+        if isinstance(self, StandardLoadStrategy):
+            return "standard_insert"
+        elif isinstance(self, UpsertLoadStrategy):
+            return "upsert"
+        else:
+            return "unknown"
 
 
 class StandardLoadStrategy(LoadStrategy):
@@ -76,9 +82,11 @@ class StandardLoadStrategy(LoadStrategy):
                 # Get columns from first record
                 columns = list(records[0].keys())
                 values = [[rec[col] for col in columns] for rec in records]
+
                 db_manager.bulk_insert(conn, self.table_name, columns, values)
                 conn.commit()
                 rows_loaded = len(records)
+
         except Exception as e:
             rows_failed = rows_attempted
             error_message = str(e)
@@ -188,6 +196,7 @@ class UpsertLoadStrategy(LoadStrategy):
                     execute_values(cursor, query, values)
                     conn.commit()
                     rows_loaded = len(records)
+
         except Exception as e:
             rows_failed = rows_attempted
             error_message = str(e)
