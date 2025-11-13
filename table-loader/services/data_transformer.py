@@ -2,6 +2,7 @@
 import logging
 from typing import Any, Dict, List, Set, Tuple, Union
 
+import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,32 @@ class DataTransformer:
                 logger.warning(f"No records found in fragment for {self.table_name}")
                 return []
 
+            # CRITICAL: Filter out records with invalid global_subject_id
+            if "global_subject_id" in fragment.columns:
+                original_count = len(fragment)
+
+                # Remove rows where global_subject_id is NaN, None, or empty
+                fragment = fragment[
+                    fragment["global_subject_id"].notna()
+                    & (fragment["global_subject_id"] != "")
+                    & (fragment["global_subject_id"] != "NaN")
+                    & (fragment["global_subject_id"] != "nan")
+                ]
+
+                filtered_count = original_count - len(fragment)
+                if filtered_count > 0:
+                    logger.warning(
+                        f"Filtered out {filtered_count} records with invalid global_subject_id "
+                        f"from {self.table_name} (NaN, None, or empty values)"
+                    )
+
+                if fragment.empty:
+                    logger.error(
+                        f"All records in {self.table_name} have invalid global_subject_id - "
+                        f"nothing to load"
+                    )
+                    return []
+
             # Convert DataFrame to list of dicts
             records = fragment.to_dict("records")
         else:
@@ -56,7 +83,6 @@ class DataTransformer:
             fields_to_keep.add("global_subject_id")
 
         logger.info(f"Fields to load for {self.table_name}: {sorted(fields_to_keep)}")
-
         if exclude_fields_present:
             logger.info(f"Excluded resolution fields: {sorted(exclude_fields_present)}")
 
@@ -70,12 +96,34 @@ class DataTransformer:
         # Filter records to only include fields we want to load
         transformed_records = []
         for record in records:
+            # Additional validation: skip records with invalid global_subject_id
+            if "global_subject_id" in record:
+                gsid = record.get("global_subject_id")
+
+                # Check for various forms of invalid values
+                if (
+                    gsid is None
+                    or gsid == ""
+                    or pd.isna(gsid)
+                    or str(gsid).lower() == "nan"
+                ):
+                    logger.warning(
+                        f"Skipping record with invalid global_subject_id: {gsid}"
+                    )
+                    continue
+
             filtered_record = {k: v for k, v in record.items() if k in fields_to_keep}
             transformed_records.append(filtered_record)
 
         logger.info(
             f"Transformed {len(transformed_records)} records for {self.table_name}"
         )
+
+        if len(transformed_records) == 0 and len(records) > 0:
+            logger.error(
+                f"All {len(records)} records were filtered out due to invalid data"
+            )
+
         return transformed_records
 
     def deduplicate(self, df: pd.DataFrame, key_columns: List[str]) -> pd.DataFrame:
@@ -95,4 +143,5 @@ class DataTransformer:
         """Prepare DataFrame for bulk insert"""
         columns = list(df.columns)
         values = [tuple(row) for row in df.values]
+
         return columns, values
