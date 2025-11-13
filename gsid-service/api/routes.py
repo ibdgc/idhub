@@ -309,9 +309,10 @@ async def register_batch(
                 request.identifier_type,
             )
 
+            gsid = resolution.get("gsid")
+
             if resolution["action"] == "create_new":
                 gsid = generate_gsid()
-
                 cur.execute(
                     """
                     INSERT INTO subjects (global_subject_id, center_id, registration_year, control)
@@ -356,6 +357,39 @@ async def register_batch(
                     ),
                 )
 
+            elif resolution["action"] == "center_promoted":
+                gsid = resolution["gsid"]
+
+                # Update subjects table
+                cur.execute(
+                    """
+                    UPDATE subjects
+                    SET center_id = %s, updated_at = CURRENT_TIMESTAMP
+                    WHERE global_subject_id = %s AND center_id = 1
+                    """,
+                    (request.center_id, gsid),
+                )
+
+                # Update local_subject_ids
+                cur.execute(
+                    """
+                    UPDATE local_subject_ids
+                    SET center_id = %s
+                    WHERE global_subject_id = %s 
+                      AND local_subject_id = %s
+                      AND identifier_type = %s
+                      AND center_id = 1
+                    """,
+                    (
+                        request.center_id,
+                        gsid,
+                        request.local_subject_id,
+                        request.identifier_type,
+                    ),
+                )
+
+                logger.info(f"[BATCH] Center promoted {gsid}: 1 -> {request.center_id}")
+
             # Log resolution with correct parameters
             log_resolution(
                 conn,
@@ -363,7 +397,7 @@ async def register_batch(
                 request.identifier_type,
                 resolution.get("action", "unknown"),
                 resolution.get("gsid"),
-                resolution.get("gsid"),  # matched_gsid same as gsid for now
+                resolution.get("gsid"),
                 resolution.get("match_strategy", "unknown"),
                 resolution.get("confidence", 0.0),
                 request.center_id,
@@ -401,6 +435,7 @@ async def register_batch(
                     message=str(e),
                 )
             )
+
         finally:
             if conn:
                 conn.close()
@@ -543,9 +578,10 @@ async def register_batch_multi_candidate(
                 primary_candidate.identifier_type,
             )
 
+            gsid = resolution.get("gsid")  # Initialize gsid
+
             if resolution["action"] == "create_new":
                 gsid = generate_gsid()
-
                 cur.execute(
                     """
                     INSERT INTO subjects (global_subject_id, center_id, registration_year, control)
@@ -594,6 +630,66 @@ async def register_batch_multi_candidate(
                         ),
                     )
 
+            elif resolution["action"] == "center_promoted":
+                gsid = resolution["gsid"]
+
+                logger.info(
+                    f"[BATCH] Center promotion for GSID {gsid}: "
+                    f"Unknown (1) -> {request.center_id} for {primary_candidate.local_subject_id}"
+                )
+
+                # 1. Update subjects table - promote from Unknown to known center
+                cur.execute(
+                    """
+                    UPDATE subjects
+                    SET center_id = %s, updated_at = CURRENT_TIMESTAMP
+                    WHERE global_subject_id = %s 
+                      AND center_id = 1
+                    """,
+                    (request.center_id, gsid),
+                )
+
+                subject_rows = cur.rowcount
+                logger.info(f"[BATCH] Updated {subject_rows} subject records")
+
+                # 2. Update all local_subject_ids for this GSID from Unknown to known center
+                # This handles ALL candidate IDs that were previously registered with Unknown
+                cur.execute(
+                    """
+                    UPDATE local_subject_ids
+                    SET center_id = %s
+                    WHERE global_subject_id = %s 
+                      AND center_id = 1
+                    """,
+                    (request.center_id, gsid),
+                )
+
+                local_rows = cur.rowcount
+                logger.info(f"[BATCH] Updated {local_rows} local_subject_id records")
+
+                # 3. Insert any new candidate IDs that don't exist yet
+                for candidate in request.candidate_ids:
+                    cur.execute(
+                        """
+                        INSERT INTO local_subject_ids (
+                            center_id, local_subject_id, identifier_type, global_subject_id
+                        )
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (center_id, local_subject_id, identifier_type) DO NOTHING
+                        """,
+                        (
+                            request.center_id,
+                            candidate.local_subject_id,
+                            candidate.identifier_type,
+                            gsid,
+                        ),
+                    )
+
+                logger.info(
+                    f"[BATCH] Center promotion complete for {gsid}: "
+                    f"{subject_rows} subject(s), {local_rows} local_id(s) updated"
+                )
+
             # Log resolution with correct parameters
             log_resolution(
                 conn,
@@ -633,6 +729,8 @@ async def register_batch_multi_candidate(
             logger.error(
                 f"Error processing multi-candidate subject {request.candidate_ids[0].local_subject_id}: {e}"
             )
+            logger.exception("Full traceback:")
+
             results.append(
                 MultiCandidateResponse(
                     gsid=None,
@@ -642,6 +740,7 @@ async def register_batch_multi_candidate(
                     message=str(e),
                 )
             )
+
         finally:
             if conn:
                 conn.close()
