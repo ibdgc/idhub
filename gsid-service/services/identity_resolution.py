@@ -1,6 +1,6 @@
 # gsid-service/services/identity_resolution.py
 import logging
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import psycopg2.extras
 
@@ -8,18 +8,18 @@ logger = logging.getLogger(__name__)
 
 
 def resolve_identity(
-    conn, center_id: int, local_subject_id: str, identifier_type: str = "consortium_id"
-) -> Dict:
+    conn, center_id: int, local_subject_id: str, identifier_type: str = "primary"
+) -> Dict[str, Any]:
     """
-    Resolve subject identity with center promotion logic
+    Resolve subject identity using local_subject_id and center_id
     """
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
     try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
         # First: Check if this local_subject_id exists for this center (ANY identifier_type)
         cur.execute(
             """
-            SELECT s.global_subject_id, s.withdrawn, s.center_id, l.identifier_type
+            SELECT s.global_subject_id, s.withdrawn, l.identifier_type
             FROM local_subject_ids l
             JOIN subjects s ON l.global_subject_id = s.global_subject_id
             WHERE l.center_id = %s AND l.local_subject_id = %s
@@ -35,7 +35,6 @@ def resolve_identity(
                 return {
                     "action": "review_required",
                     "gsid": exact["global_subject_id"],
-                    "existing_gsid": exact["global_subject_id"],
                     "match_strategy": f"exact_withdrawn (original type: {exact['identifier_type']})",
                     "confidence": 1.0,
                     "review_reason": "Subject previously withdrawn",
@@ -47,58 +46,10 @@ def resolve_identity(
                 "confidence": 1.0,
             }
 
-        # Second: Check if this local_subject_id exists at center_id=0 (Unknown)
+        # Second: Check if this local_subject_id exists at a DIFFERENT center
         cur.execute(
             """
-            SELECT s.global_subject_id, s.center_id, l.identifier_type
-            FROM local_subject_ids l
-            JOIN subjects s ON l.global_subject_id = s.global_subject_id
-            WHERE l.center_id = 0 AND l.local_subject_id = %s
-            ORDER BY l.created_at ASC
-            LIMIT 1
-            """,
-            (local_subject_id,),
-        )
-        unknown_match = cur.fetchone()
-
-        if unknown_match and center_id != 0:
-            # Auto-promote: Update subject's center_id and add new local_subject_id entry
-            gsid = unknown_match["global_subject_id"]
-
-            # Update subject's center_id
-            cur.execute(
-                """
-                UPDATE subjects
-                SET center_id = %s, updated_at = CURRENT_TIMESTAMP
-                WHERE global_subject_id = %s
-                """,
-                (center_id, gsid),
-            )
-
-            # Add new local_subject_id entry for the known center
-            cur.execute(
-                """
-                INSERT INTO local_subject_ids (center_id, local_subject_id, identifier_type, global_subject_id)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (center_id, local_subject_id, identifier_type) DO NOTHING
-                """,
-                (center_id, local_subject_id, identifier_type, gsid),
-            )
-
-            return {
-                "action": "center_promoted",
-                "gsid": gsid,
-                "match_strategy": "center_promotion",
-                "confidence": 1.0,
-                "previous_center_id": 0,
-                "new_center_id": center_id,
-                "message": f"Subject promoted from Unknown (0) to center {center_id}",
-            }
-
-        # Third: Check if this local_subject_id exists at a DIFFERENT center
-        cur.execute(
-            """
-            SELECT s.global_subject_id, s.center_id, l.center_id as local_center_id, l.identifier_type
+            SELECT s.global_subject_id, s.center_id, s.withdrawn, l.identifier_type
             FROM local_subject_ids l
             JOIN subjects s ON l.global_subject_id = s.global_subject_id
             WHERE l.local_subject_id = %s AND l.center_id != %s
@@ -107,18 +58,33 @@ def resolve_identity(
             """,
             (local_subject_id, center_id),
         )
-        other_center = cur.fetchone()
+        cross_center = cur.fetchone()
 
-        if other_center:
-            return {
-                "action": "review_required",
-                "gsid": other_center["global_subject_id"],
-                "existing_gsid": other_center["global_subject_id"],
-                "match_strategy": "cross_center_conflict",
-                "confidence": 0.8,
-                "review_reason": f"Local ID exists at different center (center_id={other_center['local_center_id']})",
-                "existing_center_id": other_center["local_center_id"],
-            }
+        if cross_center:
+            existing_center_id = cross_center["center_id"]
+            gsid = cross_center["global_subject_id"]
+
+            # If existing center is "Unknown" (0 or 1), promote to the new center
+            if existing_center_id in [0, 1]:
+                return {
+                    "action": "center_promoted",
+                    "gsid": gsid,
+                    "match_strategy": "cross_center_promotion",
+                    "confidence": 1.0,
+                    "previous_center_id": existing_center_id,
+                    "new_center_id": center_id,
+                    "message": f"Promoted from center {existing_center_id} to {center_id}",
+                }
+            else:
+                # Different known centers - flag for review
+                return {
+                    "action": "review_required",
+                    "gsid": gsid,
+                    "existing_center_id": existing_center_id,
+                    "match_strategy": "cross_center_conflict",
+                    "confidence": 0.9,
+                    "review_reason": f"Subject exists at center {existing_center_id}, attempting to register at {center_id}",
+                }
 
         # No match found - create new subject
         return {
@@ -129,10 +95,8 @@ def resolve_identity(
         }
 
     except Exception as e:
-        logger.error(f"Error in resolve_identity: {e}", exc_info=True)
+        logger.error(f"Error in resolve_identity: {str(e)}", exc_info=True)
         raise
-    finally:
-        cur.close()
 
 
 def log_resolution(
@@ -144,32 +108,44 @@ def log_resolution(
     matched_gsid: Optional[str],
     match_strategy: str,
     confidence: float,
+    center_id: int,
     metadata: Optional[Dict] = None,
+    created_by: str = "system",
 ):
-    """
-    Log identity resolution to audit table
-    """
+    """Log identity resolution decision to audit table"""
     try:
         cur = conn.cursor()
         cur.execute(
             """
-            INSERT INTO identity_resolutions 
-            (local_subject_id, identifier_type, action, gsid, matched_gsid, 
-             match_strategy, confidence, metadata, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            INSERT INTO identity_resolutions (
+                local_subject_id,
+                identifier_type,
+                input_center_id,
+                input_local_id,
+                gsid,
+                matched_gsid,
+                action,
+                match_strategy,
+                confidence,
+                requires_review,
+                metadata,
+                created_by
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 local_subject_id,
                 identifier_type,
-                action,
+                center_id,
+                local_subject_id,  # input_local_id is the same as local_subject_id
                 gsid,
                 matched_gsid,
+                action,
                 match_strategy,
                 confidence,
-                psycopg2.extras.Json(metadata) if metadata else None,
+                action == "review_required",
+                psycopg2.extras.Json(metadata or {}),
+                created_by,
             ),
         )
-        cur.close()
     except Exception as e:
-        logger.error(f"Error logging resolution: {e}", exc_info=True)
-        # Don't raise - logging failure shouldn't break the main flow
+        logger.error(f"Error logging resolution: {str(e)}", exc_info=True)

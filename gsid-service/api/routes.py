@@ -2,14 +2,12 @@
 import logging
 from typing import List
 
+import psycopg2.extras
 from core.database import get_db_connection
 from core.security import verify_api_key
 from fastapi import APIRouter, Depends, HTTPException
 from services.gsid_generator import generate_gsid
-from services.identity_resolution import (
-    log_resolution,
-    resolve_identity,
-)
+from services.identity_resolution import log_resolution, resolve_identity
 
 from .models import (
     BatchSubjectRequest,
@@ -51,6 +49,7 @@ async def register_subject(
                 matched_gsid=gsid,
                 match_strategy=resolution["match_strategy"],
                 confidence=resolution["confidence"],
+                center_id=request.center_id,
                 metadata={
                     "previous_center_id": resolution["previous_center_id"],
                     "new_center_id": resolution["new_center_id"],
@@ -95,8 +94,8 @@ async def register_subject(
                 matched_gsid=gsid,
                 match_strategy=resolution["match_strategy"],
                 confidence=resolution["confidence"],
+                center_id=request.center_id,
                 metadata={
-                    "center_id": request.center_id,
                     "review_reason": resolution["review_reason"],
                     "existing_center_id": resolution.get("existing_center_id"),
                 },
@@ -161,7 +160,8 @@ async def register_subject(
                 matched_gsid=None,
                 match_strategy=resolution["match_strategy"],
                 confidence=resolution["confidence"],
-                metadata={"center_id": request.center_id},
+                center_id=request.center_id,
+                metadata={},
             )
 
         # Handle link to existing subject
@@ -193,7 +193,8 @@ async def register_subject(
                 matched_gsid=gsid,
                 match_strategy=resolution["match_strategy"],
                 confidence=resolution["confidence"],
-                metadata={"center_id": request.center_id},
+                center_id=request.center_id,
+                metadata={},
             )
 
         conn.commit()
@@ -228,9 +229,16 @@ async def register_subjects_batch(
 
     try:
         conn = get_db_connection()
+        conn.autocommit = False
 
         for idx, request in enumerate(batch.requests):
+            savepoint_name = f"sp_{idx}"
+            cur = conn.cursor()
+
             try:
+                # Create savepoint for this record
+                cur.execute(f"SAVEPOINT {savepoint_name}")
+
                 logger.debug(
                     f"Processing batch item {idx + 1}/{len(batch.requests)}: {request.local_subject_id}"
                 )
@@ -255,6 +263,7 @@ async def register_subjects_batch(
                         matched_gsid=gsid,
                         match_strategy=resolution["match_strategy"],
                         confidence=resolution["confidence"],
+                        center_id=request.center_id,
                         metadata={
                             "previous_center_id": resolution["previous_center_id"],
                             "new_center_id": resolution["new_center_id"],
@@ -267,7 +276,6 @@ async def register_subjects_batch(
                     gsid = resolution.get("existing_gsid")
 
                     if gsid:
-                        cur = conn.cursor()
                         cur.execute(
                             """
                             UPDATE subjects 
@@ -286,8 +294,8 @@ async def register_subjects_batch(
                         matched_gsid=gsid,
                         match_strategy=resolution["match_strategy"],
                         confidence=resolution["confidence"],
+                        center_id=request.center_id,
                         metadata={
-                            "center_id": request.center_id,
                             "review_reason": resolution["review_reason"],
                             "existing_center_id": resolution.get("existing_center_id"),
                         },
@@ -296,7 +304,6 @@ async def register_subjects_batch(
                 # Handle create new
                 elif resolution["action"] == "create_new":
                     gsid = generate_gsid()
-                    cur = conn.cursor()
 
                     cur.execute(
                         "SELECT 1 FROM subjects WHERE global_subject_id = %s", (gsid,)
@@ -339,13 +346,13 @@ async def register_subjects_batch(
                         matched_gsid=None,
                         match_strategy=resolution["match_strategy"],
                         confidence=resolution["confidence"],
-                        metadata={"center_id": request.center_id},
+                        center_id=request.center_id,
+                        metadata={},
                     )
 
                 # Handle link existing
                 elif resolution["action"] == "link_existing":
                     gsid = resolution["gsid"]
-                    cur = conn.cursor()
                     cur.execute(
                         """
                         INSERT INTO local_subject_ids (center_id, local_subject_id, identifier_type, global_subject_id)
@@ -369,8 +376,12 @@ async def register_subjects_batch(
                         matched_gsid=gsid,
                         match_strategy=resolution["match_strategy"],
                         confidence=resolution["confidence"],
-                        metadata={"center_id": request.center_id},
+                        center_id=request.center_id,
+                        metadata={},
                     )
+
+                # Release savepoint - commit this record
+                cur.execute(f"RELEASE SAVEPOINT {savepoint_name}")
 
                 results.append(
                     ResolutionResponse(
@@ -385,10 +396,18 @@ async def register_subjects_batch(
                 )
 
             except Exception as e:
+                # Rollback to savepoint - only this record fails
+                try:
+                    cur.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
+                except:
+                    pass
+
+                error_msg = str(e)
                 logger.error(
-                    f"Error processing subject {request.local_subject_id} (item {idx + 1}): {e}",
+                    f"Error processing subject {request.local_subject_id} (item {idx + 1}): {error_msg}",
                     exc_info=True,
                 )
+
                 # Continue processing other subjects
                 results.append(
                     ResolutionResponse(
@@ -397,11 +416,14 @@ async def register_subjects_batch(
                         match_strategy="none",
                         confidence=0.0,
                         requires_review=True,
-                        review_reason=str(e),
-                        message=f"Error: {str(e)}",
+                        review_reason=error_msg,
+                        message=f"Error: {error_msg}",
                     )
                 )
+            finally:
+                cur.close()
 
+        # Commit all successful records
         conn.commit()
         logger.info(f"Batch processing complete: {len(results)} results")
         return results
@@ -540,3 +562,4 @@ async def update_subject_center(
     finally:
         if conn:
             conn.close()
+
