@@ -356,25 +356,39 @@ class DataProcessor:
         # Case 4: No match anywhere → create new
         else:
             logger.info(f"[{self.project_key}] No existing GSID found - creating new")
-            primary_id = subject_ids[0]
-            result = self.gsid_client.register_subject(
-                center_id=center_id,
-                local_subject_id=primary_id["local_subject_id"],
-                identifier_type=primary_id["identifier_type"],
-                registration_year=registration_year,
-                control=control,
-                created_by=self.project_key,
-            )
+
+            # Use multi-candidate registration if we have multiple IDs
+            if len(subject_ids) > 1:
+                result = self.gsid_client.register_multi_candidate(
+                    center_id=center_id,
+                    candidate_ids=subject_ids,
+                    registration_year=registration_year,
+                    control=control,
+                    created_by=self.project_key,
+                )
+            else:
+                # Single ID registration
+                primary_id = subject_ids[0]
+                result = self.gsid_client.register_subject(
+                    center_id=center_id,
+                    local_subject_id=primary_id["local_subject_id"],
+                    identifier_type=primary_id["identifier_type"],
+                    registration_year=registration_year,
+                    control=control,
+                    created_by=self.project_key,
+                )
 
             return {
                 "gsid": result["gsid"],
                 "action": result["action"],
-                "identifier_type": primary_id["identifier_type"],
-                "local_subject_id": primary_id["local_subject_id"],
+                "identifier_type": subject_ids[0]["identifier_type"],
+                "local_subject_id": subject_ids[0]["local_subject_id"],
                 "conflict": False,
                 "conflicting_gsids": None,
                 "registration_year": registration_year,
                 "control": control,
+                "match_strategy": result.get("match_strategy"),
+                "confidence": result.get("confidence"),
             }
 
     def _build_response(
