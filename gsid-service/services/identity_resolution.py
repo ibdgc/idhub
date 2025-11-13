@@ -215,16 +215,80 @@ def resolve_identity_multi_candidate(
 
 def resolve_identity(
     conn, center_id: int, local_subject_id: str, identifier_type: str = "primary"
-) -> Dict[str, Any]:
+) -> dict:
     """
-    Single-candidate resolution (backward compatibility)
-    Wraps multi-candidate resolution
+    Core identity resolution logic - finds existing GSID regardless of identifier_type
+    The same local_subject_id for a given center should ALWAYS map to the same GSID,
+    regardless of what identifier_type it was originally registered with.
     """
-    return resolve_identity_multi_candidate(
-        conn,
-        center_id,
-        [{"local_subject_id": local_subject_id, "identifier_type": identifier_type}],
-    )
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        # First: Check if this local_subject_id exists for this center (ANY identifier_type)
+        cur.execute(
+            """
+            SELECT s.global_subject_id, s.withdrawn, l.identifier_type
+            FROM local_subject_ids l
+            JOIN subjects s ON l.global_subject_id = s.global_subject_id
+            WHERE l.center_id = %s AND l.local_subject_id = %s
+            ORDER BY l.created_at ASC
+            LIMIT 1
+            """,
+            (center_id, local_subject_id),
+        )
+        exact = cur.fetchone()
+
+        if exact:
+            if exact["withdrawn"]:
+                return {
+                    "action": "review_required",
+                    "gsid": exact["global_subject_id"],
+                    "match_strategy": f"exact_withdrawn (original type: {exact['identifier_type']})",
+                    "confidence": 1.0,
+                    "review_reason": "Subject previously withdrawn",
+                }
+            return {
+                "action": "link_existing",
+                "gsid": exact["global_subject_id"],
+                "match_strategy": f"exact_match (type: {exact['identifier_type']})",
+                "confidence": 1.0,
+            }
+
+        # Second: Check if this is an Unknown center (center_id=1) that should be promoted
+        if center_id != 1:
+            cur.execute(
+                """
+                SELECT s.global_subject_id, s.center_id
+                FROM local_subject_ids l
+                JOIN subjects s ON l.global_subject_id = s.global_subject_id
+                WHERE l.center_id = 1 
+                  AND l.local_subject_id = %s
+                  AND s.center_id = 1
+                ORDER BY l.created_at ASC
+                LIMIT 1
+                """,
+                (local_subject_id,),
+            )
+            unknown_match = cur.fetchone()
+
+            if unknown_match:
+                return {
+                    "action": "center_promoted",
+                    "gsid": unknown_match["global_subject_id"],
+                    "match_strategy": "center_promotion",
+                    "confidence": 1.0,
+                    "message": f"Promoting from Unknown (1) to center {center_id}",
+                }
+
+        # No match found - create new
+        return {
+            "action": "create_new",
+            "gsid": None,
+            "match_strategy": "no_match",
+            "confidence": 0.0,
+        }
+
+    finally:
+        cur.close()
 
 
 def log_resolution(
