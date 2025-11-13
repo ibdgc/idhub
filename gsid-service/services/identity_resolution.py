@@ -232,49 +232,41 @@ def log_resolution(
     local_subject_id: str,
     identifier_type: str,
     action: str,
-    gsid: Optional[str],
-    matched_gsid: Optional[str],
+    gsid: str,
+    matched_gsid: str,
     match_strategy: str,
     confidence: float,
     center_id: int,
-    metadata: Optional[Dict] = None,
+    metadata: dict = None,
     created_by: str = "system",
 ):
-    """Log identity resolution decision to audit table"""
+    """Log identity resolution to database"""
+    cur = conn.cursor()
     try:
-        cur = conn.cursor()
         cur.execute(
             """
             INSERT INTO identity_resolutions (
-                local_subject_id,
-                identifier_type,
-                input_center_id,
-                gsid,
-                matched_gsid,
-                action,
-                match_strategy,
-                confidence,
-                requires_review,
-                review_reason,
-                metadata,
-                created_by
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                local_subject_id, identifier_type, action, gsid,
+                matched_gsid, match_strategy, confidence, input_center_id,
+                metadata, created_by
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 local_subject_id,
                 identifier_type,
-                center_id,
+                action,
                 gsid,
                 matched_gsid,
-                action,
                 match_strategy,
                 confidence,
-                action == "review_required",
-                metadata.get("review_reason") if metadata else None,
-                psycopg2.extras.Json(metadata or {}),
+                center_id,
+                json.dumps(metadata) if metadata else None,
                 created_by,
             ),
         )
     except Exception as e:
-        logger.error(f"Error logging resolution: {str(e)}", exc_info=True)
+        logger.error(f"Failed to log resolution: {e}")
         raise
+    finally:
+        cur.close()

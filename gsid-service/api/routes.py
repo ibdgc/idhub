@@ -177,8 +177,20 @@ async def register_subject(request: SubjectRequest):
                 ),
             )
 
-        # Log the resolution
-        log_resolution(conn, request, resolution)
+        # Log the resolution with correct parameters
+        log_resolution(
+            conn,
+            request.local_subject_id,
+            request.identifier_type,
+            resolution.get("action", "unknown"),
+            gsid,
+            resolution.get("gsid"),
+            resolution.get("match_strategy", "unknown"),
+            resolution.get("confidence", 0.0),
+            request.center_id,
+            metadata={"review_reason": resolution.get("review_reason")},
+            created_by=request.created_by,
+        )
 
         conn.commit()
         logger.info(f"✓ Transaction committed for {gsid}")
