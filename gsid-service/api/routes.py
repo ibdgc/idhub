@@ -2,10 +2,9 @@
 import logging
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
-
 from core.database import get_db_connection
 from core.security import verify_api_key
+from fastapi import APIRouter, Depends, HTTPException
 from services.gsid_generator import generate_gsid
 from services.identity_resolution import log_resolution, resolve_identity
 
@@ -493,4 +492,3 @@ async def register_batch_multi_candidate(
                 conn.close()
 
     return results
-
