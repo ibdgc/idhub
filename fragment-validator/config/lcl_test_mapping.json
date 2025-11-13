@@ -1,0 +1,10 @@
+{
+  "field_mapping": {
+    "knumber": "knumber",
+    "niddk_no": "niddk_no"
+  },
+  "subject_id_candidates": ["consortium_id"],
+  "center_id_field": "center_id",
+  "default_center_id": 1,
+  "exclude_from_load": ["consortium_id"]
+}
