@@ -12,6 +12,7 @@ from services import (
     GSIDClient,
     NocoDBClient,
     S3Client,
+    SubjectIDResolver,  # Add this import
 )
 
 # Load environment variables FIRST
@@ -21,7 +22,6 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-
 
 # Environment-specific configuration
 ENV_CONFIG = {
@@ -69,6 +69,7 @@ def main():
     parser.add_argument(
         "--auto-approve", action="store_true", help="Auto-approve for loading"
     )
+
     args = parser.parse_args()
 
     # Log environment selection
@@ -151,9 +152,12 @@ def main():
         logger.info("Initializing GSID client...")
         gsid_client = GSIDClient(gsid_service_url, gsid_api_key)
 
-        # Initialize validator
+        logger.info("Initializing Subject ID Resolver...")
+        subject_id_resolver = SubjectIDResolver(gsid_client)
+
+        # Initialize validator with resolver
         logger.info("Initializing validator...")
-        validator = FragmentValidator(s3_client, nocodb_client, gsid_client)
+        validator = FragmentValidator(s3_client, nocodb_client, subject_id_resolver)
 
         # Process file
         logger.info(f"Processing file: {args.input_file}")

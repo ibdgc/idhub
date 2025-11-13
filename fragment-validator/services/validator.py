@@ -1,8 +1,7 @@
 # fragment-validator/services/validator.py
 import logging
 from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import pandas as pd
 
@@ -16,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class FragmentValidator:
-    """Validates and stages data fragments for loading"""
+    """Main validator orchestrating the validation pipeline"""
 
     def __init__(
         self,
@@ -41,16 +40,17 @@ class FragmentValidator:
         Process and validate a local CSV file
 
         Args:
-            table_name: Target table name
+            table_name: Target database table name
             local_file_path: Path to local CSV file
             mapping_config: Field mapping configuration
-            source_name: Source identifier
-            auto_approve: Auto-approve for loading
+            source_name: Source system identifier
+            auto_approve: Whether to auto-approve for loading
 
         Returns:
-            Validation report dict
+            Validation report dictionary
         """
         batch_id = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
         logger.info(f"Processing batch: {batch_id}")
         logger.info(f"Table: {table_name}")
         logger.info(f"Source: {source_name}")
@@ -63,7 +63,7 @@ class FragmentValidator:
         field_mapping = mapping_config.get("field_mapping", {})
         subject_id_candidates = mapping_config.get("subject_id_candidates", [])
         center_id_field = mapping_config.get("center_id_field")
-        default_center_id = mapping_config.get("default_center_id", 1)
+        default_center_id = mapping_config.get("default_center_id", 0)
         exclude_from_load = set(mapping_config.get("exclude_from_load", []))
 
         # Apply field mapping
@@ -74,7 +74,7 @@ class FragmentValidator:
         # Validate schema
         validation_result = self.schema_validator.validate(mapped_data, table_name)
 
-        # Resolve subject IDs (with multi-candidate support)
+        # Resolve subject IDs
         logger.info(f"Resolving subject IDs with candidates: {subject_id_candidates}")
         resolution_results = self.subject_id_resolver.resolve_batch(
             mapped_data,
@@ -83,7 +83,7 @@ class FragmentValidator:
             default_center_id=default_center_id,
         )
 
-        # Add GSIDs to mapped data
+        # Add GSIDs to data
         mapped_data["global_subject_id"] = resolution_results["gsids"]
 
         # Combine exclude fields
@@ -92,7 +92,7 @@ class FragmentValidator:
         if center_id_field:
             all_exclude_fields.add(center_id_field)
 
-        # Upload to S3 staging
+        # Upload to S3
         s3_key = f"staging/validated/{batch_id}/{table_name}.csv"
         self.s3_client.upload_dataframe(mapped_data, s3_key)
 
@@ -109,10 +109,8 @@ class FragmentValidator:
             "s3_location": s3_key,
             "row_count": len(mapped_data),
             "validation_errors": validation_result.errors,
-            "warnings": validation_result.warnings + resolution_results["warnings"],
+            "warnings": validation_result.warnings,
             "auto_approved": auto_approve,
-            "resolution_summary": resolution_results["summary"],
-            "flagged_records": resolution_results.get("flagged_records", []),
         }
 
         # Check if validation passed
@@ -121,24 +119,24 @@ class FragmentValidator:
             logger.error(
                 f"✗ Validation failed with {len(validation_result.errors)} errors"
             )
-            return report
+        else:
+            # Write staging outputs
+            self._write_staging_outputs(
+                batch_id,
+                table_name,
+                mapped_data,
+                resolution_results["local_id_records"],
+                report,
+            )
 
-        # Write staging outputs
-        self._write_staging_outputs(
-            batch_id,
-            table_name,
-            mapped_data,
-            resolution_results["local_id_records"],
-            report,
-        )
+            report["status"] = "VALIDATED"
+            report["staging_location"] = (
+                f"s3://{self.s3_client.bucket}/staging/validated/{batch_id}/"
+            )
 
-        report["status"] = "VALIDATED"
-        report["staging_location"] = (
-            f"s3://{self.s3_client.bucket}/staging/validated/{batch_id}/"
-        )
+            logger.info(f"✓ Validation complete: {batch_id}")
+            self._print_summary(report)
 
-        logger.info(f"✓ Validation complete: {batch_id}")
-        self._print_summary(report)
         return report
 
     def _write_staging_outputs(
@@ -157,7 +155,7 @@ class FragmentValidator:
 
         # Write local_subject_ids records (deduplicated)
         if local_id_records:
-            # Deduplicate based on (center_id, local_subject_id, identifier_type)
+            # Deduplicate by (center_id, local_subject_id, identifier_type)
             seen = set()
             unique_records = []
             for record in local_id_records:
@@ -174,66 +172,30 @@ class FragmentValidator:
             self.s3_client.upload_dataframe(
                 local_ids_df, f"{staging_prefix}/local_subject_ids.csv"
             )
-            logger.info(
-                f"Wrote {len(unique_records)} unique local_subject_ids records "
-                f"(deduplicated from {len(local_id_records)})"
-            )
+            logger.info(f"Wrote {len(unique_records)} unique local_subject_ids records")
 
         # Write validation report
         self.s3_client.upload_json(report, f"{staging_prefix}/validation_report.json")
 
-        # Write flagged records if any
-        if report.get("flagged_records"):
-            flagged_df = pd.DataFrame(report["flagged_records"])
-            self.s3_client.upload_dataframe(
-                flagged_df, f"{staging_prefix}/flagged_records.csv"
-            )
-            logger.warning(
-                f"⚠️  Wrote {len(report['flagged_records'])} flagged records requiring review"
-            )
-
     def _print_summary(self, report: dict):
         """Print validation summary"""
-        logger.info("=" * 60)
+        logger.info(f"\n{'=' * 60}")
         logger.info("VALIDATION SUMMARY")
-        logger.info("=" * 60)
+        logger.info(f"{'=' * 60}")
         logger.info(f"Batch ID: {report['batch_id']}")
         logger.info(f"Table: {report['table_name']}")
         logger.info(f"Status: {report['status']}")
-        logger.info(f"Total Records: {report['row_count']}")
+        logger.info(f"Records: {report['row_count']}")
+        logger.info(f"Errors: {len(report['validation_errors'])}")
+        logger.info(f"Warnings: {len(report['warnings'])}")
 
         if report.get("resolution_summary"):
             summary = report["resolution_summary"]
-            logger.info("\nSubject ID Resolution:")
-            logger.info(f"  - New GSIDs minted: {summary.get('new_gsids_minted', 0)}")
-            logger.info(f"  - Existing matches: {summary.get('existing_matches', 0)}")
-            logger.info(f"  - Center promotions: {summary.get('center_promoted', 0)}")
-            logger.info(
-                f"  - Flagged for review: {summary.get('flagged_for_review', 0)}"
-            )
-            logger.info(
-                f"  - Validation warnings: {summary.get('validation_warnings', 0)}"
-            )
-            logger.info(
-                f"  - Multi-GSID conflicts: {summary.get('multi_gsid_conflicts', 0)}"
-            )
+            logger.info(f"\nSubject ID Resolution:")
+            logger.info(f"  New GSIDs minted: {summary.get('new_gsids_minted', 0)}")
+            logger.info(f"  Existing matches: {summary.get('existing_matches', 0)}")
+            logger.info(f"  Flagged for review: {summary.get('flagged_for_review', 0)}")
 
-        if report.get("validation_errors"):
-            logger.error(f"\nValidation Errors: {len(report['validation_errors'])}")
-            for error in report["validation_errors"][:5]:
-                logger.error(f"  - {error}")
-
-        if report.get("warnings"):
-            logger.warning(f"\nWarnings: {len(report['warnings'])}")
-            for warning in report["warnings"][:10]:
-                logger.warning(f"  - {warning}")
-
-        if report.get("flagged_records"):
-            logger.warning(
-                f"\n⚠️  {len(report['flagged_records'])} records flagged for manual review"
-            )
-            logger.warning(
-                f"   Review file: staging/validated/{report['batch_id']}/flagged_records.csv"
-            )
-
-        logger.info("=" * 60)
+        logger.info(f"\nStaging Location:")
+        logger.info(f"  {report.get('staging_location', 'N/A')}")
+        logger.info(f"{'=' * 60}\n")
