@@ -1,8 +1,10 @@
 # gsid-service/services/identity_resolution.py
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
 import psycopg2.extras
+from psycopg2.extras import RealDictCursor
 
 from .id_validator import IDValidator
 
@@ -16,12 +18,10 @@ def resolve_identity_multi_candidate(
 ) -> Dict[str, Any]:
     """
     Resolve subject identity using multiple candidate IDs
-
     Args:
         conn: Database connection
         center_id: Center ID for the incoming record
         candidate_ids: List of dicts with 'local_subject_id' and 'identifier_type'
-
     Returns:
         Resolution result with action, GSIDs, flags, etc.
     """
@@ -39,9 +39,11 @@ def resolve_identity_multi_candidate(
         # Check for validation errors
         validation_warnings = []
         has_validation_errors = False
+
         for candidate in candidate_ids:
             local_id = candidate["local_subject_id"]
             validation = validation_results.get(local_id, {})
+
             if not validation.get("valid", True):
                 has_validation_errors = True
                 validation_warnings.extend(validation.get("warnings", []))
@@ -211,6 +213,8 @@ def resolve_identity_multi_candidate(
             f"Error in resolve_identity_multi_candidate: {str(e)}", exc_info=True
         )
         raise
+    finally:
+        cur.close()
 
 
 def resolve_identity(
