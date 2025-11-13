@@ -33,6 +33,8 @@ async def health_check():
 async def register_subject(request: SubjectRequest):
     """Register a subject and resolve identity"""
     conn = get_db_connection()
+    cur = conn.cursor()  # ← Create cursor ONCE at the top
+
     try:
         resolution = resolve_identity(
             conn,
@@ -41,12 +43,11 @@ async def register_subject(request: SubjectRequest):
             request.identifier_type,
         )
 
-        # Initialize gsid variable
-        gsid = resolution.get("gsid")  # ← Add this line for safety
+        gsid = resolution.get("gsid")  # Initialize gsid
 
         if resolution["action"] == "create_new":
             gsid = generate_gsid()
-            cur = conn.cursor()
+
             cur.execute(
                 """
                 INSERT INTO subjects (
@@ -81,7 +82,7 @@ async def register_subject(request: SubjectRequest):
 
         elif resolution["action"] == "link_existing":
             gsid = resolution["gsid"]
-            cur = conn.cursor()
+
             cur.execute(
                 """
                 INSERT INTO local_subject_ids (center_id, local_subject_id, identifier_type, global_subject_id)
@@ -97,34 +98,43 @@ async def register_subject(request: SubjectRequest):
             )
 
         elif resolution["action"] == "center_promoted":
-            # Handle center promotion - update from Unknown (center_id=1) to known center
             gsid = resolution["gsid"]
-            cur = conn.cursor()
 
             logger.info(
                 f"Center promotion for GSID {gsid}: "
                 f"Unknown (1) -> {request.center_id} for {request.local_subject_id}"
             )
 
+            # Check current state before update
+            cur.execute(
+                "SELECT center_id FROM subjects WHERE global_subject_id = %s", (gsid,)
+            )
+            current_subject = cur.fetchone()
+            current_center = current_subject[0] if current_subject else None
+
+            logger.info(f"Subject {gsid} current center_id: {current_center}")
+
             # 1. Update subjects table - promote from Unknown to known center
             cur.execute(
                 """
                 UPDATE subjects
-                SET center_id = %s
+                SET center_id = %s, updated_at = CURRENT_TIMESTAMP
                 WHERE global_subject_id = %s 
                   AND center_id = 1
-                RETURNING center_id
                 """,
                 (request.center_id, gsid),
             )
 
-            subject_updated = cur.fetchone()
-            if subject_updated:
-                logger.info(f"Updated subject {gsid} center: 1 -> {request.center_id}")
+            rows_updated = cur.rowcount
+
+            if rows_updated > 0:
+                logger.info(
+                    f"✓ Updated subject {gsid} center: 1 -> {request.center_id}"
+                )
             else:
                 logger.warning(
-                    f"Subject {gsid} center was not 1 (Unknown), "
-                    f"may have been previously promoted"
+                    f"✗ Subject {gsid} was not updated. Current center_id: {current_center}. "
+                    f"May have been previously promoted."
                 )
 
             # 2. Update local_subject_ids - change center from Unknown to known
@@ -136,7 +146,6 @@ async def register_subject(request: SubjectRequest):
                   AND local_subject_id = %s
                   AND identifier_type = %s
                   AND center_id = 1
-                RETURNING center_id
                 """,
                 (
                     request.center_id,
@@ -146,39 +155,63 @@ async def register_subject(request: SubjectRequest):
                 ),
             )
 
-            local_id_updated = cur.fetchone()
+            local_rows_updated = cur.rowcount
 
-            # 3. If the local_subject_id wasn't in Unknown, insert it
-            if not local_id_updated:
+            if local_rows_updated > 0:
                 logger.info(
-                    f"No Unknown record found for {request.local_subject_id}, "
-                    f"inserting with center {request.center_id}"
-                )
-                cur.execute(
-                    """
-                    INSERT INTO local_subject_ids (
-                        center_id, local_subject_id, identifier_type, global_subject_id
-                    )
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (center_id, local_subject_id, identifier_type) DO NOTHING
-                    """,
-                    (
-                        request.center_id,
-                        request.local_subject_id,
-                        request.identifier_type,
-                        gsid,
-                    ),
-                )
-            else:
-                logger.info(
-                    f"Updated local_subject_id {request.local_subject_id} "
+                    f"✓ Updated local_subject_id {request.local_subject_id} "
                     f"center: 1 -> {request.center_id}"
                 )
+            else:
+                logger.warning(
+                    f"✗ No Unknown record found for {request.local_subject_id}. "
+                    f"Checking if record already exists..."
+                )
+
+                # Check if it already exists with the target center
+                cur.execute(
+                    """
+                    SELECT 1 FROM local_subject_ids
+                    WHERE global_subject_id = %s
+                      AND local_subject_id = %s
+                      AND identifier_type = %s
+                      AND center_id = %s
+                    """,
+                    (
+                        gsid,
+                        request.local_subject_id,
+                        request.identifier_type,
+                        request.center_id,
+                    ),
+                )
+
+                already_exists = cur.fetchone()
+
+                if already_exists:
+                    logger.info(
+                        f"✓ Record already exists with center {request.center_id}"
+                    )
+                else:
+                    logger.info(f"Inserting new record with center {request.center_id}")
+                    cur.execute(
+                        """
+                        INSERT INTO local_subject_ids (
+                            center_id, local_subject_id, identifier_type, global_subject_id
+                        )
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (center_id, local_subject_id, identifier_type) DO NOTHING
+                        """,
+                        (
+                            request.center_id,
+                            request.local_subject_id,
+                            request.identifier_type,
+                            gsid,
+                        ),
+                    )
 
         elif resolution["action"] == "review_required":
             gsid = resolution["gsid"]
-            # Just link the ID, don't modify the subject
-            cur = conn.cursor()
+
             cur.execute(
                 """
                 INSERT INTO local_subject_ids (center_id, local_subject_id, identifier_type, global_subject_id)
@@ -198,8 +231,10 @@ async def register_subject(request: SubjectRequest):
 
         conn.commit()
 
+        logger.info(f"✓ Transaction committed for {gsid}")
+
         return {
-            "gsid": gsid,  # ← Changed from resolution["gsid"] for consistency
+            "gsid": gsid,
             "action": resolution["action"],
             "match_strategy": resolution.get("match_strategy"),
             "confidence": resolution.get("confidence"),
@@ -209,9 +244,11 @@ async def register_subject(request: SubjectRequest):
 
     except Exception as e:
         conn.rollback()
-        logger.error(f"Error registering subject: {e}")
+        logger.error(f"✗ Error registering subject: {e}")
+        logger.exception("Full traceback:")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
+        cur.close()
         conn.close()
 
 
