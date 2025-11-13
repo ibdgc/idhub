@@ -29,36 +29,38 @@ async def health_check():
     return HealthResponse(status="healthy", service="gsid-service", version="1.0.0")
 
 
-@router.post("/register", response_model=SubjectResponse)
-async def register_subject(
-    request: SubjectRequest, api_key: str = Depends(verify_api_key)
-):
-    """Register a single subject and return GSID"""
-    conn = None
+@router.post("/register", dependencies=[Depends(verify_api_key)])
+async def register_subject(request: SubjectRequest):
+    """Register a subject and resolve identity"""
+    conn = get_db_connection()
     try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        # Resolve identity
         resolution = resolve_identity(
-            conn, request.center_id, request.local_subject_id, request.identifier_type
+            conn,
+            request.center_id,
+            request.local_subject_id,
+            request.identifier_type,
         )
 
-        if resolution["action"] == "create_new":
-            # Generate new GSID
-            gsid = generate_gsid()
+        # Initialize gsid variable
+        gsid = resolution.get("gsid")  # ← Add this line for safety
 
-            # Insert into subjects table with center_id
+        if resolution["action"] == "create_new":
+            gsid = generate_gsid()
+            cur = conn.cursor()
             cur.execute(
                 """
-                INSERT INTO subjects (global_subject_id, center_id, registration_year, control)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO subjects (
+                    global_subject_id, center_id, control, 
+                    registration_year, created_by
+                )
+                VALUES (%s, %s, %s, %s, %s)
                 """,
                 (
                     gsid,
                     request.center_id,
-                    request.registration_year,
                     request.control,
+                    request.registration_year,
+                    request.created_by,
                 ),
             )
 
@@ -94,43 +96,123 @@ async def register_subject(
                 ),
             )
 
-        # Log resolution with correct parameters
-        log_resolution(
-            conn,
-            request.local_subject_id,
-            request.identifier_type,
-            resolution.get("action", "unknown"),
-            resolution.get("gsid"),
-            resolution.get("gsid"),  # matched_gsid same as gsid for now
-            resolution.get("match_strategy", "unknown"),
-            resolution.get("confidence", 0.0),
-            request.center_id,
-            metadata={"review_reason": resolution.get("review_reason")},
-            created_by="api",
-        )
+        elif resolution["action"] == "center_promoted":
+            # Handle center promotion - update from Unknown (center_id=1) to known center
+            gsid = resolution["gsid"]
+            cur = conn.cursor()
+
+            logger.info(
+                f"Center promotion for GSID {gsid}: "
+                f"Unknown (1) -> {request.center_id} for {request.local_subject_id}"
+            )
+
+            # 1. Update subjects table - promote from Unknown to known center
+            cur.execute(
+                """
+                UPDATE subjects
+                SET center_id = %s
+                WHERE global_subject_id = %s 
+                  AND center_id = 1
+                RETURNING center_id
+                """,
+                (request.center_id, gsid),
+            )
+
+            subject_updated = cur.fetchone()
+            if subject_updated:
+                logger.info(f"Updated subject {gsid} center: 1 -> {request.center_id}")
+            else:
+                logger.warning(
+                    f"Subject {gsid} center was not 1 (Unknown), "
+                    f"may have been previously promoted"
+                )
+
+            # 2. Update local_subject_ids - change center from Unknown to known
+            cur.execute(
+                """
+                UPDATE local_subject_ids
+                SET center_id = %s
+                WHERE global_subject_id = %s 
+                  AND local_subject_id = %s
+                  AND identifier_type = %s
+                  AND center_id = 1
+                RETURNING center_id
+                """,
+                (
+                    request.center_id,
+                    gsid,
+                    request.local_subject_id,
+                    request.identifier_type,
+                ),
+            )
+
+            local_id_updated = cur.fetchone()
+
+            # 3. If the local_subject_id wasn't in Unknown, insert it
+            if not local_id_updated:
+                logger.info(
+                    f"No Unknown record found for {request.local_subject_id}, "
+                    f"inserting with center {request.center_id}"
+                )
+                cur.execute(
+                    """
+                    INSERT INTO local_subject_ids (
+                        center_id, local_subject_id, identifier_type, global_subject_id
+                    )
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (center_id, local_subject_id, identifier_type) DO NOTHING
+                    """,
+                    (
+                        request.center_id,
+                        request.local_subject_id,
+                        request.identifier_type,
+                        gsid,
+                    ),
+                )
+            else:
+                logger.info(
+                    f"Updated local_subject_id {request.local_subject_id} "
+                    f"center: 1 -> {request.center_id}"
+                )
+
+        elif resolution["action"] == "review_required":
+            gsid = resolution["gsid"]
+            # Just link the ID, don't modify the subject
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO local_subject_ids (center_id, local_subject_id, identifier_type, global_subject_id)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (center_id, local_subject_id, identifier_type) DO NOTHING
+                """,
+                (
+                    request.center_id,
+                    request.local_subject_id,
+                    request.identifier_type,
+                    gsid,
+                ),
+            )
+
+        # Log the resolution
+        log_resolution(conn, request, resolution)
 
         conn.commit()
 
-        return SubjectResponse(
-            gsid=resolution.get("gsid"),
-            local_subject_id=request.local_subject_id,
-            identifier_type=request.identifier_type,
-            center_id=request.center_id,
-            action=resolution["action"],
-            match_strategy=resolution.get("match_strategy"),
-            confidence=resolution.get("confidence"),
-            message=resolution.get("message"),
-            review_reason=resolution.get("review_reason"),
-        )
+        return {
+            "gsid": gsid,  # ← Changed from resolution["gsid"] for consistency
+            "action": resolution["action"],
+            "match_strategy": resolution.get("match_strategy"),
+            "confidence": resolution.get("confidence"),
+            "local_subject_id": request.local_subject_id,
+            "center_id": request.center_id,
+        }
 
     except Exception as e:
-        if conn:
-            conn.rollback()
+        conn.rollback()
         logger.error(f"Error registering subject: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        if conn:
-            conn.close()
+        conn.close()
 
 
 @router.post("/register/batch", response_model=List[SubjectResponse])
