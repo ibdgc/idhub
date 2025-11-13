@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class SubjectIDResolver:
-    """Resolves subject IDs using GSID service with multi-candidate support"""
+    """Resolves subject IDs using GSID service"""
 
     def __init__(self, gsid_client: GSIDClient):
         self.gsid_client = gsid_client
@@ -24,172 +24,166 @@ class SubjectIDResolver:
         created_by: str = "fragment_validator",
     ) -> Dict:
         """
-        Resolve subject IDs for entire dataset with multi-candidate support
+        Resolve subject IDs for entire dataset
+
+        This method now handles the "multiple candidate IDs per subject" case
+        by registering each ID separately and detecting conflicts.
 
         Returns dict with:
-            - gsids: List of resolved GSIDs
+            - gsids: List of resolved GSIDs (one per row)
             - local_id_records: List of local ID records to insert
             - summary: Statistics
             - warnings: List of warnings
-            - flagged_records: List of records requiring review
         """
         gsids = []
         local_id_records = []
         warnings = []
-        flagged_records = []
         stats = {
             "existing_matches": 0,
             "new_gsids_minted": 0,
             "unknown_center_used": 0,
             "center_promoted": 0,
-            "flagged_for_review": 0,
-            "validation_warnings": 0,
-            "multi_gsid_conflicts": 0,
+            "conflicts_detected": 0,
         }
 
-        # Prepare batch requests with ALL candidate IDs per record
+        # Build batch requests - one request per candidate ID per row
         batch_requests = []
-        row_indices = []
+        row_to_requests = {}  # Track which requests belong to which row
+
+        logger.info(f"Resolving subject IDs with candidates: {candidate_fields}")
 
         for idx, row in data.iterrows():
-            # Handle center_id - default to 0 (Unknown) if not provided
-            if (
-                center_id_field
-                and center_id_field in row
-                and pd.notna(row[center_id_field])
-            ):
+            # Get center_id for this row
+            if center_id_field and center_id_field in row:
                 center_id = int(row[center_id_field])
             else:
                 center_id = default_center_id
+
+            # Track if we're using Unknown center
+            if center_id == 0 or center_id == 1:
                 stats["unknown_center_used"] += 1
 
-            # Collect ALL valid candidate IDs for this record
-            candidate_ids = []
+            # Collect all candidate IDs for this row
+            row_requests = []
             for field in candidate_fields:
-                if field in row and pd.notna(row[field]):
+                if field in row and pd.notna(row[field]) and str(row[field]).strip():
                     local_id = str(row[field]).strip()
-                    if local_id:  # Only include non-empty IDs
-                        candidate_ids.append(
+
+                    # Skip invalid values
+                    if local_id.upper() in ["NA", "N/A", "NULL", "NONE", ""]:
+                        continue
+
+                    request = {
+                        "center_id": center_id,
+                        "local_subject_id": local_id,
+                        "identifier_type": field,
+                        "control": False,
+                        "created_by": created_by,
+                    }
+                    batch_requests.append(request)
+                    row_requests.append(len(batch_requests) - 1)  # Track request index
+
+            if row_requests:
+                row_to_requests[idx] = row_requests
+            else:
+                warnings.append(f"Row {idx}: No valid subject IDs found")
+
+        if not batch_requests:
+            logger.warning("No valid subject IDs found in dataset")
+            return {
+                "gsids": [],
+                "local_id_records": [],
+                "summary": stats,
+                "warnings": warnings,
+            }
+
+        # Send all requests to GSID service
+        logger.info(
+            f"Sending {len(batch_requests)} registration requests to GSID service"
+        )
+        try:
+            results = self.gsid_client.register_batch(batch_requests)
+        except Exception as e:
+            logger.error(f"GSID batch registration failed: {e}")
+            raise
+
+        # Process results - group by original row
+        for idx, request_indices in row_to_requests.items():
+            # Get all results for this row
+            row_results = [results[i] for i in request_indices]
+
+            # Extract GSIDs from results
+            row_gsids = set()
+            for result in row_results:
+                if result.get("gsid"):
+                    row_gsids.add(result["gsid"])
+
+                    # Track action statistics
+                    action = result.get("action", "unknown")
+                    if action == "create_new":
+                        stats["new_gsids_minted"] += 1
+                    elif action in ["link_existing", "exact_match"]:
+                        stats["existing_matches"] += 1
+
+            # Check for conflicts (multiple GSIDs for same subject)
+            if len(row_gsids) > 1:
+                stats["conflicts_detected"] += 1
+                warnings.append(
+                    f"Row {idx}: Multiple GSIDs detected: {row_gsids}. "
+                    f"Using first GSID: {list(row_gsids)[0]}"
+                )
+                logger.warning(
+                    f"Row {idx}: GSID conflict - multiple IDs resolved to different GSIDs: {row_gsids}"
+                )
+                gsid = list(row_gsids)[0]  # Use first GSID
+            elif len(row_gsids) == 1:
+                gsid = list(row_gsids)[0]
+            else:
+                # No GSID returned (all failed)
+                warnings.append(f"Row {idx}: Failed to resolve GSID")
+                gsid = None
+
+            gsids.append(gsid)
+
+            # Build local_id_records for this row
+            if gsid:
+                for i, request_idx in enumerate(request_indices):
+                    request = batch_requests[request_idx]
+                    result = row_results[i]
+
+                    # Only add if registration was successful
+                    if result.get("gsid") == gsid:
+                        local_id_records.append(
                             {
-                                "local_subject_id": local_id,
-                                "identifier_type": field,
+                                "global_subject_id": gsid,
+                                "center_id": request["center_id"],
+                                "local_subject_id": request["local_subject_id"],
+                                "identifier_type": request["identifier_type"],
                             }
                         )
 
-            if not candidate_ids:
-                raise ValueError(
-                    f"Row {idx}: No valid subject ID found in candidate fields: {candidate_fields}"
-                )
-
-            batch_requests.append(
-                {
-                    "center_id": center_id,
-                    "candidate_ids": candidate_ids,
-                    "created_by": created_by,
-                }
+        # Deduplicate local_id_records
+        unique_records = []
+        seen = set()
+        for record in local_id_records:
+            key = (
+                record["center_id"],
+                record["local_subject_id"],
+                record["identifier_type"],
             )
-            row_indices.append((idx, row, candidate_ids, center_id))
+            if key not in seen:
+                seen.add(key)
+                unique_records.append(record)
 
-        # Process via GSID service using multi-candidate endpoint
         logger.info(
-            f"Sending {len(batch_requests)} records with multi-candidate IDs to GSID service"
+            f"Resolution complete: {len(gsids)} subjects resolved, "
+            f"{len(unique_records)} unique local IDs, "
+            f"{stats['conflicts_detected']} conflicts detected"
         )
-        results = self.gsid_client.register_batch_multi_candidate(batch_requests)
-
-        # Process results
-        for i, result in enumerate(results):
-            idx, row, candidate_ids, center_id = row_indices[i]
-
-            # Check for errors
-            if result.get("action") == "error":
-                error_msg = result.get("error", "Unknown error")
-                warnings.append(f"Row {idx}: {error_msg}")
-                gsids.append(None)
-                continue
-
-            found_gsid = result.get("gsid")
-            action = result["action"]
-
-            # Update statistics
-            if action == "create_new":
-                stats["new_gsids_minted"] += 1
-            elif action == "link_existing":
-                stats["existing_matches"] += 1
-            elif action == "center_promoted":
-                stats["center_promoted"] += 1
-                stats["existing_matches"] += 1
-            elif action == "review_required":
-                stats["flagged_for_review"] += 1
-
-                # Track flagged records
-                flagged_records.append(
-                    {
-                        "row_index": idx,
-                        "candidate_ids": [c["local_subject_id"] for c in candidate_ids],
-                        "center_id": center_id,
-                        "gsid": found_gsid,
-                        "matched_gsids": result.get("matched_gsids"),
-                        "reason": result.get("review_reason"),
-                        "match_strategy": result.get("match_strategy"),
-                        "confidence": result.get("confidence"),
-                    }
-                )
-
-                # Check for multi-GSID conflicts
-                if result.get("matched_gsids") and len(result["matched_gsids"]) > 1:
-                    stats["multi_gsid_conflicts"] += 1
-
-            # Track validation warnings
-            if result.get("validation_warnings"):
-                stats["validation_warnings"] += 1
-                for warning in result["validation_warnings"]:
-                    warnings.append(f"Row {idx}: {warning}")
-
-            gsids.append(found_gsid)
-
-            # Record ALL local IDs for this subject
-            # The GSID service already inserted these, but we track them for the fragment
-            for candidate in candidate_ids:
-                local_id_records.append(
-                    {
-                        "center_id": center_id,
-                        "local_subject_id": candidate["local_subject_id"],
-                        "identifier_type": candidate["identifier_type"],
-                        "global_subject_id": found_gsid,
-                        "action": action,
-                    }
-                )
-
-        # Generate summary warnings
-        if stats["unknown_center_used"] > 0:
-            warnings.append(
-                f"{stats['unknown_center_used']} records used center_id={default_center_id} (Unknown)"
-            )
-
-        if stats["center_promoted"] > 0:
-            warnings.append(
-                f"{stats['center_promoted']} records promoted from Unknown to known center"
-            )
-
-        if stats["flagged_for_review"] > 0:
-            warnings.append(
-                f"⚠️  {stats['flagged_for_review']} records flagged for manual review"
-            )
-
-        if stats["multi_gsid_conflicts"] > 0:
-            warnings.append(
-                f"⚠️  {stats['multi_gsid_conflicts']} records have multiple GSID conflicts (potential merges needed)"
-            )
-
-        if stats["validation_warnings"] > 0:
-            warnings.append(
-                f"⚠️  {stats['validation_warnings']} records have ID validation warnings"
-            )
 
         return {
             "gsids": gsids,
-            "local_id_records": local_id_records,
+            "local_id_records": unique_records,
             "summary": stats,
             "warnings": warnings,
-            "flagged_records": flagged_records,
         }

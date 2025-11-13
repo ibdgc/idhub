@@ -29,7 +29,6 @@ async def health_check():
 async def register_subject(request: SubjectRequest):
     """
     Register a single subject and resolve identity
-
     Use case: Manual testing, single record registration
     """
     logger.info(
@@ -39,7 +38,6 @@ async def register_subject(request: SubjectRequest):
 
     conn = get_db_connection()
     cur = conn.cursor()
-
     try:
         resolution = resolve_identity(
             conn,
@@ -58,10 +56,11 @@ async def register_subject(request: SubjectRequest):
         if resolution["action"] == "create_new":
             gsid = generate_gsid()
 
+            # Insert into subjects table with created_by
             cur.execute(
                 """
                 INSERT INTO subjects (
-                    global_subject_id, center_id, control, 
+                    global_subject_id, center_id, control,
                     registration_year, created_by
                 )
                 VALUES (%s, %s, %s, %s, %s)
@@ -75,18 +74,21 @@ async def register_subject(request: SubjectRequest):
                 ),
             )
 
+            # Insert into local_subject_ids with created_by
             cur.execute(
                 """
                 INSERT INTO local_subject_ids (
-                    center_id, local_subject_id, identifier_type, global_subject_id
+                    center_id, local_subject_id, identifier_type,
+                    global_subject_id, created_by
                 )
-                VALUES (%s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s)
                 """,
                 (
                     request.center_id,
                     request.local_subject_id,
                     request.identifier_type,
                     gsid,
+                    request.created_by,
                 ),
             )
 
@@ -95,12 +97,14 @@ async def register_subject(request: SubjectRequest):
         elif resolution["action"] == "link_existing":
             gsid = resolution["gsid"]
 
+            # Insert into local_subject_ids with created_by
             cur.execute(
                 """
                 INSERT INTO local_subject_ids (
-                    center_id, local_subject_id, identifier_type, global_subject_id
+                    center_id, local_subject_id, identifier_type,
+                    global_subject_id, created_by
                 )
-                VALUES (%s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s)
                 ON CONFLICT (center_id, local_subject_id, identifier_type) DO NOTHING
                 """,
                 (
@@ -108,12 +112,12 @@ async def register_subject(request: SubjectRequest):
                     request.local_subject_id,
                     request.identifier_type,
                     gsid,
+                    request.created_by,
                 ),
             )
 
         elif resolution["action"] == "center_promoted":
             gsid = resolution["gsid"]
-
             logger.info(
                 f"Center promotion for GSID {gsid}: "
                 f"Unknown (1) -> {request.center_id} for {request.local_subject_id}"
@@ -128,7 +132,6 @@ async def register_subject(request: SubjectRequest):
                 """,
                 (request.center_id, gsid),
             )
-
             subject_rows = cur.rowcount
             logger.info(f"Updated {subject_rows} subject record(s)")
 
@@ -137,7 +140,7 @@ async def register_subject(request: SubjectRequest):
                 """
                 UPDATE local_subject_ids
                 SET center_id = %s
-                WHERE global_subject_id = %s 
+                WHERE global_subject_id = %s
                   AND local_subject_id = %s
                   AND identifier_type = %s
                   AND center_id = 1
@@ -149,19 +152,20 @@ async def register_subject(request: SubjectRequest):
                     request.identifier_type,
                 ),
             )
-
             local_rows = cur.rowcount
             logger.info(f"Updated {local_rows} local_subject_id record(s)")
 
         elif resolution["action"] == "review_required":
             gsid = resolution["gsid"]
 
+            # Insert into local_subject_ids with created_by
             cur.execute(
                 """
                 INSERT INTO local_subject_ids (
-                    center_id, local_subject_id, identifier_type, global_subject_id
+                    center_id, local_subject_id, identifier_type,
+                    global_subject_id, created_by
                 )
-                VALUES (%s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s)
                 ON CONFLICT (center_id, local_subject_id, identifier_type) DO NOTHING
                 """,
                 (
@@ -169,6 +173,7 @@ async def register_subject(request: SubjectRequest):
                     request.local_subject_id,
                     request.identifier_type,
                     gsid,
+                    request.created_by,
                 ),
             )
 
@@ -192,7 +197,6 @@ async def register_subject(request: SubjectRequest):
         logger.error(f"✗ Error registering subject: {e}")
         logger.exception("Full traceback:")
         raise HTTPException(status_code=500, detail=str(e))
-
     finally:
         cur.close()
         conn.close()
@@ -204,7 +208,6 @@ async def register_batch(
 ):
     """
     Register multiple subjects in batch - each in its own transaction
-
     Use case: Fragment-validator, REDCap pipeline, bulk imports
 
     Each request in the batch contains:
@@ -213,9 +216,9 @@ async def register_batch(
     - identifier_type: Type of identifier (e.g., "consortium_id", "local_id", "alias")
     - registration_year: Optional registration date
     - control: Whether this is a control subject
+    - created_by: Source system creating this record
     """
     results = []
-
     logger.info(f"Processing batch of {len(batch.requests)} subjects")
 
     for idx, request in enumerate(batch.requests, 1):
@@ -237,33 +240,39 @@ async def register_batch(
             if resolution["action"] == "create_new":
                 gsid = generate_gsid()
 
+                # Insert into subjects with created_by
                 cur.execute(
                     """
                     INSERT INTO subjects (
-                        global_subject_id, center_id, registration_year, control
+                        global_subject_id, center_id, registration_year,
+                        control, created_by
                     )
-                    VALUES (%s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s)
                     """,
                     (
                         gsid,
                         request.center_id,
                         request.registration_year,
                         request.control,
+                        request.created_by,
                     ),
                 )
 
+                # Insert into local_subject_ids with created_by
                 cur.execute(
                     """
                     INSERT INTO local_subject_ids (
-                        center_id, local_subject_id, identifier_type, global_subject_id
+                        center_id, local_subject_id, identifier_type,
+                        global_subject_id, created_by
                     )
-                    VALUES (%s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s)
                     """,
                     (
                         request.center_id,
                         request.local_subject_id,
                         request.identifier_type,
                         gsid,
+                        request.created_by,
                     ),
                 )
 
@@ -272,12 +281,14 @@ async def register_batch(
             elif resolution["action"] == "link_existing":
                 gsid = resolution["gsid"]
 
+                # Insert into local_subject_ids with created_by
                 cur.execute(
                     """
                     INSERT INTO local_subject_ids (
-                        center_id, local_subject_id, identifier_type, global_subject_id
+                        center_id, local_subject_id, identifier_type,
+                        global_subject_id, created_by
                     )
-                    VALUES (%s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s)
                     ON CONFLICT (center_id, local_subject_id, identifier_type) DO NOTHING
                     """,
                     (
@@ -285,6 +296,7 @@ async def register_batch(
                         request.local_subject_id,
                         request.identifier_type,
                         gsid,
+                        request.created_by,
                     ),
                 )
 
@@ -306,7 +318,7 @@ async def register_batch(
                     """
                     UPDATE local_subject_ids
                     SET center_id = %s
-                    WHERE global_subject_id = %s 
+                    WHERE global_subject_id = %s
                       AND local_subject_id = %s
                       AND identifier_type = %s
                       AND center_id = 1
@@ -327,12 +339,14 @@ async def register_batch(
             elif resolution["action"] == "review_required":
                 gsid = resolution["gsid"]
 
+                # Insert into local_subject_ids with created_by
                 cur.execute(
                     """
                     INSERT INTO local_subject_ids (
-                        center_id, local_subject_id, identifier_type, global_subject_id
+                        center_id, local_subject_id, identifier_type,
+                        global_subject_id, created_by
                     )
-                    VALUES (%s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s)
                     ON CONFLICT (center_id, local_subject_id, identifier_type) DO NOTHING
                     """,
                     (
@@ -340,6 +354,7 @@ async def register_batch(
                         request.local_subject_id,
                         request.identifier_type,
                         gsid,
+                        request.created_by,
                     ),
                 )
 
@@ -355,7 +370,7 @@ async def register_batch(
                 resolution.get("confidence", 0.0),
                 request.center_id,
                 metadata={"review_reason": resolution.get("review_reason")},
-                created_by="api_batch",
+                created_by=request.created_by,
             )
 
             conn.commit()
@@ -377,12 +392,10 @@ async def register_batch(
         except Exception as e:
             if conn:
                 conn.rollback()
-
             logger.error(
                 f"[BATCH {idx}/{len(batch.requests)}] Error processing "
                 f"subject {request.local_subject_id}: {e}"
             )
-
             results.append(
                 SubjectResponse(
                     gsid=None,
@@ -393,7 +406,6 @@ async def register_batch(
                     message=str(e),
                 )
             )
-
         finally:
             if conn:
                 conn.close()
@@ -401,5 +413,137 @@ async def register_batch(
     logger.info(
         f"Batch complete: {len([r for r in results if r.action != 'error'])}/{len(results)} successful"
     )
-
     return results
+
+
+@router.get("/subjects/{gsid}")
+async def get_subject(gsid: str, api_key: str = Depends(verify_api_key)):
+    """Get subject details by GSID"""
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT 
+                s.global_subject_id,
+                s.center_id,
+                c.name as center_name,
+                s.registration_year,
+                s.control,
+                s.withdrawn,
+                s.flagged_for_review,
+                s.created_by,
+                s.created_at
+            FROM subjects s
+            LEFT JOIN centers c ON s.center_id = c.center_id
+            WHERE s.global_subject_id = %s
+            """,
+            (gsid,),
+        )
+        subject = cur.fetchone()
+
+        if not subject:
+            raise HTTPException(status_code=404, detail="Subject not found")
+
+        # Get all local IDs
+        cur.execute(
+            """
+            SELECT 
+                center_id,
+                local_subject_id,
+                identifier_type,
+                created_by,
+                created_at
+            FROM local_subject_ids
+            WHERE global_subject_id = %s
+            ORDER BY created_at ASC
+            """,
+            (gsid,),
+        )
+        local_ids = cur.fetchall()
+
+        return {
+            "gsid": subject[0],
+            "center_id": subject[1],
+            "center_name": subject[2],
+            "registration_year": subject[3],
+            "control": subject[4],
+            "withdrawn": subject[5],
+            "flagged_for_review": subject[6],
+            "created_by": subject[7],
+            "created_at": subject[8],
+            "local_ids": [
+                {
+                    "center_id": lid[0],
+                    "local_subject_id": lid[1],
+                    "identifier_type": lid[2],
+                    "created_by": lid[3],
+                    "created_at": lid[4],
+                }
+                for lid in local_ids
+            ],
+        }
+    finally:
+        conn.close()
+
+
+@router.post("/subjects/{gsid}/withdraw", dependencies=[Depends(verify_api_key)])
+async def withdraw_subject(gsid: str, reason: str = None):
+    """Mark a subject as withdrawn"""
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE subjects 
+            SET withdrawn = TRUE,
+                flagged_for_review = TRUE,
+                review_notes = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE global_subject_id = %s
+            RETURNING global_subject_id
+            """,
+            (reason or "Subject withdrawn", gsid),
+        )
+
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Subject not found")
+
+        conn.commit()
+        return {"status": "withdrawn", "gsid": gsid, "reason": reason}
+    finally:
+        conn.close()
+
+
+@router.post("/subjects/{gsid}/resolve", dependencies=[Depends(verify_api_key)])
+async def resolve_review(gsid: str, reviewed_by: str, notes: str = None):
+    """Resolve a subject flagged for review"""
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE subjects 
+            SET flagged_for_review = FALSE,
+                review_notes = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE global_subject_id = %s
+            """,
+            (notes, gsid),
+        )
+
+        cur.execute(
+            """
+            UPDATE identity_resolutions
+            SET reviewed_by = %s,
+                reviewed_at = CURRENT_TIMESTAMP,
+                resolution_notes = %s
+            WHERE matched_gsid = %s AND requires_review = TRUE
+            """,
+            (reviewed_by, notes, gsid),
+        )
+
+        conn.commit()
+        return {"status": "resolved", "gsid": gsid}
+    finally:
+        conn.close()

@@ -1,5 +1,4 @@
 -- database/init-scripts/01-schema.sql
-
 -- ============================================================================
 -- CORE TABLES
 -- ============================================================================
@@ -30,6 +29,7 @@ CREATE TABLE subjects (
     family_id VARCHAR REFERENCES family(family_id),
     flagged_for_review BOOLEAN DEFAULT FALSE,
     review_notes TEXT,
+    created_by VARCHAR(100) DEFAULT 'system',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -49,6 +49,7 @@ CREATE TABLE local_subject_ids (
     local_subject_id VARCHAR,
     identifier_type VARCHAR DEFAULT 'primary',
     global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
+    created_by VARCHAR(100) DEFAULT 'system',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (center_id, local_subject_id, identifier_type)
@@ -183,6 +184,7 @@ CREATE TABLE sample_resolutions (
     resolution_notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR DEFAULT 'system',
+    
     CONSTRAINT valid_source_table CHECK (source_table IN (
         'specimen',
         'lcl',
@@ -213,6 +215,7 @@ CREATE TABLE fragment_resolutions (
     metadata JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR DEFAULT 'table_loader',
+    
     CONSTRAINT valid_load_status CHECK (load_status IN (
         'success',
         'partial',
@@ -235,12 +238,14 @@ CREATE INDEX idx_subjects_center ON subjects(center_id);
 CREATE INDEX idx_subjects_family ON subjects(family_id);
 CREATE INDEX idx_subjects_withdrawn ON subjects(withdrawn) WHERE withdrawn = TRUE;
 CREATE INDEX idx_subjects_flagged ON subjects(flagged_for_review) WHERE flagged_for_review = TRUE;
+CREATE INDEX idx_subjects_created_by ON subjects(created_by);
 
 -- Local subject IDs indexes
 CREATE INDEX idx_local_ids_gsid ON local_subject_ids(global_subject_id);
 CREATE INDEX idx_local_ids_lookup ON local_subject_ids(center_id, local_subject_id);
 CREATE INDEX idx_local_ids_type ON local_subject_ids(identifier_type);
 CREATE INDEX idx_local_ids_composite ON local_subject_ids(global_subject_id, identifier_type);
+CREATE INDEX idx_local_ids_created_by ON local_subject_ids(created_by);
 
 -- Identity resolutions indexes
 CREATE INDEX idx_resolutions_review ON identity_resolutions(requires_review) WHERE requires_review = TRUE;
@@ -302,6 +307,7 @@ RETURNS TABLE (
     center_id INT,
     local_subject_id VARCHAR,
     identifier_type VARCHAR,
+    created_by VARCHAR,
     created_at TIMESTAMP
 ) AS $$
 BEGIN
@@ -310,6 +316,7 @@ BEGIN
         l.center_id,
         l.local_subject_id,
         l.identifier_type,
+        l.created_by,
         l.created_at
     FROM local_subject_ids l
     WHERE l.global_subject_id = p_gsid
@@ -383,7 +390,8 @@ RETURNS TABLE (
     global_subject_id VARCHAR,
     center_id INT,
     identifier_types TEXT[],
-    id_count BIGINT
+    id_count BIGINT,
+    created_by_sources TEXT[]
 ) AS $$
 BEGIN
     RETURN QUERY
@@ -391,11 +399,43 @@ BEGIN
         l.global_subject_id,
         l.center_id,
         ARRAY_AGG(DISTINCT l.identifier_type ORDER BY l.identifier_type) as identifier_types,
-        COUNT(DISTINCT l.identifier_type) as id_count
+        COUNT(DISTINCT l.identifier_type) as id_count,
+        ARRAY_AGG(DISTINCT l.created_by ORDER BY l.created_by) as created_by_sources
     FROM local_subject_ids l
     GROUP BY l.global_subject_id, l.center_id
     HAVING COUNT(DISTINCT l.identifier_type) > 1
     ORDER BY id_count DESC, l.global_subject_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Function to get subjects by source
+CREATE OR REPLACE FUNCTION get_subjects_by_source(p_source VARCHAR)
+RETURNS TABLE (
+    global_subject_id VARCHAR,
+    center_id INT,
+    center_name VARCHAR,
+    registration_year DATE,
+    control BOOLEAN,
+    num_local_ids BIGINT,
+    created_at TIMESTAMP
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        s.global_subject_id,
+        s.center_id,
+        c.name as center_name,
+        s.registration_year,
+        s.control,
+        COUNT(l.local_subject_id) as num_local_ids,
+        s.created_at
+    FROM subjects s
+    JOIN centers c ON s.center_id = c.center_id
+    LEFT JOIN local_subject_ids l ON s.global_subject_id = l.global_subject_id
+    WHERE s.created_by = p_source
+    GROUP BY s.global_subject_id, s.center_id, c.name, s.registration_year, 
+             s.control, s.created_at
+    ORDER BY s.created_at DESC;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -412,6 +452,7 @@ SELECT
     s.flagged_for_review,
     s.review_notes,
     s.withdrawn,
+    s.created_by,
     COUNT(DISTINCT l.identifier_type) as num_identifier_types,
     COUNT(DISTINCT l.local_subject_id) as num_local_ids,
     s.created_at,
@@ -421,7 +462,7 @@ LEFT JOIN centers c ON s.center_id = c.center_id
 LEFT JOIN local_subject_ids l ON s.global_subject_id = l.global_subject_id
 WHERE s.flagged_for_review = TRUE OR s.withdrawn = TRUE
 GROUP BY s.global_subject_id, s.center_id, c.name, s.flagged_for_review, 
-         s.review_notes, s.withdrawn, s.created_at, s.updated_at
+         s.review_notes, s.withdrawn, s.created_by, s.created_at, s.updated_at
 ORDER BY s.updated_at DESC;
 
 -- View for multi-GSID conflicts
@@ -437,6 +478,7 @@ SELECT
     ir.requires_review,
     ir.reviewed_by,
     ir.reviewed_at,
+    ir.created_by,
     ir.created_at
 FROM identity_resolutions ir
 WHERE ir.match_strategy = 'multiple_gsid_conflict'
@@ -459,23 +501,41 @@ JOIN centers c ON ir.input_center_id = c.center_id
 GROUP BY c.center_id, c.name, ir.action, ir.match_strategy
 ORDER BY c.name, resolution_count DESC;
 
+-- View for subjects by source
+CREATE OR REPLACE VIEW v_subjects_by_source AS
+SELECT 
+    s.created_by as source,
+    COUNT(DISTINCT s.global_subject_id) as subject_count,
+    COUNT(DISTINCT s.center_id) as center_count,
+    MIN(s.created_at) as first_created,
+    MAX(s.created_at) as last_created
+FROM subjects s
+GROUP BY s.created_by
+ORDER BY subject_count DESC;
+
 -- ============================================================================
 -- COMMENTS
 -- ============================================================================
+
+COMMENT ON TABLE subjects IS 'Core subject registry with GSID as primary key';
+COMMENT ON COLUMN subjects.created_by IS 'Source system that created this subject (e.g., redcap_pipeline, fragment_validator, manual)';
+
+COMMENT ON TABLE local_subject_ids IS 'Maps local subject IDs to global GSIDs with identifier type tracking';
+COMMENT ON COLUMN local_subject_ids.identifier_type IS 'Type of identifier: consortium_id, local_id, alias, niddk_no, etc.';
+COMMENT ON COLUMN local_subject_ids.created_by IS 'Source system that created this mapping';
 
 COMMENT ON TABLE identity_resolutions IS 'Tracks all identity resolution decisions with multi-candidate support';
 COMMENT ON COLUMN identity_resolutions.candidate_ids IS 'JSONB array of all candidate IDs submitted for resolution';
 COMMENT ON COLUMN identity_resolutions.matched_gsids IS 'JSONB array of GSIDs matched (populated for conflicts)';
 COMMENT ON COLUMN identity_resolutions.validation_warnings IS 'JSONB array of ID validation warnings';
 
-COMMENT ON TABLE local_subject_ids IS 'Maps local subject IDs to global GSIDs with identifier type tracking';
-COMMENT ON COLUMN local_subject_ids.identifier_type IS 'Type of identifier: consortium_id, local_id, alias, niddk_no, etc.';
-
 COMMENT ON FUNCTION get_local_ids_for_gsid IS 'Returns all local IDs associated with a GSID';
 COMMENT ON FUNCTION check_multi_gsid_conflicts IS 'Checks if candidate IDs map to multiple different GSIDs';
 COMMENT ON FUNCTION get_resolution_stats IS 'Returns resolution statistics for a date range';
 COMMENT ON FUNCTION get_subjects_with_multiple_id_types IS 'Returns subjects with multiple identifier types';
+COMMENT ON FUNCTION get_subjects_by_source IS 'Returns subjects grouped by source system';
 
 COMMENT ON VIEW v_subjects_requiring_review IS 'Subjects flagged for review or withdrawn';
 COMMENT ON VIEW v_multi_gsid_conflicts IS 'Identity resolutions with multiple GSID conflicts';
 COMMENT ON VIEW v_resolution_summary_by_center IS 'Resolution statistics grouped by center';
+COMMENT ON VIEW v_subjects_by_source IS 'Subject counts grouped by source system';
