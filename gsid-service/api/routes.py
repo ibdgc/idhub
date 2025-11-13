@@ -32,8 +32,13 @@ async def health_check():
 @router.post("/register", dependencies=[Depends(verify_api_key)])
 async def register_subject(request: SubjectRequest):
     """Register a subject and resolve identity"""
+
+    logger.info(
+        f">>> REGISTER REQUEST: center_id={request.center_id}, local_id={request.local_subject_id}, type={request.identifier_type}"
+    )
+
     conn = get_db_connection()
-    cur = conn.cursor()  # ← Create cursor ONCE at the top
+    cur = conn.cursor()
 
     try:
         resolution = resolve_identity(
@@ -41,6 +46,10 @@ async def register_subject(request: SubjectRequest):
             request.center_id,
             request.local_subject_id,
             request.identifier_type,
+        )
+
+        logger.info(
+            f">>> RESOLUTION: action={resolution['action']}, gsid={resolution.get('gsid')}, strategy={resolution.get('match_strategy')}"
         )
 
         gsid = resolution.get("gsid")  # Initialize gsid
@@ -100,21 +109,38 @@ async def register_subject(request: SubjectRequest):
         elif resolution["action"] == "center_promoted":
             gsid = resolution["gsid"]
 
-            logger.info(
-                f"Center promotion for GSID {gsid}: "
-                f"Unknown (1) -> {request.center_id} for {request.local_subject_id}"
-            )
+            logger.info("=" * 80)
+            logger.info(f"ENTERING CENTER_PROMOTED BLOCK")
+            logger.info(f"  GSID: {gsid}")
+            logger.info(f"  local_subject_id: {request.local_subject_id}")
+            logger.info(f"  From center: 1 (Unknown)")
+            logger.info(f"  To center: {request.center_id}")
+            logger.info("=" * 80)
 
-            # Check current state before update
+            # Check current state BEFORE any updates
             cur.execute(
-                "SELECT center_id FROM subjects WHERE global_subject_id = %s", (gsid,)
+                """
+                SELECT s.center_id, 
+                       (SELECT COUNT(*) FROM local_subject_ids WHERE global_subject_id = %s) as local_id_count,
+                       (SELECT COUNT(*) FROM local_subject_ids WHERE global_subject_id = %s AND center_id = 1) as unknown_count
+                FROM subjects s 
+                WHERE s.global_subject_id = %s
+                """,
+                (gsid, gsid, gsid),
             )
-            current_subject = cur.fetchone()
-            current_center = current_subject[0] if current_subject else None
+            pre_state = cur.fetchone()
 
-            logger.info(f"Subject {gsid} current center_id: {current_center}")
+            if pre_state:
+                logger.info(f"PRE-UPDATE STATE:")
+                logger.info(f"  Subject center_id: {pre_state[0]}")
+                logger.info(f"  Total local_subject_ids: {pre_state[1]}")
+                logger.info(f"  Unknown center local_ids: {pre_state[2]}")
 
-            # 1. Update subjects table - promote from Unknown to known center
+            # 1. Update subjects table
+            logger.info(
+                f"EXECUTING: UPDATE subjects SET center_id={request.center_id} WHERE global_subject_id={gsid} AND center_id=1"
+            )
+
             cur.execute(
                 """
                 UPDATE subjects
@@ -125,19 +151,23 @@ async def register_subject(request: SubjectRequest):
                 (request.center_id, gsid),
             )
 
-            rows_updated = cur.rowcount
+            subject_rows = cur.rowcount
+            logger.info(f"RESULT: {subject_rows} rows updated in subjects table")
 
-            if rows_updated > 0:
-                logger.info(
-                    f"✓ Updated subject {gsid} center: 1 -> {request.center_id}"
-                )
-            else:
-                logger.warning(
-                    f"✗ Subject {gsid} was not updated. Current center_id: {current_center}. "
-                    f"May have been previously promoted."
-                )
+            # Verify the update
+            cur.execute(
+                "SELECT center_id FROM subjects WHERE global_subject_id = %s", (gsid,)
+            )
+            new_center = cur.fetchone()
+            logger.info(
+                f"VERIFICATION: Subject center_id is now: {new_center[0] if new_center else 'NOT FOUND'}"
+            )
 
-            # 2. Update local_subject_ids - change center from Unknown to known
+            # 2. Update local_subject_ids
+            logger.info(
+                f"EXECUTING: UPDATE local_subject_ids SET center_id={request.center_id} WHERE gsid={gsid} AND local_id={request.local_subject_id} AND center_id=1"
+            )
+
             cur.execute(
                 """
                 UPDATE local_subject_ids
@@ -155,39 +185,40 @@ async def register_subject(request: SubjectRequest):
                 ),
             )
 
-            local_rows_updated = cur.rowcount
+            local_rows = cur.rowcount
+            logger.info(f"RESULT: {local_rows} rows updated in local_subject_ids table")
 
-            if local_rows_updated > 0:
-                logger.info(
-                    f"✓ Updated local_subject_id {request.local_subject_id} "
-                    f"center: 1 -> {request.center_id}"
-                )
-            else:
-                logger.warning(
-                    f"✗ No Unknown record found for {request.local_subject_id}. "
-                    f"Checking if record already exists..."
-                )
+            # Verify local_subject_ids state
+            cur.execute(
+                """
+                SELECT center_id, COUNT(*) 
+                FROM local_subject_ids 
+                WHERE global_subject_id = %s 
+                GROUP BY center_id
+                """,
+                (gsid,),
+            )
+            local_state = cur.fetchall()
+            logger.info(f"VERIFICATION: local_subject_ids distribution: {local_state}")
 
-                # Check if it already exists with the target center
+            if local_rows == 0:
+                logger.warning("NO ROWS UPDATED - checking if record exists...")
+
                 cur.execute(
                     """
-                    SELECT 1 FROM local_subject_ids
+                    SELECT center_id, local_subject_id, identifier_type
+                    FROM local_subject_ids
                     WHERE global_subject_id = %s
                       AND local_subject_id = %s
                       AND identifier_type = %s
-                      AND center_id = %s
                     """,
-                    (
-                        gsid,
-                        request.local_subject_id,
-                        request.identifier_type,
-                        request.center_id,
-                    ),
+                    (gsid, request.local_subject_id, request.identifier_type),
                 )
+                existing = cur.fetchall()
+                logger.info(f"Existing records for this local_subject_id: {existing}")
 
-                already_exists = cur.fetchone()
-
-                if already_exists:
+                # Check if already promoted
+                if any(row[0] == request.center_id for row in existing):
                     logger.info(
                         f"✓ Record already exists with center {request.center_id}"
                     )
@@ -208,6 +239,11 @@ async def register_subject(request: SubjectRequest):
                             gsid,
                         ),
                     )
+                    logger.info(f"INSERT completed, rowcount: {cur.rowcount}")
+
+            logger.info("=" * 80)
+            logger.info("EXITING CENTER_PROMOTED BLOCK")
+            logger.info("=" * 80)
 
         elif resolution["action"] == "review_required":
             gsid = resolution["gsid"]
