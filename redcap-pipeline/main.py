@@ -16,6 +16,7 @@ logging.basicConfig(
         logging.StreamHandler(),
     ],
 )
+
 logger = logging.getLogger(__name__)
 
 
@@ -56,7 +57,7 @@ def get_project_config(projects: dict, project_key: str) -> dict:
 
 
 def run_project(project_key: str, project_config: dict) -> dict:
-    """Run pipeline for a single project"""
+    """Run pipeline for a single project with improved error handling"""
     try:
         logger.info(f"\n{'=' * 60}")
         logger.info(f"Starting pipeline for project: {project_key}")
@@ -76,19 +77,57 @@ def run_project(project_key: str, project_config: dict) -> dict:
         batch_size = project_config.get("batch_size", 50)
         result = pipeline.run(batch_size=batch_size)
 
-        logger.info(f"\n{'=' * 60}")
-        logger.info(
-            f"✓ Project '{project_key}' complete: "
-            f"{result['total_success']} success, {result['total_errors']} errors"
-        )
-        logger.info(f"{'=' * 60}\n")
+        # Handle different result statuses
+        if result.get("status") == "partial_success":
+            logger.warning(
+                f"\n{'=' * 60}\n"
+                f"⚠ Project '{project_key}' partially completed:\n"
+                f"  - Records processed: {result['total_success']}\n"
+                f"  - Errors: {result['total_errors']}\n"
+                f"  - Last offset: {result['last_offset']}\n"
+                f"  - Error: {result.get('error', 'Unknown')}\n"
+                f"{'=' * 60}\n"
+            )
+            return {
+                "project": project_key,
+                "status": "partial_success",
+                "total_success": result["total_success"],
+                "total_errors": result["total_errors"],
+                "last_offset": result["last_offset"],
+                "error": result.get("error"),
+            }
 
-        return {
-            "project": project_key,
-            "status": "success",
-            "total_success": result["total_success"],
-            "total_errors": result["total_errors"],
-        }
+        elif result.get("status") == "error":
+            logger.error(
+                f"\n{'=' * 60}\n"
+                f"✗ Project '{project_key}' failed:\n"
+                f"  - Records processed: {result['total_success']}\n"
+                f"  - Errors: {result['total_errors']}\n"
+                f"  - Error: {result.get('error', 'Unknown')}\n"
+                f"{'=' * 60}\n"
+            )
+            return {
+                "project": project_key,
+                "status": "error",
+                "total_success": result["total_success"],
+                "total_errors": result["total_errors"],
+                "error": result.get("error"),
+            }
+
+        else:  # success
+            logger.info(
+                f"\n{'=' * 60}\n"
+                f"✓ Project '{project_key}' completed successfully:\n"
+                f"  - Records processed: {result['total_success']}\n"
+                f"  - Errors: {result['total_errors']}\n"
+                f"{'=' * 60}\n"
+            )
+            return {
+                "project": project_key,
+                "status": "success",
+                "total_success": result["total_success"],
+                "total_errors": result["total_errors"],
+            }
 
     except Exception as e:
         logger.error(f"✗ Project '{project_key}' failed: {e}", exc_info=True)
@@ -96,6 +135,8 @@ def run_project(project_key: str, project_config: dict) -> dict:
             "project": project_key,
             "status": "error",
             "error": str(e),
+            "total_success": 0,
+            "total_errors": 0,
         }
 
 
@@ -168,25 +209,39 @@ def main():
         for result in results:
             if result["status"] == "skipped":
                 logger.info(f"  {result['project']}: SKIPPED ({result['reason']})")
+            elif result["status"] == "partial_success":
+                logger.warning(
+                    f"  {result['project']}: PARTIAL SUCCESS - "
+                    f"{result['total_success']} processed, "
+                    f"{result['total_errors']} errors, "
+                    f"stopped at offset {result['last_offset']}"
+                )
             elif result["status"] == "error":
                 logger.error(f"  {result['project']}: ERROR - {result['error']}")
             else:
                 logger.info(
-                    f"  {result['project']}: "
-                    f"{result['total_success']} success, {result['total_errors']} errors"
+                    f"  {result['project']}: SUCCESS - "
+                    f"{result['total_success']} processed, {result['total_errors']} errors"
                 )
 
         logger.info(f"{'=' * 60}\n")
 
-        # Exit with error if any project failed
+        # Exit with error if any project completely failed (not partial success)
         if any(r["status"] == "error" for r in results):
+            logger.error("One or more projects failed completely")
             sys.exit(1)
+
+        # Exit with warning code if any partial successes
+        if any(r["status"] == "partial_success" for r in results):
+            logger.warning("One or more projects partially completed")
+            sys.exit(2)  # Different exit code for partial success
 
         return 0
 
     except Exception as e:
         logger.error(f"Pipeline failed: {e}", exc_info=True)
         return 1
+
     finally:
         close_db_pool()
 

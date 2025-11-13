@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 def resolve_api_token(token_template: str) -> str:
     """Resolve API token from template with environment variable substitution"""
     resolved = token_template
-
     # Replace all possible token variables
     replacements = {
         "${REDCAP_API_TOKEN}": os.getenv("REDCAP_API_TOKEN", ""),
@@ -54,10 +53,11 @@ class REDCapClient:
         # Create session with retry logic
         self.session = requests.Session()
         retry_strategy = Retry(
-            total=3,
-            backoff_factor=2,  # 2, 4, 8 seconds
+            total=5,  # Increased from 3
+            backoff_factor=2,  # 2, 4, 8, 16, 32 seconds
             status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=["POST"],
+            raise_on_status=False,  # Don't raise immediately on retry-able status codes
         )
         adapter = HTTPAdapter(max_retries=retry_strategy)
         self.session.mount("https://", adapter)
@@ -87,8 +87,9 @@ class REDCapClient:
             "returnFormat": "json",
         }
 
-        max_retries = 3
+        max_retries = 5
         retry_delay = 5  # Start with 5 seconds
+        last_exception = None
 
         for attempt in range(max_retries):
             try:
@@ -101,6 +102,21 @@ class REDCapClient:
                 response = self.session.post(
                     self.api_url, data=payload, timeout=timeout
                 )
+
+                # Check for specific error codes that need special handling
+                if response.status_code == 500:
+                    logger.warning(
+                        f"[{self.project_key}] REDCap server error (500) - "
+                        f"attempt {attempt + 1}/{max_retries}"
+                    )
+                    if attempt < max_retries - 1:
+                        wait_time = retry_delay * (2**attempt)  # Exponential backoff
+                        logger.info(f"[{self.project_key}] Retrying in {wait_time}s...")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        response.raise_for_status()
+
                 response.raise_for_status()
                 all_records = response.json()
 
@@ -115,14 +131,15 @@ class REDCapClient:
                 return paginated_records
 
             except requests.exceptions.Timeout as e:
+                last_exception = e
                 if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2**attempt)
                     logger.warning(
                         f"[{self.project_key}] Request timed out "
                         f"(attempt {attempt + 1}/{max_retries}). "
-                        f"Retrying in {retry_delay}s..."
+                        f"Retrying in {wait_time}s..."
                     )
-                    time.sleep(retry_delay)
-                    retry_delay *= 2  # Exponential backoff
+                    time.sleep(wait_time)
                     timeout = min(timeout * 1.5, 300)  # Increase timeout, max 5 min
                 else:
                     logger.error(
@@ -132,8 +149,23 @@ class REDCapClient:
                     raise
 
             except requests.exceptions.RequestException as e:
-                logger.error(f"[{self.project_key}] Failed to fetch records: {e}")
-                raise
+                last_exception = e
+                logger.error(
+                    f"[{self.project_key}] Request failed "
+                    f"(attempt {attempt + 1}/{max_retries}): {e}"
+                )
+
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2**attempt)
+                    logger.info(f"[{self.project_key}] Retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"[{self.project_key}] All retry attempts exhausted")
+                    raise
+
+        # If we get here, all retries failed
+        if last_exception:
+            raise last_exception
 
         return []
 
