@@ -249,7 +249,6 @@ def log_resolution(
                 local_subject_id,
                 identifier_type,
                 input_center_id,
-                input_local_id,
                 gsid,
                 matched_gsid,
                 action,
@@ -259,13 +258,12 @@ def log_resolution(
                 review_reason,
                 metadata,
                 created_by
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 local_subject_id,
                 identifier_type,
                 center_id,
-                local_subject_id,
                 gsid,
                 matched_gsid,
                 action,
