@@ -234,6 +234,7 @@ class DataProcessor:
 
         return center_id
 
+
     def resolve_subject_ids(
         self,
         subject_ids: List[Dict[str, str]],
@@ -242,12 +243,12 @@ class DataProcessor:
     ) -> Dict[str, Any]:
         """
         Resolve subject IDs using the new unified GSID endpoint.
-
+        
         Args:
             subject_ids: List of {"local_subject_id": "X", "identifier_type": "Y"}
             center_id: Research center ID
             record: Full REDCap record for metadata extraction
-
+        
         Returns:
             {
                 "gsid": "GSID-XXX",
