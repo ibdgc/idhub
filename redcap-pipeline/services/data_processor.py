@@ -243,14 +243,6 @@ class DataProcessor:
         """
         Resolve subject IDs to a GSID using the simplified GSID client.
 
-        This method now delegates to the GSID service for all identity resolution logic.
-        The GSID service handles:
-        - Checking for existing matches
-        - Creating new GSIDs
-        - Linking to existing GSIDs
-        - Center promotion (Unknown -> Known)
-        - Conflict detection
-
         Args:
             subject_ids: List of {local_subject_id, identifier_type} dicts
             center_id: Research center ID
@@ -262,66 +254,29 @@ class DataProcessor:
         if not subject_ids:
             raise ValueError("No valid subject IDs found in record")
 
+        # Extract metadata from record
         registration_year = self.extract_registration_year(record)
         control = self.extract_control_status(record)
 
-        # Format IDs for logging
-        id_list = ", ".join(
-            [f"{s['identifier_type']}={s['local_subject_id']}" for s in subject_ids]
-        )
-        logger.info(
-            f"[{self.project_key}] Resolving {len(subject_ids)} ID(s): {id_list} "
-            f"for center_id={center_id}"
-        )
-
         try:
-            # Use the new convenience method for multiple IDs
-            result = self.gsid_client.register_subject_with_multiple_ids(
+            # Call the new unified endpoint
+            result = self.gsid_client.register_subject_with_identifiers(
                 center_id=center_id,
-                subject_ids=subject_ids,
+                identifiers=subject_ids,
                 registration_year=registration_year,
                 control=control,
             )
 
-            # Check for conflicts
             if result.get("conflicts"):
                 logger.error(
                     f"[{self.project_key}] GSID CONFLICT DETECTED: "
                     f"Multiple GSIDs found: {result['conflicts']}"
                 )
-                return {
-                    "gsid": result["conflicts"][0],  # Use first GSID for processing
-                    "action": "conflict_detected",
-                    "identifier_type": subject_ids[0]["identifier_type"],
-                    "local_subject_id": subject_ids[0]["local_subject_id"],
-                    "conflict": True,
-                    "conflicting_gsids": result["conflicts"],
-                    "registration_year": registration_year,
-                    "control": control,
-                    "match_strategy": "conflict",
-                    "confidence": 0.0,
-                }
 
-            # Success - extract primary ID info from results
-            primary_result = result["results"][0] if result.get("results") else {}
-
-            return {
-                "gsid": result["gsid"],
-                "action": result["action"],
-                "identifier_type": subject_ids[0]["identifier_type"],
-                "local_subject_id": subject_ids[0]["local_subject_id"],
-                "conflict": False,
-                "conflicting_gsids": None,
-                "registration_year": registration_year,
-                "control": control,
-                "match_strategy": primary_result.get("match_strategy", "unknown"),
-                "confidence": primary_result.get("confidence", 1.0),
-            }
+            return result
 
         except Exception as e:
-            logger.error(
-                f"[{self.project_key}] Error resolving subject IDs: {e}", exc_info=True
-            )
+            logger.error(f"[{self.project_key}] Error resolving subject IDs: {e}")
             raise
 
     def register_all_local_ids(

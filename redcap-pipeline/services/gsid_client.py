@@ -18,150 +18,31 @@ class GSIDClient:
             {"x-api-key": self.api_key, "Content-Type": "application/json"}
         )
 
-    def register_subject(
+    def register_subject_with_identifiers(
         self,
         center_id: int,
-        local_subject_id: str,
-        identifier_type: str = "primary",
+        identifiers: List[Dict[str, str]],
         registration_year: Optional[date] = None,
         control: bool = False,
-        created_by: str = "redcap_pipeline",
     ) -> Dict[str, Any]:
         """
-        Register a single subject with GSID service
+        Register a subject with multiple identifiers using the unified endpoint.
 
         Args:
             center_id: Research center ID
-            local_subject_id: Local identifier (e.g., consortium_id, local_id)
-            identifier_type: Type of identifier (e.g., "consortium_id", "local_id", "alias")
-            registration_year: Registration date
-            control: Whether this is a control subject
-            created_by: Creator identifier
+            identifiers: List of {"local_subject_id": "X", "identifier_type": "Y"}
+            registration_year: Optional registration year
+            control: Whether subject is a control
 
         Returns:
-            Registration response with gsid, action, match_strategy, etc.
-        """
-        payload = {
-            "center_id": center_id,
-            "local_subject_id": local_subject_id,
-            "identifier_type": identifier_type,
-            "registration_year": registration_year.isoformat()
-            if registration_year
-            else None,
-            "control": control,
-            "created_by": created_by,
-        }
-
-        try:
-            response = self.session.post(
-                f"{self.base_url}/register", json=payload, timeout=30
-            )
-            response.raise_for_status()
-            result = response.json()
-
-            logger.info(
-                f"[{created_by}] Registered {local_subject_id} ({identifier_type}) -> "
-                f"GSID {result.get('gsid')} ({result.get('action')}) "
-                f"[strategy={result.get('match_strategy')}, confidence={result.get('confidence')}]"
-            )
-
-            return result
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"[{created_by}] GSID registration failed: {e}")
-            raise
-
-    def register_batch(
-        self, subjects: List[Dict[str, Any]], timeout: int = 60
-    ) -> List[Dict[str, Any]]:
-        """
-        Register multiple subjects in batch
-
-        Each subject dict should contain:
-        - center_id: int
-        - local_subject_id: str
-        - identifier_type: str (e.g., "consortium_id", "local_id", "alias")
-        - registration_year: Optional[str] (ISO format)
-        - control: bool
-
-        Args:
-            subjects: List of subject registration requests
-            timeout: Request timeout in seconds
-
-        Returns:
-            List of registration responses
-
-        Example:
-            subjects = [
-                {
-                    "center_id": 2,
-                    "local_subject_id": "IBDGC001",
-                    "identifier_type": "consortium_id",
-                    "registration_year": "2024-01-15",
-                    "control": False
-                },
-                {
-                    "center_id": 2,
-                    "local_subject_id": "LOCAL-123",
-                    "identifier_type": "local_id",
-                    "registration_year": "2024-01-15",
-                    "control": False
-                }
-            ]
-            results = client.register_batch(subjects)
-        """
-        payload = {"requests": subjects}
-
-        try:
-            response = self.session.post(
-                f"{self.base_url}/register/batch", json=payload, timeout=timeout
-            )
-            response.raise_for_status()
-            results = response.json()
-
-            # Log summary
-            success_count = sum(1 for r in results if r.get("action") != "error")
-            error_count = len(results) - success_count
-
-            # Count actions
-            actions = {}
-            for r in results:
-                action = r.get("action", "unknown")
-                actions[action] = actions.get(action, 0) + 1
-
-            logger.info(
-                f"Batch registration complete: {success_count} success, {error_count} errors"
-            )
-            logger.info(f"Actions: {actions}")
-
-            return results
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Batch registration failed: {e}")
-            raise
-
-    def register_subject_with_multiple_ids(
-        self,
-        center_id: int,
-        subject_ids: List[Dict[str, str]],
-        registration_year: Optional[date] = None,
-        control: bool = False,
-    ) -> Dict[str, Any]:
-        """
-        Register a single subject with multiple local IDs using the new multi-identifier endpoint
-        """
-        if not subject_ids:
-            raise ValueError("subject_ids cannot be empty")
-
-        # Format identifiers for the new endpoint
-        identifiers = [
             {
-                "local_subject_id": id_info["local_subject_id"],
-                "identifier_type": id_info["identifier_type"],
+                "gsid": "GSID-XXX",
+                "action": "create_new" | "link_existing" | "conflict_resolved",
+                "identifiers_linked": int,
+                "conflicts": [...] or None,
+                "conflict_resolution": "used_oldest" or None
             }
-            for id_info in subject_ids
-        ]
-
+        """
         payload = {
             "center_id": center_id,
             "identifiers": identifiers,
@@ -173,28 +54,32 @@ class GSIDClient:
         }
 
         try:
+            logger.debug(
+                f"Registering subject with {len(identifiers)} identifier(s) "
+                f"for center_id={center_id}"
+            )
+
             response = self.session.post(
-                f"{self.base_url}/register/multi-identifier", json=payload, timeout=30
+                f"{self.base_url}/register/subject", json=payload, timeout=30
             )
             response.raise_for_status()
             result = response.json()
 
-            logger.info(
-                f"Multi-identifier registration: {result['gsid']} "
-                f"(action={result['action']}, identifiers={len(identifiers)})"
-            )
-
-            # Check for conflicts
             if result.get("conflicts"):
-                logger.error(f"GSID conflict detected: {result['conflicts']}")
+                logger.warning(
+                    f"GSID conflict detected: {result['gsid']} "
+                    f"(conflicts: {result['conflicts']})"
+                )
+            else:
+                logger.info(
+                    f"Subject registered: {result['gsid']} "
+                    f"(action={result['action']}, identifiers={result['identifiers_linked']})"
+                )
 
-            return {
-                "gsid": result["gsid"],
-                "action": result["action"],
-                "conflicts": result.get("conflicts"),
-                "identifiers_processed": result.get("identifiers_processed", []),
-            }
+            return result
 
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to register subject with multiple IDs: {e}")
+            logger.error(f"Failed to register subject: {e}")
+            if hasattr(e, "response") and e.response is not None:
+                logger.error(f"Response: {e.response.text}")
             raise

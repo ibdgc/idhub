@@ -1,340 +1,236 @@
 # gsid-service/services/identity_resolution.py
 import json
 import logging
+from datetime import date
 from typing import Any, Dict, List, Optional
 
-import psycopg2.extras
 from psycopg2.extras import RealDictCursor
-
-from .id_validator import IDValidator
 
 logger = logging.getLogger(__name__)
 
 
-def resolve_identity_multi_candidate(
+def resolve_subject_with_multiple_ids(
     conn,
     center_id: int,
-    candidate_ids: List[Dict[str, str]],
+    identifiers: List[Dict[str, str]],
+    registration_year: Optional[date] = None,
+    control: bool = False,
+    created_by: str = "system",
 ) -> Dict[str, Any]:
     """
-    Resolve subject identity using multiple candidate IDs
-    Args:
-        conn: Database connection
-        center_id: Center ID for the incoming record
-        candidate_ids: List of dicts with 'local_subject_id' and 'identifier_type'
+    Core identity resolution for a subject with multiple identifiers.
+
+    Logic:
+    1. Query local_subject_ids for ALL identifiers
+    2. Collect all matched GSIDs
+    3. If 0 matches → create new GSID
+    4. If 1 match → use that GSID
+    5. If 2+ matches → CONFLICT (flag all, use oldest)
+    6. Link ALL identifiers to the chosen GSID
+
     Returns:
-        Resolution result with action, GSIDs, flags, etc.
-    """
-    try:
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
-        # Step 1: Validate all candidate IDs
-        validation_results = IDValidator.validate_batch(
-            [
-                {"id": c["local_subject_id"], "type": c["identifier_type"]}
-                for c in candidate_ids
-            ]
-        )
-
-        # Check for validation errors
-        validation_warnings = []
-        has_validation_errors = False
-
-        for candidate in candidate_ids:
-            local_id = candidate["local_subject_id"]
-            validation = validation_results.get(local_id, {})
-
-            if not validation.get("valid", True):
-                has_validation_errors = True
-                validation_warnings.extend(validation.get("warnings", []))
-            elif validation.get("warnings"):
-                validation_warnings.extend(validation.get("warnings", []))
-
-        # Step 2: Query for ALL candidate IDs
-        matched_gsids = {}  # Maps GSID -> list of matched candidates
-        matched_centers = {}  # Maps GSID -> center_id from subjects table
-
-        for candidate in candidate_ids:
-            local_id = candidate["local_subject_id"]
-            identifier_type = candidate["identifier_type"]
-
-            # Check if this ID exists in local_subject_ids
-            cur.execute(
-                """
-                SELECT 
-                    l.global_subject_id,
-                    l.center_id as local_center_id,
-                    l.identifier_type,
-                    s.center_id as subject_center_id,
-                    s.withdrawn,
-                    s.flagged_for_review
-                FROM local_subject_ids l
-                JOIN subjects s ON l.global_subject_id = s.global_subject_id
-                WHERE l.local_subject_id = %s
-                ORDER BY l.created_at ASC
-                """,
-                (local_id,),
-            )
-            matches = cur.fetchall()
-
-            for match in matches:
-                gsid = match["global_subject_id"]
-                if gsid not in matched_gsids:
-                    matched_gsids[gsid] = []
-                    matched_centers[gsid] = match["subject_center_id"]
-
-                matched_gsids[gsid].append(
-                    {
-                        "local_subject_id": local_id,
-                        "identifier_type": identifier_type,
-                        "local_center_id": match["local_center_id"],
-                        "subject_center_id": match["subject_center_id"],
-                        "withdrawn": match["withdrawn"],
-                        "flagged": match["flagged_for_review"],
-                    }
-                )
-
-        # Step 3: Analyze matches and determine action
-        num_gsids_found = len(matched_gsids)
-
-        # Case 1: No matches - create new subject
-        if num_gsids_found == 0:
-            if has_validation_errors:
-                return {
-                    "action": "review_required",
-                    "gsid": None,
-                    "match_strategy": "validation_failed",
-                    "confidence": 0.0,
-                    "review_reason": f"ID validation failed: {'; '.join(validation_warnings)}",
-                    "candidate_ids": candidate_ids,
-                    "validation_warnings": validation_warnings,
-                }
-
-            return {
-                "action": "create_new",
-                "gsid": None,
-                "match_strategy": "no_match",
-                "confidence": 1.0,
-                "candidate_ids": candidate_ids,
-                "validation_warnings": validation_warnings,
-            }
-
-        # Case 2: Exactly one GSID found
-        if num_gsids_found == 1:
-            gsid = list(matched_gsids.keys())[0]
-            matches = matched_gsids[gsid]
-            subject_center_id = matched_centers[gsid]
-
-            # Check if subject is withdrawn
-            if any(m["withdrawn"] for m in matches):
-                return {
-                    "action": "review_required",
-                    "gsid": gsid,
-                    "match_strategy": "exact_withdrawn",
-                    "confidence": 1.0,
-                    "review_reason": "Subject previously withdrawn",
-                    "candidate_ids": candidate_ids,
-                    "matched_candidates": matches,
-                    "validation_warnings": validation_warnings,
-                }
-
-            # Check for cross-center conflicts
-            cross_center_conflict = False
-            conflict_details = []
-
-            for match in matches:
-                local_center = match["local_center_id"]
-                # Conflict if: different known centers (not Unknown)
-                if (
-                    local_center != center_id
-                    and local_center not in [0, 1]
-                    and center_id not in [0, 1]
-                ):
-                    cross_center_conflict = True
-                    conflict_details.append(
-                        f"ID '{match['local_subject_id']}' exists at center {local_center}, "
-                        f"attempting to link at center {center_id}"
-                    )
-
-            if cross_center_conflict:
-                return {
-                    "action": "review_required",
-                    "gsid": gsid,
-                    "match_strategy": "cross_center_conflict",
-                    "confidence": 0.8,
-                    "review_reason": "; ".join(conflict_details),
-                    "candidate_ids": candidate_ids,
-                    "matched_candidates": matches,
-                    "validation_warnings": validation_warnings,
-                }
-
-            # Check if center promotion is needed
-            if subject_center_id in [0, 1] and center_id not in [0, 1]:
-                return {
-                    "action": "center_promoted",
-                    "gsid": gsid,
-                    "match_strategy": "center_promotion",
-                    "confidence": 1.0,
-                    "previous_center_id": subject_center_id,
-                    "new_center_id": center_id,
-                    "message": f"Promoted from center {subject_center_id} (Unknown) to {center_id}",
-                    "candidate_ids": candidate_ids,
-                    "matched_candidates": matches,
-                    "validation_warnings": validation_warnings,
-                }
-
-            # Normal case: link to existing GSID
-            return {
-                "action": "link_existing",
-                "gsid": gsid,
-                "match_strategy": "exact_match",
-                "confidence": 1.0,
-                "candidate_ids": candidate_ids,
-                "matched_candidates": matches,
-                "validation_warnings": validation_warnings,
-            }
-
-        # Case 3: Multiple GSIDs found - CONFLICT!
-        return {
-            "action": "review_required",
-            "gsid": None,
-            "matched_gsids": list(matched_gsids.keys()),
-            "match_strategy": "multiple_gsid_conflict",
-            "confidence": 0.5,
-            "review_reason": f"Multiple GSIDs found for candidate IDs: {', '.join([c['local_subject_id'] for c in candidate_ids])}. "
-            f"Matched GSIDs: {', '.join(matched_gsids.keys())}. This may indicate subjects that should be merged.",
-            "candidate_ids": candidate_ids,
-            "all_matches": matched_gsids,
-            "validation_warnings": validation_warnings,
+        {
+            "gsid": "GSID-XXX",
+            "action": "create_new" | "link_existing" | "conflict_resolved",
+            "identifiers_linked": int,
+            "conflicts": ["GSID-YYY", ...] or None,
+            "conflict_resolution": "used_oldest" or None
         }
-
-    except Exception as e:
-        logger.error(
-            f"Error in resolve_identity_multi_candidate: {str(e)}", exc_info=True
-        )
-        raise
-    finally:
-        cur.close()
-
-
-def resolve_identity(
-    conn, center_id: int, local_subject_id: str, identifier_type: str = "primary"
-) -> dict:
-    """
-    Core identity resolution logic - finds existing GSID regardless of identifier_type
-    The same local_subject_id for a given center should ALWAYS map to the same GSID,
-    regardless of what identifier_type it was originally registered with.
     """
     cur = conn.cursor(cursor_factory=RealDictCursor)
+
     try:
-        # First: Check if this local_subject_id exists for this center (ANY identifier_type)
-        cur.execute(
-            """
-            SELECT s.global_subject_id, s.withdrawn, l.identifier_type
-            FROM local_subject_ids l
-            JOIN subjects s ON l.global_subject_id = s.global_subject_id
-            WHERE l.center_id = %s AND l.local_subject_id = %s
-            ORDER BY l.created_at ASC
-            LIMIT 1
-            """,
-            (center_id, local_subject_id),
-        )
-        exact = cur.fetchone()
+        # Step 1: Find all existing GSIDs for these identifiers
+        matched_gsids = set()
 
-        if exact:
-            if exact["withdrawn"]:
-                return {
-                    "action": "review_required",
-                    "gsid": exact["global_subject_id"],
-                    "match_strategy": f"exact_withdrawn (original type: {exact['identifier_type']})",
-                    "confidence": 1.0,
-                    "review_reason": "Subject previously withdrawn",
-                }
-            return {
-                "action": "link_existing",
-                "gsid": exact["global_subject_id"],
-                "match_strategy": f"exact_match (type: {exact['identifier_type']})",
-                "confidence": 1.0,
-            }
-
-        # Second: Check if this is an Unknown center (center_id=1) that should be promoted
-        if center_id != 1:
+        for identifier in identifiers:
             cur.execute(
                 """
-                SELECT s.global_subject_id, s.center_id
+                SELECT s.global_subject_id, s.created_at, s.withdrawn
                 FROM local_subject_ids l
                 JOIN subjects s ON l.global_subject_id = s.global_subject_id
-                WHERE l.center_id = 1 
-                  AND l.local_subject_id = %s
-                  AND s.center_id = 1
-                ORDER BY l.created_at ASC
-                LIMIT 1
+                WHERE l.center_id = %s 
+                  AND l.local_subject_id = %s 
+                  AND l.identifier_type = %s
                 """,
-                (local_subject_id,),
+                (
+                    center_id,
+                    identifier["local_subject_id"],
+                    identifier["identifier_type"],
+                ),
             )
-            unknown_match = cur.fetchone()
+            result = cur.fetchone()
+            if result:
+                matched_gsids.add(
+                    (
+                        result["global_subject_id"],
+                        result["created_at"],
+                        result["withdrawn"],
+                    )
+                )
 
-            if unknown_match:
-                return {
-                    "action": "center_promoted",
-                    "gsid": unknown_match["global_subject_id"],
-                    "match_strategy": "center_promotion",
-                    "confidence": 1.0,
-                    "message": f"Promoting from Unknown (1) to center {center_id}",
+        # Step 2: Determine action based on matches
+        if len(matched_gsids) == 0:
+            # No matches → create new GSID
+            from services.gsid_generator import generate_gsid
+
+            gsid = generate_gsid()
+            action = "create_new"
+            conflicts = None
+            conflict_resolution = None
+
+            # Create subject record
+            cur.execute(
+                """
+                INSERT INTO subjects (
+                    global_subject_id, center_id, registration_year, 
+                    control, created_by
+                )
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (gsid, center_id, registration_year, control, created_by),
+            )
+
+            logger.info(f"Created new GSID: {gsid} for center_id={center_id}")
+
+        elif len(matched_gsids) == 1:
+            # Single match → use that GSID
+            gsid_data = list(matched_gsids)[0]
+            gsid = gsid_data[0]
+            action = "link_existing"
+            conflicts = None
+            conflict_resolution = None
+
+            logger.info(f"Linked to existing GSID: {gsid}")
+
+        else:
+            # Multiple matches → CONFLICT
+            # Sort by created_at (oldest first), then by GSID
+            sorted_gsids = sorted(matched_gsids, key=lambda x: (x[1], x[0]))
+            gsid = sorted_gsids[0][0]  # Use oldest
+            action = "conflict_resolved"
+            conflicts = [g[0] for g in sorted_gsids]
+            conflict_resolution = "used_oldest"
+
+            logger.warning(
+                f"Multi-GSID conflict detected! Found {len(conflicts)} GSIDs: {conflicts}. "
+                f"Using oldest: {gsid}"
+            )
+
+            # Flag ALL conflicting GSIDs for review
+            for gsid_data in sorted_gsids:
+                conflict_gsid = gsid_data[0]
+                cur.execute(
+                    """
+                    UPDATE subjects
+                    SET flagged_for_review = TRUE,
+                        review_notes = COALESCE(review_notes || E'\n', '') || 
+                                      'Multi-GSID conflict detected on ' || CURRENT_TIMESTAMP::TEXT ||
+                                      '. Conflicting GSIDs: ' || %s
+                    WHERE global_subject_id = %s
+                    """,
+                    (", ".join(conflicts), conflict_gsid),
+                )
+
+            logger.info(f"Flagged {len(conflicts)} GSIDs for review")
+
+        # Step 3: Link ALL identifiers to the chosen GSID
+        identifiers_linked = 0
+        for identifier in identifiers:
+            cur.execute(
+                """
+                INSERT INTO local_subject_ids (
+                    center_id, local_subject_id, identifier_type, 
+                    global_subject_id, created_by
+                )
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (center_id, local_subject_id, identifier_type) 
+                DO UPDATE SET 
+                    global_subject_id = EXCLUDED.global_subject_id,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    center_id,
+                    identifier["local_subject_id"],
+                    identifier["identifier_type"],
+                    gsid,
+                    created_by,
+                ),
+            )
+            identifiers_linked += 1
+
+        logger.info(f"Linked {identifiers_linked} identifier(s) to {gsid}")
+
+        # Step 4: Log resolution in identity_resolutions table
+        candidate_ids_json = json.dumps(
+            [
+                {
+                    "local_subject_id": i["local_subject_id"],
+                    "identifier_type": i["identifier_type"],
                 }
+                for i in identifiers
+            ]
+        )
+        matched_gsids_json = json.dumps(conflicts) if conflicts else None
 
-        # No match found - create new
-        return {
-            "action": "create_new",
-            "gsid": None,
-            "match_strategy": "no_match",
-            "confidence": 0.0,
-        }
-
-    finally:
-        cur.close()
-
-
-def log_resolution(
-    conn,
-    local_subject_id: str,
-    identifier_type: str,
-    action: str,
-    gsid: str,
-    matched_gsid: str,
-    match_strategy: str,
-    confidence: float,
-    center_id: int,
-    metadata: dict = None,
-    created_by: str = "system",
-):
-    """Log identity resolution to database"""
-    cur = conn.cursor()
-    try:
         cur.execute(
             """
             INSERT INTO identity_resolutions (
-                local_subject_id, identifier_type, action, gsid,
-                matched_gsid, match_strategy, confidence, input_center_id,
-                metadata, created_by
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """,
-            (
                 local_subject_id,
                 identifier_type,
-                action,
+                input_center_id,
                 gsid,
                 matched_gsid,
+                action,
                 match_strategy,
                 confidence,
+                candidate_ids,
+                matched_gsids,
+                requires_review,
+                review_reason,
+                created_by
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s)
+            """,
+            (
+                identifiers[0]["local_subject_id"],  # Primary identifier
+                identifiers[0]["identifier_type"],
                 center_id,
-                json.dumps(metadata) if metadata else None,
+                gsid,
+                gsid,
+                action,
+                "multiple_gsid_conflict"
+                if conflicts
+                else "exact_match"
+                if action == "link_existing"
+                else "no_match",
+                1.0 if not conflicts else 0.5,
+                candidate_ids_json,
+                matched_gsids_json,
+                conflicts is not None,
+                f"Multiple GSIDs found: {conflicts}" if conflicts else None,
                 created_by,
             ),
         )
+
+        conn.commit()
+
+        logger.info(
+            f"Resolution complete: gsid={gsid}, action={action}, "
+            f"identifiers={len(identifiers)}, conflicts={len(conflicts) if conflicts else 0}"
+        )
+
+        return {
+            "gsid": gsid,
+            "action": action,
+            "identifiers_linked": identifiers_linked,
+            "conflicts": conflicts,
+            "conflict_resolution": conflict_resolution,
+        }
+
     except Exception as e:
-        logger.error(f"Failed to log resolution: {e}")
+        conn.rollback()
+        logger.error(f"Error resolving subject: {e}", exc_info=True)
         raise
     finally:
         cur.close()
