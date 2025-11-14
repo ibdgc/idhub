@@ -5,6 +5,60 @@ from typing import List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
+class IdentifierInfo(BaseModel):
+    """Single identifier for a subject"""
+
+    local_subject_id: str
+    identifier_type: str = "primary"
+
+
+class MultiIdentifierSubjectRequest(BaseModel):
+    """Request to register a subject with multiple identifiers"""
+
+    center_id: int
+    identifiers: List[IdentifierInfo]
+    registration_year: Optional[date] = None
+    control: bool = False
+    created_by: str = "system"
+
+    @field_validator("registration_year", mode="before")
+    @classmethod
+    def validate_year(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, date):
+            return v
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return None
+            if len(v) >= 10 and "-" in v:
+                try:
+                    return date.fromisoformat(v[:10])
+                except ValueError:
+                    pass
+            try:
+                year = int(v)
+                if 1900 <= year <= 2100:
+                    return date(year, 1, 1)
+            except ValueError:
+                pass
+        raise ValueError(f"Invalid registration_year format: {v}")
+
+
+class MultiIdentifierSubjectResponse(BaseModel):
+    """Response for multi-identifier registration"""
+
+    gsid: str
+    center_id: int
+    action: str
+    identifiers_processed: List[dict]
+    conflicts: Optional[List[str]] = None
+    match_strategy: Optional[str] = None
+    confidence: Optional[float] = None
+    message: Optional[str] = None
+
+
 class CandidateID(BaseModel):
     """Single candidate identifier"""
 
@@ -168,3 +222,18 @@ class HealthResponse(BaseModel):
     status: str
     service: str
     version: str
+
+
+__all__ = [
+    "IdentifierInfo",
+    "MultiIdentifierSubjectRequest",
+    "MultiIdentifierSubjectResponse",
+    "CandidateID",
+    "SubjectRequest",
+    "MultiCandidateSubjectRequest",
+    "BatchSubjectRequest",
+    "BatchMultiCandidateRequest",
+    "SubjectResponse",
+    "MultiCandidateResponse",
+    "HealthResponse",
+]

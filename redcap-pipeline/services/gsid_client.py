@@ -148,71 +148,53 @@ class GSIDClient:
         control: bool = False,
     ) -> Dict[str, Any]:
         """
-        Register a single subject with multiple local IDs in one call
-
-        This is a convenience method that calls register_batch with multiple
-        entries for the same subject (same center, same metadata, different IDs).
-
-        Args:
-            center_id: Research center ID
-            subject_ids: List of dicts with 'local_subject_id' and 'identifier_type'
-                        e.g., [
-                            {"local_subject_id": "IBDGC001", "identifier_type": "consortium_id"},
-                            {"local_subject_id": "LOCAL-123", "identifier_type": "local_id"},
-                            {"local_subject_id": "ALIAS-ABC", "identifier_type": "alias"}
-                        ]
-            registration_year: Registration date
-            control: Control status
-
-        Returns:
-            Dict with:
-            - gsid: The resolved GSID (should be same for all IDs)
-            - results: List of individual registration results
-            - conflicts: List of any GSID conflicts detected
+        Register a single subject with multiple local IDs using the new multi-identifier endpoint
         """
         if not subject_ids:
             raise ValueError("subject_ids cannot be empty")
 
-        # Build batch request - one entry per ID
-        batch_requests = []
-        for id_info in subject_ids:
-            batch_requests.append(
-                {
-                    "center_id": center_id,
-                    "local_subject_id": id_info["local_subject_id"],
-                    "identifier_type": id_info["identifier_type"],
-                    "registration_year": registration_year.isoformat()
-                    if registration_year
-                    else None,
-                    "control": control,
-                }
+        # Format identifiers for the new endpoint
+        identifiers = [
+            {
+                "local_subject_id": id_info["local_subject_id"],
+                "identifier_type": id_info["identifier_type"],
+            }
+            for id_info in subject_ids
+        ]
+
+        payload = {
+            "center_id": center_id,
+            "identifiers": identifiers,
+            "registration_year": registration_year.isoformat()
+            if registration_year
+            else None,
+            "control": control,
+            "created_by": "redcap_pipeline",
+        }
+
+        try:
+            response = self.session.post(
+                f"{self.base_url}/register/multi-identifier", json=payload, timeout=30
+            )
+            response.raise_for_status()
+            result = response.json()
+
+            logger.info(
+                f"Multi-identifier registration: {result['gsid']} "
+                f"(action={result['action']}, identifiers={len(identifiers)})"
             )
 
-        # Register all IDs
-        results = self.register_batch(batch_requests)
+            # Check for conflicts
+            if result.get("conflicts"):
+                logger.error(f"GSID conflict detected: {result['conflicts']}")
 
-        # Check for GSID conflicts
-        gsids = set(r.get("gsid") for r in results if r.get("gsid"))
-
-        if len(gsids) > 1:
-            logger.warning(
-                f"GSID conflict detected! Multiple GSIDs returned for same subject: {gsids}"
-            )
             return {
-                "gsid": None,
-                "results": results,
-                "conflicts": list(gsids),
-                "action": "review_required",
-                "message": f"Multiple GSIDs detected: {gsids}. Manual review required.",
+                "gsid": result["gsid"],
+                "action": result["action"],
+                "conflicts": result.get("conflicts"),
+                "identifiers_processed": result.get("identifiers_processed", []),
             }
 
-        # All IDs resolved to same GSID (or all failed)
-        gsid = gsids.pop() if gsids else None
-
-        return {
-            "gsid": gsid,
-            "results": results,
-            "conflicts": [],
-            "action": results[0].get("action") if results else "error",
-            "message": f"Successfully registered {len(subject_ids)} IDs for GSID {gsid}",
-        }
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to register subject with multiple IDs: {e}")
+            raise

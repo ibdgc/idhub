@@ -428,6 +428,186 @@ async def register_batch(
     return results
 
 
+@router.post(
+    "/register/multi-identifier", response_model=MultiIdentifierSubjectResponse
+)
+async def register_subject_multi_identifier(
+    request: MultiIdentifierSubjectRequest, api_key: str = Depends(verify_api_key)
+):
+    """
+    Register a single subject with multiple identifiers
+
+    This endpoint handles the case where one subject has multiple local IDs
+    (e.g., consortium_id, local_id, alias) and ensures they all map to the
+    same GSID.
+
+    Process:
+    1. Check each identifier against existing records
+    2. If any identifier already exists, link all others to that GSID
+    3. If multiple different GSIDs are found, flag as conflict
+    4. If no matches, create new GSID and link all identifiers
+    """
+    if not request.identifiers:
+        raise HTTPException(status_code=400, detail="At least one identifier required")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        # Step 1: Check all identifiers for existing GSIDs
+        found_gsids = set()
+        identifier_resolutions = []
+
+        for identifier in request.identifiers:
+            resolution = resolve_identity(
+                conn,
+                request.center_id,
+                identifier.local_subject_id,
+                identifier.identifier_type,
+            )
+
+            identifier_resolutions.append(
+                {
+                    "local_subject_id": identifier.local_subject_id,
+                    "identifier_type": identifier.identifier_type,
+                    "resolution": resolution,
+                }
+            )
+
+            if resolution.get("gsid"):
+                found_gsids.add(resolution["gsid"])
+
+        # Step 2: Determine final action
+        if len(found_gsids) > 1:
+            # CONFLICT: Multiple different GSIDs found
+            logger.error(
+                f"GSID conflict for center {request.center_id}: "
+                f"Found {len(found_gsids)} different GSIDs: {found_gsids}"
+            )
+
+            # Use the first GSID but flag for review
+            gsid = sorted(found_gsids)[0]
+            action = "conflict_detected"
+
+            # Flag subject for review
+            cur.execute(
+                """
+                UPDATE subjects
+                SET flagged_for_review = TRUE,
+                    review_notes = %s
+                WHERE global_subject_id = %s
+                """,
+                (
+                    f"Multiple GSIDs detected during multi-identifier registration: {found_gsids}",
+                    gsid,
+                ),
+            )
+
+        elif len(found_gsids) == 1:
+            # LINK: One GSID found, link all identifiers to it
+            gsid = found_gsids.pop()
+            action = "link_existing"
+
+        else:
+            # CREATE: No existing GSID, create new one
+            gsid = generate_gsid()
+            action = "create_new"
+
+            # Insert into subjects table
+            cur.execute(
+                """
+                INSERT INTO subjects (
+                    global_subject_id, center_id, registration_year,
+                    control, created_by
+                )
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (
+                    gsid,
+                    request.center_id,
+                    request.registration_year,
+                    request.control,
+                    request.created_by,
+                ),
+            )
+
+        # Step 3: Link all identifiers to the final GSID
+        identifiers_processed = []
+
+        for identifier in request.identifiers:
+            cur.execute(
+                """
+                INSERT INTO local_subject_ids (
+                    center_id, local_subject_id, identifier_type,
+                    global_subject_id, created_by
+                )
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (center_id, local_subject_id, identifier_type) 
+                DO UPDATE SET global_subject_id = EXCLUDED.global_subject_id
+                """,
+                (
+                    request.center_id,
+                    identifier.local_subject_id,
+                    identifier.identifier_type,
+                    gsid,
+                    request.created_by,
+                ),
+            )
+
+            identifiers_processed.append(
+                {
+                    "local_subject_id": identifier.local_subject_id,
+                    "identifier_type": identifier.identifier_type,
+                    "linked_to_gsid": gsid,
+                }
+            )
+
+        # Step 4: Log the resolution
+        log_resolution(
+            conn,
+            ", ".join([i.local_subject_id for i in request.identifiers]),
+            "multi_identifier",
+            action,
+            gsid,
+            gsid,
+            "multi_identifier_registration",
+            1.0 if len(found_gsids) <= 1 else 0.5,
+            request.center_id,
+            metadata={
+                "identifier_count": len(request.identifiers),
+                "conflicts": list(found_gsids) if len(found_gsids) > 1 else None,
+            },
+            created_by=request.created_by,
+        )
+
+        conn.commit()
+
+        logger.info(
+            f"✓ Multi-identifier registration complete: {gsid} "
+            f"({len(request.identifiers)} identifiers, action={action})"
+        )
+
+        return MultiIdentifierSubjectResponse(
+            gsid=gsid,
+            center_id=request.center_id,
+            action=action,
+            identifiers_processed=identifiers_processed,
+            conflicts=list(found_gsids) if len(found_gsids) > 1 else None,
+            match_strategy="multi_identifier_registration",
+            confidence=1.0 if len(found_gsids) <= 1 else 0.5,
+            message=f"Successfully registered {len(request.identifiers)} identifiers",
+        )
+
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"✗ Error in multi-identifier registration: {e}")
+        logger.exception("Full traceback:")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+
 @router.get("/subjects/{gsid}")
 async def get_subject(gsid: str, api_key: str = Depends(verify_api_key)):
     """Get subject details by GSID"""
