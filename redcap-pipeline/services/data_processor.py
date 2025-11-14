@@ -207,6 +207,33 @@ class DataProcessor:
                 )
         return subject_ids
 
+    def resolve_center(self, record: Dict) -> int:
+        """
+        Resolve center from REDCap record.
+
+        Args:
+            record: REDCap record containing center information
+
+        Returns:
+            center_id: Integer ID of the resolved center
+        """
+        # REDCap stores center in 'redcap_data_access_group' field
+        center_name = record.get("redcap_data_access_group", "Unknown")
+
+        if not center_name or center_name == "Unknown":
+            logger.warning(
+                f"[{self.project_key}] Record {record.get('record_id')} has no center, using 'Unknown'"
+            )
+
+        # Use CenterResolver to get or create center
+        center_id = self.center_resolver.get_or_create_center(center_name)
+
+        logger.debug(
+            f"[{self.project_key}] Resolved center '{center_name}' to ID {center_id}"
+        )
+
+        return center_id
+
     def resolve_subject_ids(
         self,
         subject_ids: List[Dict[str, str]],
