@@ -11,6 +11,8 @@ from services.identity_resolution import log_resolution, resolve_identity
 from .models import (
     BatchSubjectRequest,
     HealthResponse,
+    MultiIdentifierSubjectRequest,
+    MultiIdentifierSubjectResponse,
     SubjectRequest,
     SubjectResponse,
 )
