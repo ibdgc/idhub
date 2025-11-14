@@ -241,15 +241,20 @@ class DataProcessor:
         record: Dict,
     ) -> Dict[str, Any]:
         """
-        Resolve subject IDs to a GSID using the simplified GSID client.
+        Resolve subject IDs using the new unified GSID endpoint.
 
         Args:
-            subject_ids: List of {local_subject_id, identifier_type} dicts
+            subject_ids: List of {"local_subject_id": "X", "identifier_type": "Y"}
             center_id: Research center ID
-            record: Full REDCap record (for metadata)
+            record: Full REDCap record for metadata extraction
 
         Returns:
-            Dict with gsid, action, conflicts, etc.
+            {
+                "gsid": "GSID-XXX",
+                "action": "create_new" | "link_existing" | "conflict_resolved",
+                "identifiers_linked": int,
+                "conflicts": [...] or None
+            }
         """
         if not subject_ids:
             raise ValueError("No valid subject IDs found in record")
@@ -258,8 +263,14 @@ class DataProcessor:
         registration_year = self.extract_registration_year(record)
         control = self.extract_control_status(record)
 
+        logger.info(
+            f"[{self.project_key}] Resolving {len(subject_ids)} ID(s): "
+            f"{', '.join(f'{id[\"identifier_type\"]}={id[\"local_subject_id\"]}' for id in subject_ids)} "
+            f"for center_id={center_id}"
+        )
+
         try:
-            # Call the new unified endpoint
+            # Call the unified registration endpoint
             result = self.gsid_client.register_subject_with_identifiers(
                 center_id=center_id,
                 identifiers=subject_ids,
@@ -267,10 +278,15 @@ class DataProcessor:
                 control=control,
             )
 
+            logger.info(
+                f"[{self.project_key}] Subject resolved: {result['gsid']} "
+                f"(action={result['action']}, identifiers_linked={result['identifiers_linked']})"
+            )
+
             if result.get("conflicts"):
-                logger.error(
-                    f"[{self.project_key}] GSID CONFLICT DETECTED: "
-                    f"Multiple GSIDs found: {result['conflicts']}"
+                logger.warning(
+                    f"[{self.project_key}] Conflict detected for {result['gsid']}: "
+                    f"{result['conflicts']}"
                 )
 
             return result
