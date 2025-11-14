@@ -234,7 +234,6 @@ class DataProcessor:
 
         return center_id
 
-
     def resolve_subject_ids(
         self,
         subject_ids: List[Dict[str, str]],
@@ -243,12 +242,12 @@ class DataProcessor:
     ) -> Dict[str, Any]:
         """
         Resolve subject IDs using the new unified GSID endpoint.
-        
+
         Args:
             subject_ids: List of {"local_subject_id": "X", "identifier_type": "Y"}
             center_id: Research center ID
             record: Full REDCap record for metadata extraction
-        
+
         Returns:
             {
                 "gsid": "GSID-XXX",
@@ -264,10 +263,14 @@ class DataProcessor:
         registration_year = self.extract_registration_year(record)
         control = self.extract_control_status(record)
 
+        # Format IDs for logging
+        id_list = ", ".join(
+            f"{id['identifier_type']}={id['local_subject_id']}" for id in subject_ids
+        )
+
         logger.info(
             f"[{self.project_key}] Resolving {len(subject_ids)} ID(s): "
-            f"{', '.join(f'{id[\"identifier_type\"]}={id[\"local_subject_id\"]}' for id in subject_ids)} "
-            f"for center_id={center_id}"
+            f"{id_list} for center_id={center_id}"
         )
 
         try:
