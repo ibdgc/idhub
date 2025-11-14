@@ -23,7 +23,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: prod
+          ref: ${{ github.ref_name }}
       - name: Determine environment
         id: env
         run: |
@@ -65,7 +65,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
           cache: pip
           cache-dependency-path: redcap-pipeline/requirements.txt
       - name: Install dependencies
@@ -106,8 +106,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name:
-            pipeline-logs-${{ steps.env.outputs.environment }}-${{ github.run_id
+          name: pipeline-logs-${{ steps.env.outputs.environment }}-${{ github.run_id
             }}
           path: redcap-pipeline/logs/
           retention-days: 30
