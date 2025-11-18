@@ -27,7 +27,7 @@ class REDCapPipeline:
         self.data_processor = DataProcessor(project_config)
         self.s3_uploader = S3Uploader()
 
-    def run(self, batch_size: int = 50):
+    def run(self, batch_size: int = 200):
         """Execute the full pipeline with batch processing"""
         logger.info(f"[{self.project_key}] Starting REDCap pipeline...")
 

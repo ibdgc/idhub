@@ -4,9 +4,8 @@ import logging
 import sys
 
 import boto3
-from dotenv import load_dotenv
-
 from core.config import settings
+from dotenv import load_dotenv
 from services import (
     FragmentValidator,
     GSIDClient,
@@ -68,6 +67,12 @@ def main():
     parser.add_argument("--source", required=True, help="Source system name")
     parser.add_argument(
         "--auto-approve", action="store_true", help="Auto-approve for loading"
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=20,
+        help="Number of parallel workers for GSID resolution (default: 20, max recommended: 50)",
     )
 
     args = parser.parse_args()
@@ -171,6 +176,7 @@ def main():
             mapping_config,
             args.source,
             args.auto_approve,
+            batch_size=args.batch_size,
         )
 
         if report["status"] == "FAILED":

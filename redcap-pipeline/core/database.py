@@ -33,8 +33,8 @@ def get_db_pool() -> pool.SimpleConnectionPool:
         logger.info("Initializing database connection pool...")
         try:
             db_pool = psycopg2.pool.SimpleConnectionPool(
-                1,
-                20,
+                minconn=10,
+                maxconn=50,
                 host=os.getenv("DB_HOST"),
                 database=os.getenv("DB_NAME"),
                 user=os.getenv("DB_USER"),
