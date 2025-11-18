@@ -1,4 +1,5 @@
 -- database/init-scripts/01-schema.sql
+
 -- ============================================================================
 -- CORE TABLES
 -- ============================================================================
@@ -56,7 +57,7 @@ CREATE TABLE local_subject_ids (
 );
 
 -- ============================================================================
--- IDENTITY RESOLUTIONS - Enhanced for Multi-Candidate Tracking
+-- IDENTITY RESOLUTIONS - Enhanced for Center-Agnostic Matching
 -- ============================================================================
 
 CREATE TABLE identity_resolutions (
@@ -97,6 +98,7 @@ CREATE TABLE identity_resolutions (
     CONSTRAINT valid_action CHECK (action IN (
         'create_new',
         'link_existing',
+        'conflict_resolved',  -- NEW: For multi-GSID conflicts
         'center_promoted',
         'review_required',
         'error'
@@ -104,9 +106,11 @@ CREATE TABLE identity_resolutions (
     CONSTRAINT valid_match_strategy CHECK (match_strategy IN (
         'no_match',
         'exact_match',
+        'center_agnostic_match',  -- NEW: Match on local_subject_id alone
         'exact_withdrawn',
         'center_promotion',
-        'multiple_gsid_conflict',
+        'multiple_gsid_conflict',  -- Multi-GSID conflict (same ID → different GSIDs)
+        'center_mismatch',  -- NEW: Same ID, different centers
         'cross_center_conflict',
         'validation_failed',
         'error'
@@ -246,6 +250,8 @@ CREATE INDEX idx_local_ids_lookup ON local_subject_ids(center_id, local_subject_
 CREATE INDEX idx_local_ids_type ON local_subject_ids(identifier_type);
 CREATE INDEX idx_local_ids_composite ON local_subject_ids(global_subject_id, identifier_type);
 CREATE INDEX idx_local_ids_created_by ON local_subject_ids(created_by);
+-- NEW: Center-agnostic lookup (for matching on local_subject_id alone)
+CREATE INDEX idx_local_ids_subject_only ON local_subject_ids(local_subject_id, identifier_type);
 
 -- Identity resolutions indexes
 CREATE INDEX idx_resolutions_review ON identity_resolutions(requires_review) WHERE requires_review = TRUE;
@@ -324,15 +330,47 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- NEW: Function to check for center conflicts (same ID, different centers)
+CREATE OR REPLACE FUNCTION check_center_conflicts(
+    p_local_subject_id VARCHAR,
+    p_identifier_type VARCHAR
+)
+RETURNS TABLE (
+    global_subject_id VARCHAR,
+    center_id INT,
+    center_name VARCHAR,
+    conflict_detected BOOLEAN
+) AS $$
+BEGIN
+    RETURN QUERY
+    WITH id_centers AS (
+        SELECT 
+            l.global_subject_id,
+            l.center_id,
+            c.name as center_name
+        FROM local_subject_ids l
+        JOIN centers c ON l.center_id = c.center_id
+        WHERE l.local_subject_id = p_local_subject_id
+          AND l.identifier_type = p_identifier_type
+    )
+    SELECT 
+        ic.global_subject_id,
+        ic.center_id,
+        ic.center_name,
+        COUNT(DISTINCT ic.center_id) OVER () > 1 as conflict_detected
+    FROM id_centers ic;
+END;
+$$ LANGUAGE plpgsql;
+
 -- Function to check for multi-GSID conflicts
 CREATE OR REPLACE FUNCTION check_multi_gsid_conflicts(
-    p_center_id INT,
     p_candidate_ids JSONB
 )
 RETURNS TABLE (
     local_subject_id VARCHAR,
     identifier_type VARCHAR,
     global_subject_id VARCHAR,
+    center_id INT,
     conflict_detected BOOLEAN
 ) AS $$
 BEGIN
@@ -347,11 +385,11 @@ BEGIN
         c.local_id,
         c.id_type,
         l.global_subject_id,
+        l.center_id,
         COUNT(DISTINCT l.global_subject_id) OVER () > 1 as conflict_detected
     FROM candidate_list c
     LEFT JOIN local_subject_ids l 
-        ON l.center_id = p_center_id 
-        AND l.local_subject_id = c.local_id
+        ON l.local_subject_id = c.local_id
         AND l.identifier_type = c.id_type
     WHERE l.global_subject_id IS NOT NULL;
 END;
@@ -439,6 +477,33 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- NEW: Function to find duplicate subjects (same local_subject_id across centers)
+CREATE OR REPLACE FUNCTION find_duplicate_subjects()
+RETURNS TABLE (
+    local_subject_id VARCHAR,
+    identifier_type VARCHAR,
+    gsid_count BIGINT,
+    gsids TEXT[],
+    center_ids INT[],
+    center_names TEXT[]
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        l.local_subject_id,
+        l.identifier_type,
+        COUNT(DISTINCT l.global_subject_id) as gsid_count,
+        ARRAY_AGG(DISTINCT l.global_subject_id ORDER BY l.global_subject_id) as gsids,
+        ARRAY_AGG(DISTINCT l.center_id ORDER BY l.center_id) as center_ids,
+        ARRAY_AGG(DISTINCT c.name ORDER BY c.name) as center_names
+    FROM local_subject_ids l
+    JOIN centers c ON l.center_id = c.center_id
+    GROUP BY l.local_subject_id, l.identifier_type
+    HAVING COUNT(DISTINCT l.global_subject_id) > 1
+    ORDER BY gsid_count DESC, l.local_subject_id;
+END;
+$$ LANGUAGE plpgsql;
+
 -- ============================================================================
 -- VIEWS
 -- ============================================================================
@@ -486,6 +551,25 @@ WHERE ir.match_strategy = 'multiple_gsid_conflict'
   AND jsonb_array_length(ir.matched_gsids) > 1
 ORDER BY ir.created_at DESC;
 
+-- NEW: View for center conflicts
+CREATE OR REPLACE VIEW v_center_conflicts AS
+SELECT 
+    ir.resolution_id,
+    ir.local_subject_id,
+    ir.identifier_type,
+    ir.input_center_id,
+    ir.gsid,
+    ir.review_reason,
+    ir.requires_review,
+    ir.reviewed_by,
+    ir.reviewed_at,
+    ir.created_by,
+    ir.created_at
+FROM identity_resolutions ir
+WHERE ir.match_strategy = 'center_mismatch'
+  AND ir.requires_review = TRUE
+ORDER BY ir.created_at DESC;
+
 -- View for resolution summary by center
 CREATE OR REPLACE VIEW v_resolution_summary_by_center AS
 SELECT 
@@ -524,18 +608,21 @@ COMMENT ON TABLE local_subject_ids IS 'Maps local subject IDs to global GSIDs wi
 COMMENT ON COLUMN local_subject_ids.identifier_type IS 'Type of identifier: consortium_id, local_id, alias, niddk_no, etc.';
 COMMENT ON COLUMN local_subject_ids.created_by IS 'Source system that created this mapping';
 
-COMMENT ON TABLE identity_resolutions IS 'Tracks all identity resolution decisions with multi-candidate support';
+COMMENT ON TABLE identity_resolutions IS 'Tracks all identity resolution decisions with center-agnostic matching support';
 COMMENT ON COLUMN identity_resolutions.candidate_ids IS 'JSONB array of all candidate IDs submitted for resolution';
 COMMENT ON COLUMN identity_resolutions.matched_gsids IS 'JSONB array of GSIDs matched (populated for conflicts)';
 COMMENT ON COLUMN identity_resolutions.validation_warnings IS 'JSONB array of ID validation warnings';
 
 COMMENT ON FUNCTION get_local_ids_for_gsid IS 'Returns all local IDs associated with a GSID';
+COMMENT ON FUNCTION check_center_conflicts IS 'Checks if a local_subject_id exists with different centers';
 COMMENT ON FUNCTION check_multi_gsid_conflicts IS 'Checks if candidate IDs map to multiple different GSIDs';
 COMMENT ON FUNCTION get_resolution_stats IS 'Returns resolution statistics for a date range';
 COMMENT ON FUNCTION get_subjects_with_multiple_id_types IS 'Returns subjects with multiple identifier types';
 COMMENT ON FUNCTION get_subjects_by_source IS 'Returns subjects grouped by source system';
+COMMENT ON FUNCTION find_duplicate_subjects IS 'Finds subjects with same local_subject_id linked to different GSIDs';
 
 COMMENT ON VIEW v_subjects_requiring_review IS 'Subjects flagged for review or withdrawn';
 COMMENT ON VIEW v_multi_gsid_conflicts IS 'Identity resolutions with multiple GSID conflicts';
+COMMENT ON VIEW v_center_conflicts IS 'Identity resolutions with center mismatches';
 COMMENT ON VIEW v_resolution_summary_by_center IS 'Resolution statistics grouped by center';
 COMMENT ON VIEW v_subjects_by_source IS 'Subject counts grouped by source system';
