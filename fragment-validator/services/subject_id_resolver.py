@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class SubjectIDResolver:
-    """Resolves subject IDs using GSID service with optimized parallel processing"""
+    """Resolves subject IDs using GSID service with center-agnostic matching"""
 
     def __init__(self, gsid_client: GSIDClient):
         self.gsid_client = gsid_client
@@ -22,32 +22,34 @@ class SubjectIDResolver:
         center_id_field: Optional[str] = None,
         default_center_id: int = 0,
         created_by: str = "fragment_validator",
-        batch_size: int = 20,  # REDUCED from 50 to 20
+        batch_size: int = 20,
     ) -> Dict:
         """
         Resolve subject IDs for entire dataset with parallel processing.
 
-        Uses parallel calls to /register/subject endpoint for better performance.
+        Uses the unified /register/subject endpoint which:
+        - Matches on local_subject_id ALONE (center-agnostic)
+        - Flags center conflicts for review
+        - Links all identifiers to the same GSID
 
         Args:
             data: DataFrame with subject data
             candidate_fields: List of fields that may contain subject IDs
             center_id_field: Optional field containing center_id
-            default_center_id: Default center_id if not specified
+            default_center_id: Default center_id if not specified (use 0 for unknown)
             created_by: Source identifier
-            batch_size: Number of parallel workers (default 20, max recommended 50)
+            batch_size: Number of parallel workers (default 20)
 
         Returns dict with:
             - gsids: List of resolved GSIDs (one per row)
-            - local_id_records: List of local ID records to insert
-            - summary: Statistics
+            - summary: Statistics including conflicts and warnings
         """
         logger.info(f"Resolving subject IDs with candidates: {candidate_fields}")
         logger.info(f"Total rows to process: {len(data)}")
 
         # Build registration requests
         requests_list = []
-        row_to_request_map = []  # Track which request corresponds to which row
+        row_to_request_map = []
 
         for idx, row in data.iterrows():
             # Get center_id
@@ -60,32 +62,40 @@ class SubjectIDResolver:
             else:
                 center_id = default_center_id
 
-            # Extract subject IDs from candidate fields
-            subject_ids = []
+            # Extract ALL non-null identifiers from candidate fields
+            identifiers = []
             for field in candidate_fields:
                 if field in row and pd.notna(row[field]) and str(row[field]).strip():
-                    subject_ids.append(str(row[field]).strip())
+                    local_id = str(row[field]).strip()
 
-            if not subject_ids:
-                logger.warning(f"Row {idx}: No subject IDs found in candidate fields")
+                    # Determine identifier type from field name
+                    if "consortium" in field.lower():
+                        id_type = "consortium_id"
+                    elif "niddk" in field.lower():
+                        id_type = "niddk_no"
+                    elif "knumber" in field.lower() or "k_number" in field.lower():
+                        id_type = "knumber"
+                    elif field.lower() in ["local_subject_id", "subject_id"]:
+                        id_type = "primary"
+                    else:
+                        id_type = field  # Use field name as type
+
+                    identifiers.append(
+                        {
+                            "local_subject_id": local_id,
+                            "identifier_type": id_type,
+                        }
+                    )
+
+            if not identifiers:
+                logger.warning(f"Row {idx}: No valid identifiers found")
                 continue
 
-            # Determine primary identifier type based on field name
-            primary_field = candidate_fields[0]
-            if "consortium" in primary_field.lower():
-                primary_type = "consortium_id"
-            elif "niddk" in primary_field.lower():
-                primary_type = "niddk_no"
-            else:
-                primary_type = "primary"
-
-            # Create registration request
+            # Create registration request matching API schema
             requests_list.append(
                 {
-                    "local_subject_id": subject_ids[0],
                     "center_id": center_id,
-                    "primary_type": primary_type,
-                    "alternate_ids": subject_ids[1:] if len(subject_ids) > 1 else [],
+                    "identifiers": identifiers,
                     "created_by": created_by,
                 }
             )
@@ -96,7 +106,7 @@ class SubjectIDResolver:
 
         logger.info(f"Prepared {len(requests_list)} registration requests")
 
-        # Parallel register with GSID service
+        # Call GSID service with parallel workers
         logger.info(f"Calling GSID service with {batch_size} parallel workers...")
         results = self.gsid_client.register_batch(
             requests_list, batch_size=batch_size, timeout=120
@@ -104,8 +114,10 @@ class SubjectIDResolver:
 
         # Map results back to DataFrame rows
         gsids = [None] * len(data)
-        local_id_records = []
         failed_rows = []
+        warnings_list = []
+        conflicts_count = 0
+        center_conflicts_count = 0
 
         for i, result in enumerate(results):
             if result is None:
@@ -113,32 +125,32 @@ class SubjectIDResolver:
                 continue
 
             row_idx = row_to_request_map[i]
-            gsid = result["gsid"]
-            gsids[row_idx] = gsid
+            gsids[row_idx] = result["gsid"]
 
-            # Build local_subject_ids records
-            identifiers_linked = result.get("identifiers_linked", 1)
-            for j in range(identifiers_linked):
-                local_id = (
-                    requests_list[i]["local_subject_id"]
-                    if j == 0
-                    else requests_list[i]["alternate_ids"][j - 1]
+            # Collect warnings
+            if result.get("warnings"):
+                warnings_list.extend(result["warnings"])
+                # Count center conflicts
+                center_conflicts_count += sum(
+                    1 for w in result["warnings"] if "center" in w.lower()
                 )
-                local_id_records.append(
-                    {
-                        "global_subject_id": gsid,
-                        "local_subject_id": local_id,
-                        "center_id": requests_list[i]["center_id"],
-                    }
-                )
+
+            # Count multi-GSID conflicts
+            if result.get("conflicts"):
+                conflicts_count += 1
 
         # Calculate summary statistics
+        actions = [r.get("action") for r in results if r is not None]
         summary = {
             "total_rows": len(data),
             "resolved": len([g for g in gsids if g is not None]),
             "unresolved": len([g for g in gsids if g is None]),
             "unique_gsids": len(set(g for g in gsids if g is not None)),
-            "local_id_records": len(local_id_records),
+            "created": actions.count("create_new"),
+            "linked": actions.count("link_existing"),
+            "multi_gsid_conflicts": conflicts_count,
+            "center_conflicts": center_conflicts_count,
+            "warnings": warnings_list,
             "unknown_center_used": sum(
                 1 for req in requests_list if req["center_id"] == default_center_id
             ),
@@ -151,11 +163,29 @@ class SubjectIDResolver:
             f"✓ Resolution complete: "
             f"{summary['resolved']} resolved, "
             f"{summary['unresolved']} unresolved, "
-            f"{summary['unique_gsids']} unique GSIDs"
+            f"{summary['unique_gsids']} unique GSIDs, "
+            f"{summary['created']} created, "
+            f"{summary['linked']} linked"
         )
+
+        if summary["multi_gsid_conflicts"] > 0:
+            logger.warning(
+                f"⚠ {summary['multi_gsid_conflicts']} multi-GSID conflicts detected (flagged for review)"
+            )
+
+        if summary["center_conflicts"] > 0:
+            logger.warning(
+                f"⚠ {summary['center_conflicts']} center conflicts detected (flagged for review)"
+            )
+
+        if warnings_list:
+            logger.warning(f"Warnings detected ({len(warnings_list)}):")
+            for warning in warnings_list[:10]:  # Show first 10
+                logger.warning(f"  - {warning}")
+            if len(warnings_list) > 10:
+                logger.warning(f"  ... and {len(warnings_list) - 10} more")
 
         return {
             "gsids": gsids,
-            "local_id_records": local_id_records,
             "summary": summary,
         }

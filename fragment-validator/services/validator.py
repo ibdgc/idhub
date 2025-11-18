@@ -1,12 +1,12 @@
 # fragment-validator/services/validator.py
 import logging
 from datetime import datetime
-from typing import Dict
+from pathlib import Path
+from typing import Dict, List, Optional
 
 import pandas as pd
 
 from .field_mapper import FieldMapper
-from .gsid_client import GSIDClient
 from .nocodb_client import NocoDBClient
 from .s3_client import S3Client
 from .schema_validator import SchemaValidator
@@ -47,6 +47,7 @@ class FragmentValidator:
             mapping_config: Field mapping configuration
             source_name: Source system identifier
             auto_approve: Whether to auto-approve for loading
+            batch_size: Number of parallel workers for GSID resolution
 
         Returns:
             Validation report dictionary
@@ -57,108 +58,129 @@ class FragmentValidator:
         logger.info(f"Table: {table_name}")
         logger.info(f"Source: {source_name}")
 
-        # Step 1: Load CSV with optimizations
+        # Extract config
+        field_mapping = mapping_config.get("field_mapping", {})
+        subject_id_candidates = mapping_config.get("subject_id_candidates", [])
+        center_id_field = mapping_config.get("center_id_field")
+        default_center_id = mapping_config.get("default_center_id", 0)
+        exclude_from_load = mapping_config.get("exclude_from_load", [])
+
+        if not subject_id_candidates:
+            raise ValueError(
+                "subject_id_candidates must be specified in mapping config"
+            )
+
+        # Load and parse CSV
         logger.info(f"Loading CSV file: {local_file_path}")
-        raw_data = pd.read_csv(
-            local_file_path,
-            dtype=str,  # Read all as strings initially
-            na_filter=False,  # Faster, we'll handle NaN ourselves
-            low_memory=False,
-        )
+        raw_data = pd.read_csv(local_file_path)
         logger.info(f"Loaded {len(raw_data)} rows from {local_file_path}")
 
-        # Step 2: Apply field mapping
+        # Apply field mapping (ONLY explicitly mapped fields)
         logger.info("Applying field mapping...")
         mapped_data = FieldMapper.apply_mapping(
-            raw_data,
-            mapping_config.get("field_mapping", {}),
-            mapping_config.get("subject_id_candidates", []),
-            mapping_config.get("center_id_field"),
+            raw_data=raw_data,
+            field_mapping=field_mapping,
+            subject_id_candidates=subject_id_candidates,
+            center_id_field=center_id_field,
         )
         logger.info(
             f"Mapped data: {len(mapped_data)} rows, {len(mapped_data.columns)} columns"
         )
 
-        # Step 3: Schema validation
+        # Validate schema (before adding global_subject_id)
         logger.info(f"Validating against table schema: {table_name}")
         validation_result = self.schema_validator.validate(mapped_data, table_name)
 
         if not validation_result.is_valid:
             logger.error("✗ Schema validation failed")
-            return self._build_failure_report(batch_id, validation_result)
+            for error in validation_result.errors:
+                logger.error(f"  - {error}")
+            return self._create_failed_report(
+                batch_id, table_name, validation_result.errors
+            )
+
+        if validation_result.warnings:
+            for warning in validation_result.warnings:
+                logger.warning(f"  ⚠ {warning}")
 
         logger.info("✓ Schema validation passed")
 
-        # Step 4: Subject ID resolution (OPTIMIZED)
+        # Subject ID resolution (use raw_data to access all fields)
         logger.info("Starting subject ID resolution...")
         resolution_result = self.subject_id_resolver.resolve_batch(
-            mapped_data,
-            mapping_config.get("subject_id_candidates", []),
-            mapping_config.get("center_id_field"),
-            mapping_config.get("default_center_id", 0),
+            data=raw_data,  # Use raw data so we have access to resolution fields
+            candidate_fields=subject_id_candidates,
+            center_id_field=center_id_field,
+            default_center_id=default_center_id,
             created_by=source_name,
             batch_size=batch_size,
         )
 
-        # Add GSIDs to mapped data
+        # Add resolved GSIDs to mapped_data
         mapped_data["global_subject_id"] = resolution_result["gsids"]
 
-        # Step 5: Upload to S3
-        logger.info("Uploading validated data to S3...")
+        # Remove fields marked as exclude_from_load
+        if exclude_from_load:
+            fields_to_remove = [
+                f for f in exclude_from_load if f in mapped_data.columns
+            ]
+            if fields_to_remove:
+                logger.info(f"Removing excluded fields: {fields_to_remove}")
+                mapped_data = mapped_data.drop(columns=fields_to_remove)
+
+        logger.info(
+            f"Final data: {len(mapped_data)} rows, {len(mapped_data.columns)} columns"
+        )
+        logger.info(f"Final columns: {list(mapped_data.columns)}")
+
+        # Check for missing GSIDs
+        missing_gsids = mapped_data["global_subject_id"].isna().sum()
+        if missing_gsids > 0:
+            logger.error(f"✗ {missing_gsids} rows missing global_subject_id")
+            return self._create_failed_report(
+                batch_id,
+                table_name,
+                [f"{missing_gsids} rows failed GSID resolution"],
+            )
+
+        # Upload to S3
+        logger.info("Uploading validated fragment to S3...")
         s3_key = f"staging/validated/{batch_id}/{table_name}.csv"
         self.s3_client.upload_dataframe(mapped_data, s3_key)
 
-        # Upload local_subject_ids separately
-        if resolution_result["local_id_records"]:
-            local_ids_df = pd.DataFrame(resolution_result["local_id_records"])
-            local_ids_key = f"staging/validated/{batch_id}/local_subject_ids.csv"
-            self.s3_client.upload_dataframe(local_ids_df, local_ids_key)
-            logger.info(f"Wrote {len(local_ids_df)} unique local_subject_ids records")
-
-        # Step 6: Build validation report
-        report = self._build_success_report(
-            batch_id,
-            mapped_data,
-            resolution_result,
-            s3_key,
-            auto_approve,
-        )
-
-        # Upload report to S3
-        report_key = f"staging/validated/{batch_id}/validation_report.json"
-        self.s3_client.upload_json(report, report_key)
-
-        logger.info(f"✓ Validation complete: {batch_id}")
-        return report
-
-    def _build_success_report(
-        self,
-        batch_id: str,
-        data: pd.DataFrame,
-        resolution_result: Dict,
-        s3_key: str,
-        auto_approve: bool,
-    ) -> Dict:
-        """Build success validation report"""
-        return {
+        # Create validation report
+        report = {
             "batch_id": batch_id,
+            "table_name": table_name,
+            "source": source_name,
             "status": "VALIDATED",
-            "timestamp": datetime.now().isoformat(),
-            "row_count": len(data),
-            "column_count": len(data.columns),
-            "errors": [],
-            "warnings": [],
-            "s3_location": s3_key,
-            "auto_approved": auto_approve,
+            "timestamp": datetime.utcnow().isoformat(),
+            "row_count": len(mapped_data),
+            "s3_key": s3_key,
+            "validation_errors": [],
+            "validation_warnings": validation_result.warnings,
             "resolution_summary": resolution_result["summary"],
+            "auto_approved": auto_approve,
         }
 
-    def _build_failure_report(self, batch_id: str, validation_result) -> Dict:
-        """Build failure validation report"""
+        # Upload validation report
+        report_key = f"staging/validated/{batch_id}/validation_report.json"
+        self.s3_client.upload_json(report, report_key)
+        logger.info(
+            f"Uploaded validation report to s3://{self.s3_client.bucket}/{report_key}"
+        )
+
+        logger.info("✓ Validation complete")
+        return report
+
+    def _create_failed_report(
+        self, batch_id: str, table_name: str, errors: List[str]
+    ) -> Dict:
+        """Create a failed validation report"""
         return {
             "batch_id": batch_id,
+            "table_name": table_name,
             "status": "FAILED",
-            "timestamp": datetime.now().isoformat(),
-            "errors": validation_result.errors,
-            "warnings": validation_result.warnings,
+            "timestamp": datetime.utcnow().isoformat(),
+            "validation_errors": errors,
         }
