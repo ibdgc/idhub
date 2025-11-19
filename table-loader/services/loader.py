@@ -1,130 +1,92 @@
 # table-loader/services/loader.py
 import logging
-from typing import Dict, List, Optional
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-import pandas as pd
+import psycopg2
 from core.database import get_db_connection, get_db_cursor
+from psycopg2.extras import execute_values
 
-from services.data_transformer import DataTransformer
-from services.s3_client import S3Client
+from .data_transformer import DataTransformer
+from .s3_client import S3Client
 
 logger = logging.getLogger(__name__)
 
 
 class TableLoader:
-    """Loads validated fragments from S3 into database tables"""
+    """Handles loading validated fragments into database tables"""
 
-    # Tables that use UPSERT strategy (conflict resolution)
-    UPSERT_TABLES = {
-        "local_subject_ids": ["center_id", "local_subject_id", "identifier_type"],
-        "subjects": ["global_subject_id"],
-        # Add other tables that need upsert
-    }
-
-    def __init__(self, s3_bucket: str = "idhub-curated-fragments"):
-        self.s3_client = S3Client(bucket=s3_bucket)
-
-    def load_batch(
-        self, batch_id: str, approve: bool = False, dry_run: bool = False
-    ) -> Dict:
+    def __init__(
+        self,
+        s3_bucket: str,
+        db_connection=None,
+        dry_run: bool = False,
+    ):
         """
-        Load a validated batch from S3 into database
+        Initialize table loader
 
         Args:
-            batch_id: Batch identifier (e.g., "batch_20251119_130611")
-            approve: Whether to approve and load the batch
-            dry_run: If True, analyze but don't commit changes
+            s3_bucket: S3 bucket name containing validated fragments
+            db_connection: Database connection (optional, will create if not provided)
+            dry_run: If True, analyze without making changes
+        """
+        self.s3_client = S3Client(s3_bucket)
+        self.db_connection = db_connection or get_db_connection()
+        self.dry_run = dry_run
+        self.validation_report: Dict[str, Any] = {}
+
+    def load_batch(self, batch_id: str, approve: bool = False) -> Dict[str, Any]:
+        """
+        Load all fragments from a validated batch
+
+        Args:
+            batch_id: Batch identifier
+            approve: If True, proceed with loading (required for non-dry-run)
 
         Returns:
-            Load result summary
+            Dictionary with load results
         """
         logger.info(f"Loading batch: {batch_id}")
 
         try:
-            # Download validation report
-            report = self.s3_client.download_validation_report(batch_id)
+            # Download and parse validation report
+            report_key = f"staging/validated/{batch_id}/validation_report.json"
+            self.validation_report = self.s3_client.download_json(report_key)
 
-            if report["status"] != "VALIDATED":
-                raise ValueError(
-                    f"Batch {batch_id} is not validated (status: {report['status']})"
-                )
+            # Check if batch requires approval
+            if not self.dry_run and not approve:
+                if not self.validation_report.get("auto_approved", False):
+                    raise ValueError(
+                        f"Batch {batch_id} requires manual approval (use --approve flag)"
+                    )
 
-            if not approve and not report.get("auto_approved", False):
-                raise ValueError(
-                    f"Batch {batch_id} requires manual approval (use --approve flag)"
-                )
-
-            table_name = report["table_name"]
-            logger.info(f"Loading table: {table_name}")
+            table_name = self.validation_report.get("table_name")
+            if not table_name:
+                raise ValueError("Validation report missing table_name")
 
             # Download fragment data
-            fragment_df = self.s3_client.download_fragment(batch_id, table_name)
-            logger.info(f"Downloaded {len(fragment_df)} records")
+            fragment_key = f"staging/validated/{batch_id}/{table_name}.csv"
+            records = self.s3_client.download_csv(fragment_key)
+            logger.info(f"Downloaded {len(records)} records")
 
-            # Get exclude fields from report
-            exclude_fields = set(report.get("exclude_from_load", []))
-
-            # Transform data
-            transformer = DataTransformer(table_name, exclude_fields)
-            records = transformer.transform_records(fragment_df)
-
-            if dry_run:
-                logger.info(
-                    f"DRY RUN: Would load {len(records)} records into {table_name}"
-                )
-                return {
-                    "status": "DRY_RUN",
-                    "batch_id": batch_id,
-                    "table_name": table_name,
-                    "records_loaded": 0,
-                    "inserted": 0,
-                    "updated": 0,
-                    "would_load": len(records),
-                }
-
-            # Load into database
-            load_result = self._load_records(table_name, records)
+            # Load records
+            result = self._load_records(table_name, records)
 
             # Load local_subject_ids if present
-            local_ids_result = None
-            try:
-                local_ids_df = self.s3_client.download_fragment(
-                    batch_id, "local_subject_ids"
-                )
-                if not local_ids_df.empty:
-                    logger.info(
-                        f"Loading {len(local_ids_df)} local_subject_ids records"
-                    )
-                    local_ids_transformer = DataTransformer("local_subject_ids", set())
-                    local_ids_records = local_ids_transformer.transform_records(
-                        local_ids_df
-                    )
-                    local_ids_result = self._load_records(
-                        "local_subject_ids", local_ids_records
-                    )
-            except Exception as e:
-                logger.warning(f"No local_subject_ids to load: {e}")
+            local_ids_result = self._load_local_subject_ids(batch_id)
+            if local_ids_result:
+                result["local_subject_ids"] = local_ids_result
 
             return {
-                "status": "SUCCESS",
+                "status": "success",
                 "batch_id": batch_id,
                 "table_name": table_name,
-                "records_loaded": load_result["inserted"] + load_result["updated"],
-                "inserted": load_result["inserted"],
-                "updated": load_result["updated"],
-                "local_ids_loaded": local_ids_result["inserted"]
-                + local_ids_result["updated"]
-                if local_ids_result
-                else 0,
+                "result": result,
             }
 
         except Exception as e:
-            logger.error(f"Failed to load batch {batch_id}: {e}", exc_info=True)
-            return {
-                "status": "FAILED",
-                "batch_id": batch_id,
-                "error": str(e),
-            }
+            logger.error(f"Failed to load batch {batch_id}: {e}")
+            raise
 
     def _load_records(self, table_name: str, records: List[Dict]) -> Dict[str, Any]:
         """Load records using appropriate strategy"""
@@ -148,99 +110,102 @@ class TableLoader:
                 "message": "No valid records after transformation",
             }
 
-        # Get load strategy
-        strategy = self._get_load_strategy(table_name, exclude_fields)
+        # Determine load strategy
+        strategy = self._determine_load_strategy(table_name)
+        logger.info(f"Using load strategy: {strategy} for {table_name}")
 
         # Execute load
-        return strategy.load(transformed_records)
+        if self.dry_run:
+            logger.info(
+                f"DRY RUN: Would load {len(transformed_records)} records to {table_name}"
+            )
+            return {
+                "status": "dry_run",
+                "rows_analyzed": len(transformed_records),
+                "strategy": strategy,
+            }
 
-    def _insert_records(self, table_name: str, records: List[Dict]) -> Dict:
-        """Insert records (fail on conflict)"""
-        conn = get_db_connection()
-        inserted = 0
+        return self._insert_records(table_name, transformed_records)
+
+    def _determine_load_strategy(self, table_name: str) -> str:
+        """Determine the appropriate load strategy for a table"""
+
+        # For now, use simple INSERT strategy
+        # Future: Add UPSERT, MERGE, etc. based on table configuration
+        return "INSERT"
+
+    def _insert_records(self, table_name: str, records: List[Dict]) -> Dict[str, Any]:
+        """Insert records into table"""
+
+        if not records:
+            return {"status": "skipped", "rows_loaded": 0}
+
+        # Get column names from first record
+        columns = list(records[0].keys())
+
+        # Build INSERT query
+        columns_str = ", ".join(columns)
+        placeholders = ", ".join([f"%({col})s" for col in columns])
+        query = f"INSERT INTO {table_name} ({columns_str}) VALUES ({placeholders})"
 
         try:
-            with get_db_cursor(conn) as cursor:
-                for record in records:
-                    columns = list(record.keys())
-                    values = [record[col] for col in columns]
+            with get_db_cursor(self.db_connection) as cursor:
+                # Execute batch insert
+                cursor.executemany(query, records)
+                rows_inserted = cursor.rowcount
 
-                    placeholders = ", ".join(["%s"] * len(columns))
-                    columns_str = ", ".join(columns)
+                if not self.dry_run:
+                    self.db_connection.commit()
+                    logger.info(f"Inserted {rows_inserted} rows into {table_name}")
 
-                    query = f"""
-                        INSERT INTO {table_name} ({columns_str})
-                        VALUES ({placeholders})
-                    """
+                return {
+                    "status": "success",
+                    "rows_loaded": rows_inserted,
+                    "strategy": "INSERT",
+                }
 
-                    cursor.execute(query, values)
-                    inserted += 1
-
-            conn.commit()
-            logger.info(f"✓ Inserted {inserted} records into {table_name}")
-
-        except Exception as e:
-            conn.rollback()
+        except psycopg2.Error as e:
+            self.db_connection.rollback()
             logger.error(f"Failed to insert records: {e}")
             raise
-        finally:
-            conn.close()
 
-        return {"inserted": inserted, "updated": 0}
-
-    def _upsert_records(self, table_name: str, records: List[Dict]) -> Dict:
-        """Upsert records (insert or update on conflict)"""
-        conn = get_db_connection()
-        inserted = 0
-        updated = 0
-
-        conflict_columns = self.UPSERT_TABLES[table_name]
+    def _load_local_subject_ids(self, batch_id: str) -> Optional[Dict[str, Any]]:
+        """Load local subject IDs if present in batch"""
 
         try:
-            with get_db_cursor(conn) as cursor:
-                for record in records:
-                    columns = list(record.keys())
-                    values = [record[col] for col in columns]
+            local_ids_key = f"staging/validated/{batch_id}/local_subject_ids.csv"
+            records = self.s3_client.download_csv(local_ids_key)
 
-                    placeholders = ", ".join(["%s"] * len(columns))
-                    columns_str = ", ".join(columns)
+            if not records:
+                logger.info("No local_subject_ids to load")
+                return None
 
-                    # Build UPDATE clause (exclude conflict columns)
-                    update_columns = [
-                        col for col in columns if col not in conflict_columns
-                    ]
-                    update_clause = ", ".join(
-                        [f"{col} = EXCLUDED.{col}" for col in update_columns]
-                    )
+            logger.info(f"Loading {len(records)} local subject ID mappings")
 
-                    conflict_str = ", ".join(conflict_columns)
-
-                    query = f"""
-                        INSERT INTO {table_name} ({columns_str})
-                        VALUES ({placeholders})
-                        ON CONFLICT ({conflict_str})
-                        DO UPDATE SET {update_clause}
-                        RETURNING (xmax = 0) AS inserted
-                    """
-
-                    cursor.execute(query, values)
-                    result = cursor.fetchone()
-
-                    if result and result[0]:
-                        inserted += 1
-                    else:
-                        updated += 1
-
-            conn.commit()
-            logger.info(
-                f"✓ Upserted {inserted + updated} records into {table_name} (inserted={inserted}, updated={updated})"
+            # Transform and load
+            transformer = DataTransformer(
+                table_name="local_subject_ids",
+                exclude_fields=set(),  # No exclusions for local_subject_ids
             )
+            transformed_records = transformer.transform_records(records)
+
+            if self.dry_run:
+                logger.info(
+                    f"DRY RUN: Would load {len(transformed_records)} local subject IDs"
+                )
+                return {
+                    "status": "dry_run",
+                    "rows_analyzed": len(transformed_records),
+                }
+
+            return self._insert_records("local_subject_ids", transformed_records)
 
         except Exception as e:
-            conn.rollback()
-            logger.error(f"Failed to upsert records: {e}")
-            raise
-        finally:
-            conn.close()
+            # Local subject IDs are optional, so just log warning
+            logger.warning(f"Could not load local_subject_ids: {e}")
+            return None
 
-        return {"inserted": inserted, "updated": updated}
+    def close(self):
+        """Close database connection"""
+        if self.db_connection:
+            self.db_connection.close()
