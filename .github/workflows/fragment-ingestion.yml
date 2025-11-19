@@ -53,7 +53,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        # Remove the 'ref' parameter - use default branch
       - name: Display environment info
         run: |
           echo "::notice::Target Environment: ${{ github.event.inputs.environment }}"
@@ -117,7 +116,6 @@ jobs:
             "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'fragment_resolutions');")
           if [ "$TABLE_EXISTS" = "t" ]; then
             echo "✓ fragment_resolutions table exists"
-            # Show recent resolutions for this batch if any
             echo ""
             echo "Previous load attempts for this batch:"
             psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -c \
@@ -211,6 +209,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: us-east-1
+          ENVIRONMENT: ${{ github.event.inputs.environment }}
           S3_BUCKET: ${{ github.event.inputs.environment == 'prod' && 'idhub-curated-fragments' || 'idhub-curated-fragments-qa' }}
         run: |
           echo "::group::Running table loader"
@@ -219,9 +218,15 @@ jobs:
           echo "Database: $DB_NAME"
           echo ""
           cd table-loader
-          CMD="python main.py --batch-id ${{ github.event.inputs.batch_id }}"
+
+          # Build command with required flags
+          CMD="python main.py --batch-id ${{ github.event.inputs.batch_id }} --environment ${{ github.event.inputs.environment }} --s3-bucket $S3_BUCKET"
+
+          # Add --approve flag if NOT in dry-run mode
           if [[ "${{ github.event.inputs.dry_run }}" == "false" ]]; then
             CMD="$CMD --approve"
+          else
+            CMD="$CMD --dry-run"
           fi
           echo "Executing: $CMD"
           echo ""
@@ -255,15 +260,12 @@ jobs:
           DB_NAME: ${{ secrets.DB_NAME }}
         run: |
           echo "::group::Fragment Resolution Summary"
-
-          # Check if table exists
           TABLE_EXISTS=$(psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -tAc \
             "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'fragment_resolutions');")
           if [ "$TABLE_EXISTS" = "t" ]; then
             echo "=== Load Statistics for Batch: ${{ github.event.inputs.batch_id }} ==="
             echo ""
             
-            # Overall statistics
             psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -c \
               "SELECT 
                 COUNT(*) as total_fragments,
@@ -289,7 +291,7 @@ jobs:
                 requires_review,
                 CASE WHEN requires_review THEN review_reason ELSE '' END as review_reason
                FROM fragment_resolutions 
-               WHERE batch_id = '${{ github.event.inputs.batch_id }}'
+               WHERE batch_id = '${{ github.event.inputs.batch_id }}' 
                ORDER BY created_at;"
             
             echo ""
@@ -342,7 +344,7 @@ jobs:
                   error_message,
                   created_at
                 FROM fragment_resolutions 
-                WHERE batch_id = '${{ github.event.inputs.batch_id }}'
+                WHERE batch_id = '${{ github.event.inputs.batch_id }}' 
                 ORDER BY created_at
               ) TO STDOUT WITH CSV HEADER" > table-loader/reports/fragment_resolutions_${{ github.event.inputs.batch_id }}.csv
             echo "✓ Resolution report exported"
@@ -396,8 +398,6 @@ jobs:
           echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Triggered by**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-
-          # Add resolution statistics if available
           TABLE_EXISTS=$(psql -h localhost -p 5432 -U $DB_USER -d $DB_NAME -tAc \
             "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'fragment_resolutions');" || echo "f")
           if [ "$TABLE_EXISTS" = "t" ]; then
