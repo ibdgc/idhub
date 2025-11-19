@@ -20,32 +20,55 @@ class S3Client:
         """
         if bucket is None:
             from core.config import settings
+
             bucket = settings.S3_BUCKET
 
         self.bucket = bucket
         self.s3_client = boto3.client("s3")
 
+    def download_csv(self, key: str) -> list[dict]:
+        """Download CSV file and return as list of dicts"""
+        try:
+            response = self.s3_client.get_object(Bucket=self.bucket, Key=key)
+            df = pd.read_csv(response["Body"])
+            logger.info(f"Downloaded {len(df)} rows from s3://{self.bucket}/{key}")
+            return df.to_dict("records")
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchKey":
+                logger.error(f"File not found: {key}")
+                raise FileNotFoundError(f"File not found: {key}")
+            else:
+                logger.error(f"Error downloading {key}: {e}")
+                raise
+
+    def download_json(self, key: str) -> dict:
+        """Download JSON file"""
+        try:
+            response = self.s3_client.get_object(Bucket=self.bucket, Key=key)
+            data = json.loads(response["Body"].read())
+            logger.info(f"Downloaded JSON from s3://{self.bucket}/{key}")
+            return data
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchKey":
+                logger.error(f"File not found: {key}")
+                raise FileNotFoundError(f"File not found: {key}")
+            else:
+                logger.error(f"Error downloading {key}: {e}")
+                raise
+
     def list_batch_fragments(self, batch_id: str) -> list[dict]:
         """List all table fragment files for a batch"""
         prefix = f"staging/validated/{batch_id}/"
-
         try:
-            response = self.s3_client.list_objects_v2(
-                Bucket=self.bucket, Prefix=prefix
-            )
-
+            response = self.s3_client.list_objects_v2(Bucket=self.bucket, Prefix=prefix)
             if "Contents" not in response:
                 return []
 
             # Filter out validation_report.json and only return CSV files
             fragments = [
-                obj
-                for obj in response["Contents"]
-                if obj["Key"].endswith(".csv")
+                obj for obj in response["Contents"] if obj["Key"].endswith(".csv")
             ]
-
             return fragments
-
         except ClientError as e:
             logger.error(f"Error listing batch fragments: {e}")
             raise
@@ -53,17 +76,13 @@ class S3Client:
     def download_fragment(self, batch_id: str, table_name: str) -> pd.DataFrame:
         """Download a table fragment as DataFrame"""
         key = f"staging/validated/{batch_id}/{table_name}.csv"
-
         try:
             response = self.s3_client.get_object(Bucket=self.bucket, Key=key)
             df = pd.read_csv(response["Body"])
-            logger.info(
-                f"Downloaded {len(df)} rows from s3://{self.bucket}/{key}"
-            )
+            logger.info(f"Downloaded {len(df)} rows from s3://{self.bucket}/{key}")
             return df
-
         except ClientError as e:
-            if e.response['Error']['Code'] == 'NoSuchKey':
+            if e.response["Error"]["Code"] == "NoSuchKey":
                 logger.error(f"Fragment not found: {key}")
                 raise FileNotFoundError(f"Fragment not found: {key}")
             else:
@@ -79,32 +98,12 @@ class S3Client:
     def download_validation_report(self, batch_id: str) -> dict:
         """Download validation report JSON"""
         key = f"staging/validated/{batch_id}/validation_report.json"
-
-        try:
-            response = self.s3_client.get_object(Bucket=self.bucket, Key=key)
-            report = json.loads(response["Body"].read())
-            logger.info(f"Downloaded validation report from s3://{self.bucket}/{key}")
-            return report
-
-        except ClientError as e:
-            if e.response['Error']['Code'] == 'NoSuchKey':
-                logger.error(f"Validation report not found: {key}")
-                raise FileNotFoundError(f"Validation report not found: {key}")
-            else:
-                logger.error(f"Error downloading validation report {key}: {e}")
-                raise
-        except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in validation report {key}: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Unexpected error downloading validation report {key}: {e}")
-            raise
+        return self.download_json(key)
 
     def mark_fragment_loaded(self, batch_id: str, table_name: str):
         """Move fragment to loaded/ prefix after successful load"""
         source_key = f"staging/validated/{batch_id}/{table_name}.csv"
         dest_key = f"staging/loaded/{batch_id}/{table_name}.csv"
-
         try:
             # Copy to new location
             self.s3_client.copy_object(
@@ -112,12 +111,9 @@ class S3Client:
                 CopySource={"Bucket": self.bucket, "Key": source_key},
                 Key=dest_key,
             )
-
             # Delete original
             self.s3_client.delete_object(Bucket=self.bucket, Key=source_key)
-
             logger.info(f"Moved fragment from {source_key} to {dest_key}")
-
         except ClientError as e:
             logger.error(f"Error marking fragment as loaded: {e}")
             raise
