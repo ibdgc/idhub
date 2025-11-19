@@ -1,97 +1,108 @@
 # table-loader/services/data_transformer.py
 import logging
-from typing import Any, Dict, List, Set, Tuple, Union
+from datetime import date, datetime
+from typing import Any, Dict, List, Set, Union
 
-import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 
 class DataTransformer:
-    """Transforms fragment data for database insertion"""
+    """Transforms fragment data for database loading"""
 
-    def __init__(self, table_name: str, exclude_fields: set = None):
-        self.table_name = table_name
-        self.exclude_fields = exclude_fields or set()
+    # System columns that should never be loaded
+    SYSTEM_COLUMNS = {
+        "Id",
+        "created_at",
+        "updated_at",
+        "CreatedAt",
+        "UpdatedAt",
+    }
 
-    def transform_records(
-        self, fragment: Union[pd.DataFrame, Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        """Transform fragment records for database insertion
+    # Subject identifier fields that are stored in local_subject_ids table
+    # These should NOT be loaded into data tables
+    SUBJECT_ID_FIELDS = {
+        "consortium_id",
+        "local_subject_id",
+        "niddk_no",
+        "knumber",
+        "local_id",
+        "subject_id",
+        "patient_id",
+        "record_id",  # REDCap record ID
+    }
+
+    # Metadata fields that should not be loaded
+    METADATA_FIELDS = {
+        "center_id",
+        "source",
+        "batch_id",
+    }
+
+    def __init__(self, table_name: str, exclude_fields: Set[str] = None):
+        """
+        Initialize transformer
 
         Args:
-            fragment: Either a DataFrame or a dict with 'records' key
+            table_name: Target table name
+            exclude_fields: Additional fields to exclude (from validation report)
+        """
+        self.table_name = table_name
+
+        # Build complete exclusion set
+        self.exclude_fields = set()
+        self.exclude_fields.update(self.SYSTEM_COLUMNS)
+        self.exclude_fields.update(self.METADATA_FIELDS)
+
+        # For data tables (not local_subject_ids), exclude subject ID fields
+        if table_name != "local_subject_ids":
+            self.exclude_fields.update(self.SUBJECT_ID_FIELDS)
+
+        # Add custom exclusions from validation report
+        if exclude_fields:
+            self.exclude_fields.update(exclude_fields)
+
+    def transform_records(
+        self, data: Union[pd.DataFrame, Dict]
+    ) -> List[Dict[str, Any]]:
+        """
+        Transform data for database insertion
+
+        Args:
+            data: DataFrame or dict with 'records' key
 
         Returns:
-            List of record dictionaries ready for database insertion
+            List of transformed record dictionaries
         """
-        # Handle DataFrame input
-        if isinstance(fragment, pd.DataFrame):
-            if fragment.empty:
-                logger.warning(f"No records found in fragment for {self.table_name}")
-                return []
-
-            # CRITICAL: Filter out records with invalid global_subject_id
-            if "global_subject_id" in fragment.columns:
-                original_count = len(fragment)
-
-                # Remove rows where global_subject_id is NaN, None, or empty
-                fragment = fragment[
-                    fragment["global_subject_id"].notna()
-                    & (fragment["global_subject_id"] != "")
-                    & (fragment["global_subject_id"] != "NaN")
-                    & (fragment["global_subject_id"] != "nan")
-                ]
-
-                filtered_count = original_count - len(fragment)
-                if filtered_count > 0:
-                    logger.warning(
-                        f"Filtered out {filtered_count} records with invalid global_subject_id "
-                        f"from {self.table_name} (NaN, None, or empty values)"
-                    )
-
-                if fragment.empty:
-                    logger.error(
-                        f"All records in {self.table_name} have invalid global_subject_id - "
-                        f"nothing to load"
-                    )
-                    return []
-
-            # Convert DataFrame to list of dicts
-            records = fragment.to_dict("records")
+        # Convert to DataFrame if needed
+        if isinstance(data, dict):
+            if "records" in data:
+                df = pd.DataFrame(data["records"])
+            else:
+                df = pd.DataFrame([data])
         else:
-            # Handle dict input (legacy format)
-            records = fragment.get("records", [])
-            if not records:
-                logger.warning(f"No records found in fragment for {self.table_name}")
-                return []
+            df = data
 
-        # Get the first record to determine fields
-        sample_record = records[0]
+        if df.empty:
+            logger.warning(f"No data to transform for {self.table_name}")
+            return []
 
-        # Only exclude fields that actually exist in the data
-        # This prevents excluding required fields that aren't in the source
-        fields_present = set(sample_record.keys())
-        exclude_fields_present = self.exclude_fields & fields_present
+        # Get all columns
+        all_columns = set(df.columns)
 
         # Determine which fields to keep
-        fields_to_keep = fields_present - exclude_fields_present
-
-        # Always include global_subject_id if present
-        if "global_subject_id" in sample_record:
-            fields_to_keep.add("global_subject_id")
+        fields_to_keep = all_columns - self.exclude_fields
 
         logger.info(f"Fields to load for {self.table_name}: {sorted(fields_to_keep)}")
-        if exclude_fields_present:
-            logger.info(f"Excluded resolution fields: {sorted(exclude_fields_present)}")
 
-        # Log if exclude_fields contains fields not in the data
-        exclude_fields_not_present = self.exclude_fields - fields_present
-        if exclude_fields_not_present:
-            logger.debug(
-                f"Exclude list contains fields not in data (ignored): {sorted(exclude_fields_not_present)}"
+        if self.exclude_fields & all_columns:
+            logger.info(
+                f"Excluding fields: {sorted(self.exclude_fields & all_columns)}"
             )
+
+        # Convert DataFrame to records
+        records = df.to_dict("records")
 
         # Filter records to only include fields we want to load
         transformed_records = []
@@ -119,29 +130,4 @@ class DataTransformer:
             f"Transformed {len(transformed_records)} records for {self.table_name}"
         )
 
-        if len(transformed_records) == 0 and len(records) > 0:
-            logger.error(
-                f"All {len(records)} records were filtered out due to invalid data"
-            )
-
         return transformed_records
-
-    def deduplicate(self, df: pd.DataFrame, key_columns: List[str]) -> pd.DataFrame:
-        """Remove duplicate rows based on key columns"""
-        original_count = len(df)
-        df = df.drop_duplicates(subset=key_columns, keep="first")
-        deduped_count = len(df)
-
-        if original_count > deduped_count:
-            logger.info(
-                f"Deduplicated {original_count - deduped_count} rows from {self.table_name}"
-            )
-
-        return df
-
-    def prepare_rows(self, df: pd.DataFrame) -> Tuple[List[str], List[Tuple[Any, ...]]]:
-        """Prepare DataFrame for bulk insert"""
-        columns = list(df.columns)
-        values = [tuple(row) for row in df.values]
-
-        return columns, values
