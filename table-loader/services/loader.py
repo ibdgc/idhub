@@ -126,26 +126,33 @@ class TableLoader:
                 "error": str(e),
             }
 
-    def _load_records(self, table_name: str, records: List[Dict]) -> Dict:
-        """
-        Load records into database table
+    def _load_records(self, table_name: str, records: List[Dict]) -> Dict[str, Any]:
+        """Load records using appropriate strategy"""
 
-        Args:
-            table_name: Target table name
-            records: List of record dictionaries
+        # Get exclude fields from validation report
+        exclude_fields = set(self.validation_report.get("exclude_from_load", []))
 
-        Returns:
-            {"inserted": int, "updated": int}
-        """
-        if not records:
-            logger.warning(f"No records to load for table {table_name}")
-            return {"inserted": 0, "updated": 0}
+        # Create transformer with exclude fields
+        transformer = DataTransformer(
+            table_name=table_name, exclude_fields=exclude_fields
+        )
 
-        # Determine load strategy
-        if table_name in self.UPSERT_TABLES:
-            return self._upsert_records(table_name, records)
-        else:
-            return self._insert_records(table_name, records)
+        # Transform records
+        transformed_records = transformer.transform_records(records)
+
+        if not transformed_records:
+            logger.warning(f"No records to load for {table_name}")
+            return {
+                "status": "skipped",
+                "rows_loaded": 0,
+                "message": "No valid records after transformation",
+            }
+
+        # Get load strategy
+        strategy = self._get_load_strategy(table_name, exclude_fields)
+
+        # Execute load
+        return strategy.load(transformed_records)
 
     def _insert_records(self, table_name: str, records: List[Dict]) -> Dict:
         """Insert records (fail on conflict)"""
