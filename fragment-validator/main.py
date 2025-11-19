@@ -1,6 +1,6 @@
-# fragment-validator/main.py
 import argparse
 import logging
+import os
 import sys
 
 import boto3
@@ -11,7 +11,7 @@ from services import (
     GSIDClient,
     NocoDBClient,
     S3Client,
-    SubjectIDResolver,  # Add this import
+    SubjectIDResolver,
 )
 
 # Load environment variables FIRST
@@ -42,133 +42,120 @@ def get_aws_credentials():
     try:
         session = boto3.Session()
         credentials = session.get_credentials()
-        if credentials is None:
-            raise ValueError("No AWS credentials found")
-        return credentials
+        if credentials:
+            return {
+                "aws_access_key_id": credentials.access_key,
+                "aws_secret_access_key": credentials.secret_key,
+                "aws_session_token": credentials.token,
+            }
+        return None
     except Exception as e:
-        raise ValueError(f"Failed to load AWS credentials: {e}")
+        logger.warning(f"Could not get AWS credentials from session: {e}")
+        return None
+
+
+def get_db_config():
+    """Get database configuration from environment variables"""
+    return {
+        "host": os.getenv("DB_HOST", "localhost"),
+        "database": os.getenv("DB_NAME", "idhub"),
+        "user": os.getenv("DB_USER", "idhub_user"),
+        "password": os.getenv("DB_PASSWORD", ""),
+        "port": int(os.getenv("DB_PORT", "5432")),
+    }
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Validate and stage data fragments")
+    parser = argparse.ArgumentParser(
+        description="Validate and stage data fragments for IDhub"
+    )
+    parser.add_argument("--input-file", required=True, help="Path to input CSV file")
     parser.add_argument(
-        "--environment",
-        choices=["qa", "production"],
-        default="qa",
-        help="Target environment (default: qa)",
+        "--table-name", required=True, help="Target table name (e.g., blood, dna, lcl)"
     )
     parser.add_argument(
-        "--table-name", required=True, help="Target database table name"
+        "--mapping-config",
+        required=True,
+        help="Path to field mapping JSON config file",
     )
-    parser.add_argument("--input-file", required=True, help="Local path to CSV file")
     parser.add_argument(
-        "--mapping-config", required=True, help="Path to mapping config JSON file"
+        "--source",
+        default="manual_upload",
+        help="Source identifier (default: manual_upload)",
     )
-    parser.add_argument("--source", required=True, help="Source system name")
     parser.add_argument(
-        "--auto-approve", action="store_true", help="Auto-approve for loading"
+        "--auto-approve",
+        action="store_true",
+        help="Auto-approve validation (skip manual review)",
     )
     parser.add_argument(
         "--batch-size",
         type=int,
         default=20,
-        help="Number of parallel workers for GSID resolution (default: 20, max recommended: 50)",
+        help="Batch size for parallel GSID resolution (default: 20)",
+    )
+    parser.add_argument(
+        "--no-change-detection",
+        action="store_true",
+        help="Disable change detection against current database state",
+    )
+    parser.add_argument(
+        "--env",
+        choices=["qa", "production"],
+        default="qa",
+        help="Environment (qa or production)",
     )
 
     args = parser.parse_args()
 
-    # Log environment selection
-    env_label = args.environment.upper()
-    logger.info(f"{'=' * 60}")
-    logger.info(f"Running in {env_label} environment")
-    logger.info(f"{'=' * 60}")
-
-    # Load mapping config
     try:
+        # Get environment config
+        env_config = ENV_CONFIG[args.env]
+        logger.info(f"Running in {args.env.upper()} environment")
+
+        # Load mapping configuration
+        logger.info(f"Loading mapping config from: {args.mapping_config}")
         mapping_config = settings.load_mapping_config(args.mapping_config)
-        logger.info(f"Loaded mapping config from {args.mapping_config}")
-    except FileNotFoundError:
-        logger.error(f"Mapping config file not found: {args.mapping_config}")
-        sys.exit(1)
-    except Exception as e:
-        logger.error(f"Invalid JSON in mapping config: {e}")
-        sys.exit(1)
 
-    # Get environment-specific configuration
-    env_config = ENV_CONFIG[args.environment]
-    s3_bucket = env_config["S3_BUCKET"]
-    gsid_service_url = env_config["GSID_SERVICE_URL"]
-    nocodb_url = env_config["NOCODB_URL"]
+        # Get required environment variables
+        nocodb_token = os.getenv("NOCODB_TOKEN")
+        gsid_api_key = os.getenv("GSID_API_KEY")
 
-    # Get user-provided credentials from .env
-    import os
+        if not nocodb_token:
+            raise ValueError("NOCODB_TOKEN environment variable not set")
+        if not gsid_api_key:
+            raise ValueError("GSID_API_KEY environment variable not set")
 
-    gsid_api_key = os.getenv("GSID_API_KEY")
-
-    # Get environment-specific NocoDB token
-    env_suffix = "_QA" if args.environment == "qa" else "_PROD"
-    nocodb_token = os.getenv(f"NOCODB_API_TOKEN{env_suffix}")
-    nocodb_base = os.getenv("NOCODB_BASE_ID")  # Optional
-
-    # Validate AWS credentials
-    try:
-        aws_credentials = get_aws_credentials()
-        logger.info("✓ AWS credentials loaded from CLI configuration")
-    except ValueError as e:
-        logger.error(f"✗ {e}")
-        logger.error("\nPlease configure AWS CLI credentials:")
-        logger.error("  aws configure")
-        sys.exit(1)
-
-    # Validate required environment variables
-    if not gsid_api_key:
-        logger.error("Missing required environment variable: GSID_API_KEY")
-        logger.error("Please add to .env file: GSID_API_KEY=your_key_here")
-        sys.exit(1)
-
-    if not nocodb_token:
-        logger.error(
-            f"Missing required environment variable: NOCODB_API_TOKEN{env_suffix}"
-        )
-        logger.error(
-            f"Please add to .env file: NOCODB_API_TOKEN{env_suffix}=your_token_here"
-        )
-        sys.exit(1)
-
-    # Log configuration
-    logger.info(f"Configuration:")
-    logger.info(f"  Environment: {env_label}")
-    logger.info(f"  S3 Bucket: {s3_bucket}")
-    logger.info(f"  GSID Service: {gsid_service_url}")
-    logger.info(f"  NocoDB URL: {nocodb_url}")
-    logger.info(f"  NocoDB Base ID: {nocodb_base or 'auto-detect'}")
-    logger.info(f"  GSID API Key: {'*' * 8}{gsid_api_key[-4:]}")
-    logger.info(f"  NocoDB Token: {'*' * 8}{nocodb_token[-4:]}")
-    logger.info(f"{'=' * 60}")
-
-    try:
         # Initialize clients
-        logger.info("Initializing S3 client...")
-        s3_client = S3Client(s3_bucket)
-
-        logger.info("Initializing NocoDB client...")
-        nocodb_client = NocoDBClient(nocodb_url, nocodb_token, nocodb_base)
-
-        logger.info("Initializing GSID client...")
-        gsid_client = GSIDClient(gsid_service_url, gsid_api_key)
-
-        logger.info("Initializing Subject ID Resolver...")
+        logger.info("Initializing service clients...")
+        s3_client = S3Client(bucket=env_config["S3_BUCKET"])
+        nocodb_client = NocoDBClient(url=env_config["NOCODB_URL"], token=nocodb_token)
+        gsid_client = GSIDClient(
+            service_url=env_config["GSID_SERVICE_URL"], api_key=gsid_api_key
+        )
         subject_id_resolver = SubjectIDResolver(gsid_client)
 
-        # Initialize validator with resolver
-        logger.info("Initializing validator...")
-        validator = FragmentValidator(s3_client, nocodb_client, subject_id_resolver)
+        # Get database config
+        db_config = get_db_config()
+        logger.info(
+            f"Database: {db_config['host']}:{db_config['port']}/{db_config['database']}"
+        )
+
+        # Initialize validator with DB config
+        validator = FragmentValidator(
+            s3_client=s3_client,
+            nocodb_client=nocodb_client,
+            subject_id_resolver=subject_id_resolver,
+            db_config=db_config,
+        )
 
         # Process file
+        logger.info(f"{'=' * 60}")
         logger.info(f"Processing file: {args.input_file}")
         logger.info(f"Target table: {args.table_name}")
         logger.info(f"Source: {args.source}")
         logger.info(f"Auto-approve: {args.auto_approve}")
+        logger.info(f"Change detection: {not args.no_change_detection}")
 
         report = validator.process_local_file(
             args.table_name,
@@ -177,6 +164,7 @@ def main():
             args.source,
             args.auto_approve,
             batch_size=args.batch_size,
+            detect_changes=not args.no_change_detection,
         )
 
         if report["status"] == "FAILED":
@@ -184,6 +172,32 @@ def main():
             sys.exit(1)
         else:
             logger.info("✓ Validation successful")
+
+            # Print change summary if available
+            if report.get("change_analysis", {}).get("enabled"):
+                logger.info("\n" + "=" * 60)
+                logger.info("CHANGE SUMMARY")
+                logger.info("=" * 60)
+                summary = report["change_analysis"]["summary"]
+                logger.info(f"Total incoming records: {summary['total_incoming']}")
+                logger.info(f"  New records:          {summary['new']}")
+                logger.info(f"  Updated records:      {summary['updated']}")
+                logger.info(f"  Unchanged records:    {summary['unchanged']}")
+                logger.info(f"  Orphaned records:     {summary['orphaned']}")
+
+                if report["change_analysis"].get("sample_updates"):
+                    logger.info("\nSample Updates:")
+                    for i, update in enumerate(
+                        report["change_analysis"]["sample_updates"][:5], 1
+                    ):
+                        key_str = ", ".join(
+                            f"{k}={v}" for k, v in update["natural_key"].items()
+                        )
+                        logger.info(f"  {i}. {key_str}")
+                        logger.info(
+                            f"     Fields changed: {', '.join(update['fields_changed'])}"
+                        )
+
             logger.info(f"{'=' * 60}")
             sys.exit(0)
 
@@ -193,14 +207,12 @@ def main():
         logger.error("1. Verify network connectivity to the services")
         logger.error("2. Check that API tokens are valid")
         logger.error(f"3. Confirm service URLs are accessible:")
-        logger.error(f"   - {gsid_service_url}")
-        logger.error(f"   - {nocodb_url}")
+        logger.error(f"   - GSID Service: {env_config['GSID_SERVICE_URL']}")
+        logger.error(f"   - NocoDB: {env_config['NOCODB_URL']}")
+        logger.error(f"   - S3 Bucket: {env_config['S3_BUCKET']}")
         sys.exit(1)
     except Exception as e:
-        logger.error(f"✗ Validation failed: {e}")
-        import traceback
-
-        traceback.print_exc()
+        logger.error(f"✗ Error: {e}", exc_info=True)
         sys.exit(1)
 
 

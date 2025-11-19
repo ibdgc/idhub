@@ -328,3 +328,26 @@ def temp_mapping_config(tmp_path, blood_mapping_config):
     with open(config_file, "w") as f:
         json.dump(blood_mapping_config, f)
     return config_file
+
+
+@pytest.fixture
+def mock_db_connection():
+    """Mock database connection for UpdateDetector tests"""
+    from unittest.mock import MagicMock, patch
+
+    with patch("psycopg2.connect") as mock_connect:
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+
+        # Setup cursor behavior
+        mock_cursor.fetchall.return_value = []
+        mock_cursor.description = [
+            ("global_subject_id",),
+            ("sample_id",),
+            ("volume_ml",),
+        ]
+
+        mock_conn.cursor.return_value = mock_cursor
+        mock_connect.return_value = mock_conn
+
+        yield mock_conn

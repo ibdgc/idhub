@@ -1,0 +1,41 @@
+{
+  "blood": {
+    "natural_key": ["global_subject_id", "sample_id"],
+    "immutable_fields": ["created_at", "created_by"],
+    "update_strategy": "upsert"
+  },
+  "dna": {
+    "natural_key": ["global_subject_id", "sample_id"],
+    "immutable_fields": ["created_at", "created_by"],
+    "update_strategy": "upsert"
+  },
+  "rna": {
+    "natural_key": ["global_subject_id", "sample_id"],
+    "immutable_fields": ["created_at", "created_by"],
+    "update_strategy": "upsert"
+  },
+  "lcl": {
+    "natural_key": ["global_subject_id", "niddk_no"],
+    "immutable_fields": ["created_at"],
+    "update_strategy": "upsert"
+  },
+  "specimen": {
+    "natural_key": ["sample_id"],
+    "immutable_fields": ["created_at"],
+    "update_strategy": "upsert"
+  },
+  "local_subject_ids": {
+    "natural_key": ["center_id", "local_subject_id", "identifier_type"],
+    "immutable_fields": ["created_at"],
+    "update_strategy": "upsert"
+  },
+  "subjects": {
+    "natural_key": ["global_subject_id"],
+    "immutable_fields": [
+      "global_subject_id",
+      "created_at",
+      "registration_year"
+    ],
+    "update_strategy": "update_only"
+  }
+}

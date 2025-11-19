@@ -1,9 +1,6 @@
--- database/init-scripts/01-schema.sql
-
 -- ============================================================================
 -- CORE TABLES
 -- ============================================================================
-
 CREATE TABLE centers (
     center_id SERIAL PRIMARY KEY,
     name VARCHAR NOT NULL,
@@ -44,7 +41,6 @@ CREATE TABLE subject_alias (
 -- ============================================================================
 -- LOCAL SUBJECT IDS - Multi-Candidate Support
 -- ============================================================================
-
 CREATE TABLE local_subject_ids (
     center_id INT,
     local_subject_id VARCHAR,
@@ -59,7 +55,6 @@ CREATE TABLE local_subject_ids (
 -- ============================================================================
 -- IDENTITY RESOLUTIONS - Enhanced for Center-Agnostic Matching
 -- ============================================================================
-
 CREATE TABLE identity_resolutions (
     resolution_id SERIAL PRIMARY KEY,
     
@@ -118,9 +113,22 @@ CREATE TABLE identity_resolutions (
 );
 
 -- ============================================================================
+-- DATA CHANGE AUDIT - Track all data modifications
+-- ============================================================================
+CREATE TABLE data_change_audit (
+    id SERIAL PRIMARY KEY,
+    table_name VARCHAR(100) NOT NULL,
+    record_key JSONB NOT NULL,  -- Natural key values: {"global_subject_id": "GSID-001", "sample_id": "SMP050"}
+    changes JSONB NOT NULL,      -- Field changes: {"volume_ml": {"old": 5.0, "new": 5.5}}
+    changed_by VARCHAR(255),     -- Source: "fragment_loader", "redcap_pipeline", etc.
+    changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    batch_id VARCHAR(100),       -- Link to fragment batch
+    source_fragment VARCHAR(500) -- S3 path to source file
+);
+
+-- ============================================================================
 -- SAMPLE TABLES
 -- ============================================================================
-
 CREATE TABLE specimen (
     sample_id VARCHAR PRIMARY KEY,
     global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
@@ -174,7 +182,6 @@ CREATE TABLE olink (
 -- ============================================================================
 -- RESOLUTION TRACKING TABLES
 -- ============================================================================
-
 CREATE TABLE sample_resolutions (
     resolution_id SERIAL PRIMARY KEY,
     sample_id VARCHAR NOT NULL,
@@ -236,7 +243,6 @@ CREATE TABLE fragment_resolutions (
 -- ============================================================================
 -- INDEXES
 -- ============================================================================
-
 -- Subject indexes
 CREATE INDEX idx_subjects_center ON subjects(center_id);
 CREATE INDEX idx_subjects_family ON subjects(family_id);
@@ -261,11 +267,17 @@ CREATE INDEX idx_resolutions_action ON identity_resolutions(action);
 CREATE INDEX idx_resolutions_strategy ON identity_resolutions(match_strategy);
 CREATE INDEX idx_resolutions_created ON identity_resolutions(created_at DESC);
 CREATE INDEX idx_resolutions_identifier_type ON identity_resolutions(identifier_type);
-
 -- JSONB indexes for multi-candidate queries
 CREATE INDEX idx_resolutions_candidate_ids ON identity_resolutions USING GIN (candidate_ids);
 CREATE INDEX idx_resolutions_matched_gsids ON identity_resolutions USING GIN (matched_gsids);
 CREATE INDEX idx_resolutions_validation_warnings ON identity_resolutions USING GIN (validation_warnings);
+
+-- Data change audit indexes
+CREATE INDEX idx_audit_table ON data_change_audit(table_name);
+CREATE INDEX idx_audit_time ON data_change_audit(changed_at);
+CREATE INDEX idx_audit_batch ON data_change_audit(batch_id);
+CREATE INDEX idx_audit_record_key ON data_change_audit USING GIN(record_key);
+CREATE INDEX idx_audit_changed_by ON data_change_audit(changed_by);
 
 -- Sample resolutions indexes
 CREATE INDEX idx_sample_resolutions_review ON sample_resolutions(requires_review) WHERE requires_review = TRUE;
@@ -284,7 +296,6 @@ CREATE UNIQUE INDEX idx_fragment_resolutions_unique ON fragment_resolutions(batc
 -- ============================================================================
 -- TRIGGERS
 -- ============================================================================
-
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -306,7 +317,6 @@ CREATE TRIGGER local_subject_ids_updated_at
 -- ============================================================================
 -- HELPER FUNCTIONS
 -- ============================================================================
-
 -- Function to get all local IDs for a GSID
 CREATE OR REPLACE FUNCTION get_local_ids_for_gsid(p_gsid VARCHAR)
 RETURNS TABLE (
@@ -333,8 +343,7 @@ $$ LANGUAGE plpgsql;
 -- NEW: Function to check for center conflicts (same ID, different centers)
 CREATE OR REPLACE FUNCTION check_center_conflicts(
     p_local_subject_id VARCHAR,
-    p_identifier_type VARCHAR
-)
+    p_identifier_type VARCHAR)
 RETURNS TABLE (
     global_subject_id VARCHAR,
     center_id INT,
@@ -364,8 +373,7 @@ $$ LANGUAGE plpgsql;
 
 -- Function to check for multi-GSID conflicts
 CREATE OR REPLACE FUNCTION check_multi_gsid_conflicts(
-    p_candidate_ids JSONB
-)
+    p_candidate_ids JSONB)
 RETURNS TABLE (
     local_subject_id VARCHAR,
     identifier_type VARCHAR,
@@ -398,8 +406,7 @@ $$ LANGUAGE plpgsql;
 -- Function to get resolution statistics
 CREATE OR REPLACE FUNCTION get_resolution_stats(
     p_start_date TIMESTAMP DEFAULT NULL,
-    p_end_date TIMESTAMP DEFAULT NULL
-)
+    p_end_date TIMESTAMP DEFAULT NULL)
 RETURNS TABLE (
     action VARCHAR,
     match_strategy VARCHAR,
@@ -504,10 +511,69 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- NEW: Function to query audit trail for a specific record
+CREATE OR REPLACE FUNCTION get_change_history(
+    p_table_name VARCHAR,
+    p_record_key JSONB,
+    p_limit INT DEFAULT 100)
+RETURNS TABLE (
+    id INT,
+    changes JSONB,
+    changed_by VARCHAR,
+    changed_at TIMESTAMP,
+    batch_id VARCHAR,
+    source_fragment VARCHAR
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        a.id,
+        a.changes,
+        a.changed_by,
+        a.changed_at,
+        a.batch_id,
+        a.source_fragment
+    FROM data_change_audit a
+    WHERE a.table_name = p_table_name
+      AND a.record_key = p_record_key
+    ORDER BY a.changed_at DESC
+    LIMIT p_limit;
+END;
+$$ LANGUAGE plpgsql;
+
+-- NEW: Function to get change statistics by table
+CREATE OR REPLACE FUNCTION get_change_stats_by_table(
+    p_start_date TIMESTAMP DEFAULT NULL,
+    p_end_date TIMESTAMP DEFAULT NULL)
+RETURNS TABLE (
+    table_name VARCHAR,
+    total_changes BIGINT,
+    unique_records BIGINT,
+    changed_by_sources TEXT[],
+    first_change TIMESTAMP,
+    last_change TIMESTAMP
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        a.table_name,
+        COUNT(*) as total_changes,
+        COUNT(DISTINCT a.record_key) as unique_records,
+        ARRAY_AGG(DISTINCT a.changed_by ORDER BY a.changed_by) as changed_by_sources,
+        MIN(a.changed_at) as first_change,
+        MAX(a.changed_at) as last_change
+    FROM data_change_audit a
+    WHERE 
+        (p_start_date IS NULL OR a.changed_at >= p_start_date)
+        AND (p_end_date IS NULL OR a.changed_at <= p_end_date)
+    GROUP BY a.table_name
+    ORDER BY total_changes DESC;
+END;
+$$ LANGUAGE plpgsql;
+
 -- ============================================================================
 -- VIEWS
 -- ============================================================================
-
 -- View for subjects with review flags
 CREATE OR REPLACE VIEW v_subjects_requiring_review AS
 SELECT 
@@ -597,10 +663,24 @@ FROM subjects s
 GROUP BY s.created_by
 ORDER BY subject_count DESC;
 
+-- NEW: View for recent data changes
+CREATE OR REPLACE VIEW v_recent_data_changes AS
+SELECT 
+    a.id,
+    a.table_name,
+    a.record_key,
+    a.changes,
+    a.changed_by,
+    a.changed_at,
+    a.batch_id,
+    jsonb_object_keys(a.changes) as changed_fields_count
+FROM data_change_audit a
+ORDER BY a.changed_at DESC
+LIMIT 1000;
+
 -- ============================================================================
 -- COMMENTS
 -- ============================================================================
-
 COMMENT ON TABLE subjects IS 'Core subject registry with GSID as primary key';
 COMMENT ON COLUMN subjects.created_by IS 'Source system that created this subject (e.g., redcap_pipeline, fragment_validator, manual)';
 
@@ -613,6 +693,13 @@ COMMENT ON COLUMN identity_resolutions.candidate_ids IS 'JSONB array of all cand
 COMMENT ON COLUMN identity_resolutions.matched_gsids IS 'JSONB array of GSIDs matched (populated for conflicts)';
 COMMENT ON COLUMN identity_resolutions.validation_warnings IS 'JSONB array of ID validation warnings';
 
+COMMENT ON TABLE data_change_audit IS 'Audit trail of all data modifications for reproducibility and tracking';
+COMMENT ON COLUMN data_change_audit.record_key IS 'Natural key identifying the record (e.g., {"global_subject_id": "GSID-001", "sample_id": "SMP050"})';
+COMMENT ON COLUMN data_change_audit.changes IS 'Fields that changed with old and new values (e.g., {"volume_ml": {"old": 5.0, "new": 5.5}})';
+COMMENT ON COLUMN data_change_audit.changed_by IS 'Source system that made the change (fragment_loader, redcap_pipeline, manual, etc.)';
+COMMENT ON COLUMN data_change_audit.batch_id IS 'Fragment batch ID that triggered this change';
+COMMENT ON COLUMN data_change_audit.source_fragment IS 'S3 path to the source file that contained this change';
+
 COMMENT ON FUNCTION get_local_ids_for_gsid IS 'Returns all local IDs associated with a GSID';
 COMMENT ON FUNCTION check_center_conflicts IS 'Checks if a local_subject_id exists with different centers';
 COMMENT ON FUNCTION check_multi_gsid_conflicts IS 'Checks if candidate IDs map to multiple different GSIDs';
@@ -620,9 +707,12 @@ COMMENT ON FUNCTION get_resolution_stats IS 'Returns resolution statistics for a
 COMMENT ON FUNCTION get_subjects_with_multiple_id_types IS 'Returns subjects with multiple identifier types';
 COMMENT ON FUNCTION get_subjects_by_source IS 'Returns subjects grouped by source system';
 COMMENT ON FUNCTION find_duplicate_subjects IS 'Finds subjects with same local_subject_id linked to different GSIDs';
+COMMENT ON FUNCTION get_change_history IS 'Returns change history for a specific record';
+COMMENT ON FUNCTION get_change_stats_by_table IS 'Returns change statistics grouped by table';
 
 COMMENT ON VIEW v_subjects_requiring_review IS 'Subjects flagged for review or withdrawn';
 COMMENT ON VIEW v_multi_gsid_conflicts IS 'Identity resolutions with multiple GSID conflicts';
 COMMENT ON VIEW v_center_conflicts IS 'Identity resolutions with center mismatches';
 COMMENT ON VIEW v_resolution_summary_by_center IS 'Resolution statistics grouped by center';
 COMMENT ON VIEW v_subjects_by_source IS 'Subject counts grouped by source system';
+COMMENT ON VIEW v_recent_data_changes IS 'Most recent data changes across all tables';
