@@ -1,305 +1,239 @@
 # table-loader/services/loader.py
-import json
 import logging
-from datetime import datetime
 from typing import Dict, List, Optional
 
-from core.database import get_db_connection
+import pandas as pd
+from core.database import get_db_connection, get_db_cursor
 
 from services.data_transformer import DataTransformer
-from services.fragment_resolution_service import FragmentResolutionService
-from services.load_strategies import (
-    LoadStrategy,
-    StandardLoadStrategy,
-    UniversalUpsertStrategy,
-    UpsertLoadStrategy,
-)
 from services.s3_client import S3Client
 
 logger = logging.getLogger(__name__)
 
 
-class FragmentLoader:
+class TableLoader:
     """Loads validated fragments from S3 into database tables"""
 
-    # System columns to always exclude
-    SYSTEM_COLUMNS = {
-        "Id",
-        "CreatedAt",
-        "UpdatedAt",
-        "created_at",
-        "updated_at",
-    }
-
-    # Table configurations with natural keys
-    TABLE_CONFIGS = {
-        "blood": {
-            "natural_key": ["global_subject_id", "sample_id"],
-            "strategy": "universal_upsert",
-        },
-        "dna": {
-            "natural_key": ["global_subject_id", "sample_id"],
-            "strategy": "universal_upsert",
-        },
-        "rna": {
-            "natural_key": ["global_subject_id", "sample_id"],
-            "strategy": "universal_upsert",
-        },
-        "plasma": {
-            "natural_key": ["global_subject_id", "sample_id"],
-            "strategy": "universal_upsert",
-        },
-        "serum": {
-            "natural_key": ["global_subject_id", "sample_id"],
-            "strategy": "universal_upsert",
-        },
-        "stool": {
-            "natural_key": ["global_subject_id", "sample_id"],
-            "strategy": "universal_upsert",
-        },
-        "lcl": {
-            "natural_key": ["global_subject_id", "niddk_no"],
-            "strategy": "universal_upsert",
-        },
-        "specimen": {"natural_key": ["sample_id"], "strategy": "universal_upsert"},
-        "local_subject_ids": {
-            "natural_key": ["center_id", "local_subject_id", "identifier_type"],
-            "strategy": "universal_upsert",
-        },
-        "subjects": {
-            "natural_key": ["global_subject_id"],
-            "strategy": "universal_upsert",
-        },
-    }
-
-    # Legacy UPSERT tables (backward compatibility)
-    LEGACY_UPSERT_TABLES = {
+    # Tables that use UPSERT strategy (conflict resolution)
+    UPSERT_TABLES = {
         "local_subject_ids": ["center_id", "local_subject_id", "identifier_type"],
+        "subjects": ["global_subject_id"],
+        # Add other tables that need upsert
     }
 
-    # Table-specific default exclusions
-    TABLE_DEFAULT_EXCLUSIONS = {
-        "local_subject_ids": {"action"},
-    }
-
-    def __init__(self):
-        self.s3_client = S3Client()
-        self.resolution_service = FragmentResolutionService()
-
-    def _get_load_strategy(
-        self,
-        table_name: str,
-        exclude_fields: set,
-        batch_id: str,
-        changed_by: str = "table_loader",
-    ) -> LoadStrategy:
-        """Get appropriate load strategy for table"""
-
-        # Check if table has configuration
-        if table_name in self.TABLE_CONFIGS:
-            config = self.TABLE_CONFIGS[table_name]
-
-            if config["strategy"] == "universal_upsert":
-                return UniversalUpsertStrategy(
-                    table_name=table_name,
-                    natural_key=config["natural_key"],
-                    exclude_fields=exclude_fields,
-                    changed_by=changed_by,
-                )
-
-        # Legacy upsert tables
-        if table_name in self.LEGACY_UPSERT_TABLES:
-            return UpsertLoadStrategy(
-                table_name=table_name,
-                conflict_columns=self.LEGACY_UPSERT_TABLES[table_name],
-                exclude_fields=exclude_fields,
-            )
-
-        # Default to standard insert
-        return StandardLoadStrategy(
-            table_name=table_name, exclude_fields=exclude_fields
-        )
-
-    def _extract_table_name(self, s3_key: str) -> str:
-        """Extract table name from S3 key"""
-        # Example: staging/validated/batch_20240115_120000/blood.csv -> blood
-        parts = s3_key.split("/")
-        filename = parts[-1]
-        return filename.replace(".csv", "")
-
-    def _get_exclude_fields(self, table_name: str) -> set:
-        """Get fields to exclude for a table"""
-        exclude = self.SYSTEM_COLUMNS.copy()
-
-        # Add table-specific exclusions
-        if table_name in self.TABLE_DEFAULT_EXCLUSIONS:
-            exclude.update(self.TABLE_DEFAULT_EXCLUSIONS[table_name])
-
-        return exclude
+    def __init__(self, s3_bucket: str = "idhub-curated-fragments"):
+        self.s3_client = S3Client(bucket=s3_bucket)
 
     def load_batch(
-        self, batch_id: str, preview: bool = False, changed_by: str = "table_loader"
+        self, batch_id: str, approve: bool = False, dry_run: bool = False
     ) -> Dict:
         """
-        Load all fragments for a batch
+        Load a validated batch from S3 into database
 
         Args:
-            batch_id: Batch identifier
-            preview: If True, don't commit changes
-            changed_by: Source identifier for audit log
+            batch_id: Batch identifier (e.g., "batch_20251119_130611")
+            approve: Whether to approve and load the batch
+            dry_run: If True, analyze but don't commit changes
+
+        Returns:
+            Load result summary
         """
-        logger.info(f"Loading batch: {batch_id} (preview={preview})")
-
-        # List all CSV files in batch
-        prefix = f"staging/validated/{batch_id}/"
-        fragments = self.s3_client.list_fragments(prefix)
-
-        if not fragments:
-            logger.warning(f"No fragments found for batch {batch_id}")
-            return {
-                "batch_id": batch_id,
-                "status": "no_fragments",
-                "fragments_loaded": 0,
-                "total_rows": 0,
-            }
-
-        # Filter out validation report
-        csv_fragments = [
-            f for f in fragments if f.endswith(".csv") and "validation_report" not in f
-        ]
-
-        logger.info(f"Found {len(csv_fragments)} fragments to load")
-
-        conn = get_db_connection()
-        results = []
+        logger.info(f"Loading batch: {batch_id}")
 
         try:
-            for s3_key in csv_fragments:
-                table_name = self._extract_table_name(s3_key)
-                logger.info(f"Loading fragment: {table_name} from {s3_key}")
+            # Download validation report
+            report = self.s3_client.download_validation_report(batch_id)
 
-                result = self._load_fragment(
-                    conn=conn,
-                    s3_key=s3_key,
-                    table_name=table_name,
-                    batch_id=batch_id,
-                    changed_by=changed_by,
-                )
-                results.append(result)
-
-                # Log to fragment_resolutions table
-                self.resolution_service.log_fragment_resolution(
-                    conn=conn,
-                    batch_id=batch_id,
-                    table_name=table_name,
-                    fragment_key=s3_key,
-                    load_result=result,
+            if report["status"] != "VALIDATED":
+                raise ValueError(
+                    f"Batch {batch_id} is not validated (status: {report['status']})"
                 )
 
-            if preview:
-                logger.info("Preview mode: Rolling back transaction")
-                conn.rollback()
-            else:
-                logger.info("Committing transaction")
-                conn.commit()
+            if not approve and not report.get("auto_approved", False):
+                raise ValueError(
+                    f"Batch {batch_id} requires manual approval (use --approve flag)"
+                )
 
-            summary = self._build_summary(batch_id, results, preview)
-            logger.info(f"Batch load complete: {summary}")
+            table_name = report["table_name"]
+            logger.info(f"Loading table: {table_name}")
 
-            return summary
+            # Download fragment data
+            fragment_df = self.s3_client.download_fragment(batch_id, table_name)
+            logger.info(f"Downloaded {len(fragment_df)} records")
+
+            # Get exclude fields from report
+            exclude_fields = set(report.get("exclude_from_load", []))
+
+            # Transform data
+            transformer = DataTransformer(table_name, exclude_fields)
+            records = transformer.transform_records(fragment_df)
+
+            if dry_run:
+                logger.info(
+                    f"DRY RUN: Would load {len(records)} records into {table_name}"
+                )
+                return {
+                    "status": "DRY_RUN",
+                    "batch_id": batch_id,
+                    "table_name": table_name,
+                    "records_loaded": 0,
+                    "inserted": 0,
+                    "updated": 0,
+                    "would_load": len(records),
+                }
+
+            # Load into database
+            load_result = self._load_records(table_name, records)
+
+            # Load local_subject_ids if present
+            local_ids_result = None
+            try:
+                local_ids_df = self.s3_client.download_fragment(
+                    batch_id, "local_subject_ids"
+                )
+                if not local_ids_df.empty:
+                    logger.info(
+                        f"Loading {len(local_ids_df)} local_subject_ids records"
+                    )
+                    local_ids_transformer = DataTransformer("local_subject_ids", set())
+                    local_ids_records = local_ids_transformer.transform_records(
+                        local_ids_df
+                    )
+                    local_ids_result = self._load_records(
+                        "local_subject_ids", local_ids_records
+                    )
+            except Exception as e:
+                logger.warning(f"No local_subject_ids to load: {e}")
+
+            return {
+                "status": "SUCCESS",
+                "batch_id": batch_id,
+                "table_name": table_name,
+                "records_loaded": load_result["inserted"] + load_result["updated"],
+                "inserted": load_result["inserted"],
+                "updated": load_result["updated"],
+                "local_ids_loaded": local_ids_result["inserted"]
+                + local_ids_result["updated"]
+                if local_ids_result
+                else 0,
+            }
 
         except Exception as e:
-            logger.error(f"Batch load failed: {e}", exc_info=True)
+            logger.error(f"Failed to load batch {batch_id}: {e}", exc_info=True)
+            return {
+                "status": "FAILED",
+                "batch_id": batch_id,
+                "error": str(e),
+            }
+
+    def _load_records(self, table_name: str, records: List[Dict]) -> Dict:
+        """
+        Load records into database table
+
+        Args:
+            table_name: Target table name
+            records: List of record dictionaries
+
+        Returns:
+            {"inserted": int, "updated": int}
+        """
+        if not records:
+            logger.warning(f"No records to load for table {table_name}")
+            return {"inserted": 0, "updated": 0}
+
+        # Determine load strategy
+        if table_name in self.UPSERT_TABLES:
+            return self._upsert_records(table_name, records)
+        else:
+            return self._insert_records(table_name, records)
+
+    def _insert_records(self, table_name: str, records: List[Dict]) -> Dict:
+        """Insert records (fail on conflict)"""
+        conn = get_db_connection()
+        inserted = 0
+
+        try:
+            with get_db_cursor(conn) as cursor:
+                for record in records:
+                    columns = list(record.keys())
+                    values = [record[col] for col in columns]
+
+                    placeholders = ", ".join(["%s"] * len(columns))
+                    columns_str = ", ".join(columns)
+
+                    query = f"""
+                        INSERT INTO {table_name} ({columns_str})
+                        VALUES ({placeholders})
+                    """
+
+                    cursor.execute(query, values)
+                    inserted += 1
+
+            conn.commit()
+            logger.info(f"✓ Inserted {inserted} records into {table_name}")
+
+        except Exception as e:
             conn.rollback()
+            logger.error(f"Failed to insert records: {e}")
             raise
         finally:
             conn.close()
 
-    def _load_fragment(
-        self,
-        conn,
-        s3_key: str,
-        table_name: str,
-        batch_id: str,
-        changed_by: str,
-    ) -> Dict:
-        """Load a single fragment"""
-        start_time = datetime.now()
+        return {"inserted": inserted, "updated": 0}
+
+    def _upsert_records(self, table_name: str, records: List[Dict]) -> Dict:
+        """Upsert records (insert or update on conflict)"""
+        conn = get_db_connection()
+        inserted = 0
+        updated = 0
+
+        conflict_columns = self.UPSERT_TABLES[table_name]
 
         try:
-            # Download fragment
-            df = self.s3_client.download_dataframe(s3_key)
-            logger.info(f"Downloaded {len(df)} rows from {s3_key}")
+            with get_db_cursor(conn) as cursor:
+                for record in records:
+                    columns = list(record.keys())
+                    values = [record[col] for col in columns]
 
-            # Transform data
-            exclude_fields = self._get_exclude_fields(table_name)
-            transformer = DataTransformer(
-                table_name=table_name, exclude_fields=exclude_fields
+                    placeholders = ", ".join(["%s"] * len(columns))
+                    columns_str = ", ".join(columns)
+
+                    # Build UPDATE clause (exclude conflict columns)
+                    update_columns = [
+                        col for col in columns if col not in conflict_columns
+                    ]
+                    update_clause = ", ".join(
+                        [f"{col} = EXCLUDED.{col}" for col in update_columns]
+                    )
+
+                    conflict_str = ", ".join(conflict_columns)
+
+                    query = f"""
+                        INSERT INTO {table_name} ({columns_str})
+                        VALUES ({placeholders})
+                        ON CONFLICT ({conflict_str})
+                        DO UPDATE SET {update_clause}
+                        RETURNING (xmax = 0) AS inserted
+                    """
+
+                    cursor.execute(query, values)
+                    result = cursor.fetchone()
+
+                    if result and result[0]:
+                        inserted += 1
+                    else:
+                        updated += 1
+
+            conn.commit()
+            logger.info(
+                f"✓ Upserted {inserted + updated} records into {table_name} (inserted={inserted}, updated={updated})"
             )
-            records = transformer.transform_records(df)
-
-            # Get load strategy
-            strategy = self._get_load_strategy(
-                table_name, exclude_fields, batch_id, changed_by
-            )
-
-            # Load records
-            load_result = strategy.load(conn, records, batch_id, s3_key)
-
-            execution_time = int((datetime.now() - start_time).total_seconds() * 1000)
-
-            return {
-                "table_name": table_name,
-                "fragment_key": s3_key,
-                "load_status": "success"
-                if load_result["rows_failed"] == 0
-                else "partial",
-                "load_strategy": strategy.__class__.__name__,
-                "rows_attempted": load_result["rows_attempted"],
-                "rows_loaded": load_result["rows_loaded"],
-                "rows_failed": load_result["rows_failed"],
-                "rows_inserted": load_result.get("rows_inserted", 0),
-                "rows_updated": load_result.get("rows_updated", 0),
-                "rows_unchanged": load_result.get("rows_unchanged", 0),
-                "execution_time_ms": execution_time,
-                "errors": load_result.get("errors", []),
-            }
 
         except Exception as e:
-            logger.error(f"Failed to load fragment {s3_key}: {e}", exc_info=True)
-            execution_time = int((datetime.now() - start_time).total_seconds() * 1000)
+            conn.rollback()
+            logger.error(f"Failed to upsert records: {e}")
+            raise
+        finally:
+            conn.close()
 
-            return {
-                "table_name": table_name,
-                "fragment_key": s3_key,
-                "load_status": "failed",
-                "load_strategy": "unknown",
-                "rows_attempted": 0,
-                "rows_loaded": 0,
-                "rows_failed": 0,
-                "execution_time_ms": execution_time,
-                "errors": [str(e)],
-            }
-
-    def _build_summary(self, batch_id: str, results: List[Dict], preview: bool) -> Dict:
-        """Build summary of batch load"""
-        total_rows = sum(r["rows_loaded"] for r in results)
-        total_inserted = sum(r.get("rows_inserted", 0) for r in results)
-        total_updated = sum(r.get("rows_updated", 0) for r in results)
-        total_unchanged = sum(r.get("rows_unchanged", 0) for r in results)
-        failed_fragments = [r for r in results if r["load_status"] == "failed"]
-
-        return {
-            "batch_id": batch_id,
-            "status": "preview"
-            if preview
-            else ("success" if not failed_fragments else "partial"),
-            "preview_mode": preview,
-            "fragments_loaded": len(results),
-            "fragments_failed": len(failed_fragments),
-            "total_rows_loaded": total_rows,
-            "total_rows_inserted": total_inserted,
-            "total_rows_updated": total_updated,
-            "total_rows_unchanged": total_unchanged,
-            "fragments": results,
-        }
+        return {"inserted": inserted, "updated": updated}

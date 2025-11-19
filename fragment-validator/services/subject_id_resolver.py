@@ -26,7 +26,6 @@ class SubjectIDResolver:
     ) -> Dict:
         """
         Resolve subject IDs for entire dataset with parallel processing.
-
         Uses the unified /register/subject endpoint which:
         - Matches on local_subject_id ALONE (center-agnostic)
         - Flags center conflicts for review
@@ -42,6 +41,7 @@ class SubjectIDResolver:
 
         Returns dict with:
             - gsids: List of resolved GSIDs (one per row)
+            - local_id_records: List of local_subject_id records for bulk insert
             - summary: Statistics including conflicts and warnings
         """
         logger.info(f"Resolving subject IDs with candidates: {candidate_fields}")
@@ -119,13 +119,43 @@ class SubjectIDResolver:
         conflicts_count = 0
         center_conflicts_count = 0
 
+        # Build local_id_records for bulk insert
+        local_id_records = []
+        seen_local_ids = (
+            set()
+        )  # Track unique (gsid, local_id, type, center) combinations
+
         for i, result in enumerate(results):
             if result is None:
                 failed_rows.append(row_to_request_map[i])
                 continue
 
             row_idx = row_to_request_map[i]
-            gsids[row_idx] = result["gsid"]
+            gsid = result["gsid"]
+            gsids[row_idx] = gsid
+
+            # Extract local_subject_id records from the request and result
+            request = requests_list[i]
+            center_id = request["center_id"]
+
+            for identifier in request["identifiers"]:
+                local_id = identifier["local_subject_id"]
+                id_type = identifier["identifier_type"]
+
+                # Create unique key to avoid duplicates
+                unique_key = (gsid, local_id, id_type, center_id)
+
+                if unique_key not in seen_local_ids:
+                    seen_local_ids.add(unique_key)
+                    local_id_records.append(
+                        {
+                            "global_subject_id": gsid,
+                            "local_subject_id": local_id,
+                            "identifier_type": id_type,
+                            "center_id": center_id,
+                            "source": created_by,
+                        }
+                    )
 
             # Collect warnings
             if result.get("warnings"):
@@ -185,7 +215,10 @@ class SubjectIDResolver:
             if len(warnings_list) > 10:
                 logger.warning(f"  ... and {len(warnings_list) - 10} more")
 
+        logger.info(f"Built {len(local_id_records)} unique local_subject_id records")
+
         return {
             "gsids": gsids,
+            "local_id_records": local_id_records,
             "summary": summary,
         }

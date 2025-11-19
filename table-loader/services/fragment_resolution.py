@@ -1,175 +1,187 @@
 # table-loader/services/fragment_resolution.py
-import json
 import logging
-from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
+import pandas as pd
 from core.database import db_manager
 
 logger = logging.getLogger(__name__)
 
 
 class FragmentResolutionService:
-    """Tracks fragment load operations and their outcomes"""
+    """
+    Analyzes changes between incoming fragments and current database state
+    """
 
-    def create_resolution(
+    def __init__(self):
+        self.db_manager = db_manager
+
+    def analyze_changes(
         self,
-        batch_id: str,
         table_name: str,
-        fragment_key: str,
-        load_status: str,
-        load_strategy: str,
-        rows_attempted: int,
-        rows_loaded: int,
-        rows_failed: int,
-        execution_time_ms: Optional[int] = None,
-        error_message: Optional[str] = None,
-        requires_review: bool = False,
-        review_reason: Optional[str] = None,
-        metadata: Optional[Dict] = None,
-    ) -> int:
-        """Create a fragment resolution record
+        incoming_data: pd.DataFrame,
+        natural_key: List[str],
+    ) -> Dict:
+        """
+        Compare incoming data with current database state
 
         Args:
-            batch_id: Batch identifier
             table_name: Target table name
-            fragment_key: S3 key of the fragment
-            load_status: Status of the load (success, failed, skipped, preview)
-            load_strategy: Strategy used (standard_insert, upsert)
-            rows_attempted: Number of rows attempted to load
-            rows_loaded: Number of rows successfully loaded
-            rows_failed: Number of rows that failed
-            execution_time_ms: Execution time in milliseconds
-            error_message: Error message if failed
-            requires_review: Whether manual review is needed
-            review_reason: Reason for review requirement
-            metadata: Additional metadata as dict
+            incoming_data: DataFrame with new data
+            natural_key: List of columns that form natural key
 
         Returns:
-            resolution_id of created record
+            Dictionary with change analysis:
+            {
+                "new_records": [...],
+                "updates": [...],
+                "unchanged": [...],
+                "orphaned": [...],
+                "summary": {...}
+            }
         """
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cur:
-                # Convert metadata dict to JSON string
-                metadata_json = json.dumps(metadata) if metadata else None
+        logger.info(
+            f"Analyzing changes for table '{table_name}' with natural key {natural_key}"
+        )
 
-                cur.execute(
-                    """
-                    INSERT INTO fragment_resolutions (
-                        batch_id, table_name, fragment_key, load_status, load_strategy,
-                        rows_attempted, rows_loaded, rows_failed, execution_time_ms,
-                        error_message, requires_review, review_reason, metadata, created_at
-                    )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-                    RETURNING resolution_id
-                    """,
-                    (
-                        batch_id,
-                        table_name,
-                        fragment_key,
-                        load_status,
-                        load_strategy,
-                        rows_attempted,
-                        rows_loaded,
-                        rows_failed,
-                        execution_time_ms,
-                        error_message,
-                        requires_review,
-                        review_reason,
-                        metadata_json,  # Use JSON string instead of dict
-                    ),
-                )
-                result = cur.fetchone()
-                conn.commit()
-                return result[0]
+        try:
+            # Fetch current data from database
+            current_data = self._fetch_current_data(table_name)
 
-    def mark_reviewed(
-        self,
-        resolution_id: int,
-        reviewed_by: str,
-        resolution_notes: Optional[str] = None,
-    ):
-        """Mark a fragment resolution as reviewed"""
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE fragment_resolutions
-                    SET reviewed_by = %s,
-                        reviewed_at = NOW(),
-                        resolution_notes = %s,
-                        requires_review = FALSE
-                    WHERE resolution_id = %s
-                    """,
-                    (reviewed_by, resolution_notes, resolution_id),
-                )
-                conn.commit()
+            if current_data.empty:
+                logger.info(f"No existing data in '{table_name}' - all records are new")
+                return {
+                    "new_records": incoming_data.to_dict("records"),
+                    "updates": [],
+                    "unchanged": [],
+                    "orphaned": [],
+                    "summary": {
+                        "total_incoming": len(incoming_data),
+                        "new": len(incoming_data),
+                        "updated": 0,
+                        "unchanged": 0,
+                        "orphaned": 0,
+                    },
+                }
 
-    def get_pending_reviews(self, batch_id: Optional[str] = None) -> list:
-        """Get fragment resolutions requiring review"""
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cur:
-                if batch_id:
-                    cur.execute(
-                        """
-                        SELECT resolution_id, batch_id, table_name, fragment_key,
-                               load_status, review_reason, created_at
-                        FROM fragment_resolutions
-                        WHERE requires_review = TRUE AND batch_id = %s
-                        ORDER BY created_at DESC
-                        """,
-                        (batch_id,),
-                    )
+            # Perform comparison
+            new_records = []
+            updates = []
+            unchanged = []
+
+            # Create lookup index for current data
+            current_index = self._create_index(current_data, natural_key)
+            incoming_index = self._create_index(incoming_data, natural_key)
+
+            # Check each incoming record
+            for idx, row in incoming_data.iterrows():
+                key = tuple(row[col] for col in natural_key)
+
+                if key not in current_index:
+                    # New record
+                    new_records.append(row.to_dict())
                 else:
-                    cur.execute(
-                        """
-                        SELECT resolution_id, batch_id, table_name, fragment_key,
-                               load_status, review_reason, created_at
-                        FROM fragment_resolutions
-                        WHERE requires_review = TRUE
-                        ORDER BY created_at DESC
-                        """
-                    )
-                return cur.fetchall()
+                    # Existing record - check for changes
+                    current_row = current_data.iloc[current_index[key]]
+                    changes = self._detect_changes(row, current_row)
 
-    def get_load_statistics(self, batch_id: str) -> Dict:
-        """Get load statistics for a batch"""
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT 
-                        COUNT(*) as total_fragments,
-                        SUM(rows_attempted) as total_rows_attempted,
-                        SUM(rows_loaded) as total_rows_loaded,
-                        SUM(rows_failed) as total_rows_failed,
-                        SUM(CASE WHEN load_status = 'success' THEN 1 ELSE 0 END) as successful_loads,
-                        SUM(CASE WHEN load_status = 'failed' THEN 1 ELSE 0 END) as failed_loads,
-                        SUM(CASE WHEN requires_review THEN 1 ELSE 0 END) as pending_reviews
-                    FROM fragment_resolutions
-                    WHERE batch_id = %s
-                    """,
-                    (batch_id,),
-                )
-                row = cur.fetchone()
+                    if changes:
+                        updates.append(
+                            {
+                                "natural_key": dict(zip(natural_key, key)),
+                                "changes": changes,
+                            }
+                        )
+                    else:
+                        unchanged.append(dict(zip(natural_key, key)))
 
-                if row:
-                    return {
-                        "total_fragments": row[0] or 0,
-                        "total_rows_attempted": row[1] or 0,
-                        "total_rows_loaded": row[2] or 0,
-                        "total_rows_failed": row[3] or 0,
-                        "successful_loads": row[4] or 0,
-                        "failed_loads": row[5] or 0,
-                        "pending_reviews": row[6] or 0,
-                    }
-                else:
-                    return {
-                        "total_fragments": 0,
-                        "total_rows_attempted": 0,
-                        "total_rows_loaded": 0,
-                        "total_rows_failed": 0,
-                        "successful_loads": 0,
-                        "failed_loads": 0,
-                        "pending_reviews": 0,
-                    }
+            # Find orphaned records (in DB but not in incoming)
+            orphaned = []
+            for key in current_index:
+                if key not in incoming_index:
+                    orphaned.append(dict(zip(natural_key, key)))
+
+            summary = {
+                "total_incoming": len(incoming_data),
+                "new": len(new_records),
+                "updated": len(updates),
+                "unchanged": len(unchanged),
+                "orphaned": len(orphaned),
+            }
+
+            logger.info(
+                f"Change detection complete: "
+                f"{summary['new']} new, "
+                f"{summary['updated']} updated, "
+                f"{summary['unchanged']} unchanged"
+            )
+
+            return {
+                "new_records": new_records,
+                "updates": updates,
+                "unchanged": unchanged,
+                "orphaned": orphaned,
+                "summary": summary,
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to analyze changes: {e}", exc_info=True)
+            raise
+
+    def _fetch_current_data(self, table_name: str) -> pd.DataFrame:
+        """Fetch current data from database table"""
+        try:
+            query = f"SELECT * FROM {table_name}"
+
+            with self.db_manager.get_cursor() as cursor:
+                cursor.execute(query)
+                results = cursor.fetchall()
+
+            if not results:
+                return pd.DataFrame()
+
+            # Convert to DataFrame
+            df = pd.DataFrame(results)
+            logger.info(f"Fetched {len(df)} existing records from '{table_name}'")
+            return df
+
+        except Exception as e:
+            logger.error(f"Database error fetching current data: {e}")
+            # Return empty DataFrame on error (treat as no existing data)
+            return pd.DataFrame()
+
+    def _create_index(self, df: pd.DataFrame, key_columns: List[str]) -> Dict:
+        """Create lookup index from DataFrame using natural key"""
+        index = {}
+        for idx, row in df.iterrows():
+            key = tuple(row[col] for col in key_columns)
+            index[key] = idx
+        return index
+
+    def _detect_changes(self, new_row: pd.Series, current_row: pd.Series) -> Dict:
+        """
+        Detect changes between two rows
+
+        Returns:
+            Dictionary of changed fields: {field: {"old": value, "new": value}}
+        """
+        changes = {}
+
+        for col in new_row.index:
+            if col not in current_row.index:
+                continue
+
+            new_val = new_row[col]
+            current_val = current_row[col]
+
+            # Handle NaN/None comparison
+            if pd.isna(new_val) and pd.isna(current_val):
+                continue
+
+            if new_val != current_val:
+                changes[col] = {
+                    "old": current_val,
+                    "new": new_val,
+                }
+
+        return changes

@@ -20,18 +20,17 @@ class FieldMapper:
         """
         Apply field mapping from source to target fields.
 
-        Only maps explicitly defined fields in field_mapping.
-        Resolution fields (subject_id_candidates, center_id) should be
-        handled separately and excluded via exclude_from_load config.
+        Auto-includes subject_id_candidates and center_id_field for resolution,
+        even if not in field_mapping (they'll be excluded later via exclude_from_load).
 
         Args:
             raw_data: Source DataFrame
             field_mapping: Dict mapping target_field -> source_field
-            subject_id_candidates: List of subject ID fields (for logging only)
-            center_id_field: Center ID field name (for logging only)
+            subject_id_candidates: List of subject ID fields (auto-included)
+            center_id_field: Center ID field name (auto-included if present)
 
         Returns:
-            Mapped DataFrame with only explicitly mapped fields
+            Mapped DataFrame with explicitly mapped fields + resolution fields
         """
         mapped_data = pd.DataFrame()
 
@@ -46,6 +45,30 @@ class FieldMapper:
                     f"(target: {target_field})"
                 )
 
+        # Auto-include subject ID candidate fields (needed for resolution)
+        for candidate_field in subject_id_candidates:
+            if candidate_field in raw_data.columns:
+                # Only add if not already mapped
+                if candidate_field not in mapped_data.columns:
+                    mapped_data[candidate_field] = raw_data[candidate_field]
+                    logger.debug(
+                        f"Auto-included subject ID candidate: {candidate_field}"
+                    )
+            else:
+                logger.warning(
+                    f"Subject ID candidate '{candidate_field}' not found in source data"
+                )
+
+        # Auto-include center_id field if specified
+        if center_id_field and center_id_field in raw_data.columns:
+            if center_id_field not in mapped_data.columns:
+                mapped_data[center_id_field] = raw_data[center_id_field]
+                logger.debug(f"Auto-included center_id field: {center_id_field}")
+
         logger.info(f"Mapped {len(field_mapping)} fields from source data")
+        logger.info(
+            f"Total columns in mapped data: {len(mapped_data.columns)} "
+            f"(includes {len(subject_id_candidates)} subject ID candidates)"
+        )
 
         return mapped_data

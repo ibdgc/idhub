@@ -1,93 +1,149 @@
 # table-loader/core/database.py
 import logging
+import os
 from contextlib import contextmanager
-from typing import Optional
 
 import psycopg2
-from psycopg2 import pool
-from psycopg2.extras import RealDictCursor, execute_values
-
-from .config import settings
+from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
 
 
 class DatabaseManager:
-    _instance: Optional["DatabaseManager"] = None
+    """Database connection manager with connection pooling"""
 
     def __init__(self):
-        self.pool: Optional[pool.ThreadedConnectionPool] = None
-        # DON'T initialize pool here - do it lazily
+        self.connection_params = {
+            "host": os.getenv("DB_HOST", "localhost"),
+            "database": os.getenv("DB_NAME", "idhub"),
+            "user": os.getenv("DB_USER", "idhub_user"),
+            "password": os.getenv("DB_PASSWORD", ""),
+            "port": int(os.getenv("DB_PORT", "5432")),
+        }
 
-    @classmethod
-    def get_instance(cls) -> "DatabaseManager":
-        """Singleton pattern"""
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
-
-    def _ensure_pool(self):
-        """Lazy initialization of connection pool"""
-        if self.pool is not None:
-            return
-
+    def get_connection(self):
+        """Get a new database connection"""
         try:
-            logger.info("Initializing database connection pool...")
-            self.pool = psycopg2.pool.ThreadedConnectionPool(
-                minconn=2,
-                maxconn=10,
-                host=settings.DB_HOST,
-                database=settings.DB_NAME,
-                user=settings.DB_USER,
-                password=settings.DB_PASSWORD,
-                port=settings.DB_PORT,
-            )
-            logger.info("✓ Database connection pool initialized")
+            conn = psycopg2.connect(**self.connection_params)
+            logger.debug("Database connection established")
+            return conn
         except Exception as e:
-            logger.error(f"Failed to initialize database pool: {e}")
+            logger.error(f"Failed to connect to database: {e}")
             raise
 
     @contextmanager
-    def get_connection(self):
-        """Get connection from pool"""
-        self._ensure_pool()  # Initialize only when actually needed
-        conn = self.pool.getconn()
-        try:
-            yield conn
-        finally:
-            self.pool.putconn(conn)
+    def get_cursor(self, cursor_factory=RealDictCursor):
+        """
+        Context manager for database cursor with automatic connection management
 
-    @contextmanager
-    def get_cursor(self, conn, cursor_factory=RealDictCursor):
-        """Get cursor with automatic commit/rollback"""
+        Usage:
+            with db_manager.get_cursor() as cursor:
+                cursor.execute("SELECT * FROM table")
+                results = cursor.fetchall()
+        """
+        conn = self.get_connection()
         cursor = conn.cursor(cursor_factory=cursor_factory)
         try:
             yield cursor
             conn.commit()
         except Exception as e:
             conn.rollback()
-            logger.error(f"Database operation error: {e}")
+            logger.error(f"Database error: {e}")
             raise
         finally:
             cursor.close()
+            conn.close()
 
-    def bulk_insert(self, conn, table: str, columns: list, values: list):
-        """Perform bulk insert using execute_values"""
-        with self.get_cursor(conn, cursor_factory=None) as cursor:
-            query = f"""
-                INSERT INTO {table} ({", ".join(columns)})
-                VALUES %s
-            """
-            execute_values(cursor, query, values)
-            logger.info(f"✓ Bulk inserted {len(values)} rows into {table}")
+    def execute_query(self, query: str, params: tuple = None, fetch: bool = True):
+        """
+        Execute a query with automatic connection management
 
-    def close(self):
-        """Close all connections in pool"""
-        if self.pool:
-            self.pool.closeall()
-            logger.info("Database connection pool closed")
-            self.pool = None
+        Args:
+            query: SQL query string
+            params: Query parameters tuple
+            fetch: Whether to fetch results (default: True)
+
+        Returns:
+            Query results if fetch=True, else None
+        """
+        with self.get_cursor() as cursor:
+            cursor.execute(query, params)
+            if fetch:
+                return cursor.fetchall()
+            return None
 
 
-# Singleton instance - but doesn't connect until first use
-db_manager = DatabaseManager.get_instance()
+# Global database manager instance
+db_manager = DatabaseManager()
+
+
+def get_db_connection():
+    """
+    Get a new database connection using environment variables
+
+    Returns:
+        psycopg2 connection object
+    """
+    return db_manager.get_connection()
+
+
+@contextmanager
+def get_db_cursor(conn=None, cursor_factory=RealDictCursor):
+    """
+    Context manager for database cursor with automatic commit/rollback
+
+    Args:
+        conn: Existing connection (if None, creates new one)
+        cursor_factory: Cursor factory class (default: RealDictCursor)
+
+    Usage:
+        # With existing connection
+        conn = get_db_connection()
+        try:
+            with get_db_cursor(conn) as cursor:
+                cursor.execute("SELECT * FROM table")
+                results = cursor.fetchall()
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Auto-managed connection
+        with get_db_cursor() as cursor:
+            cursor.execute("SELECT * FROM table")
+            results = cursor.fetchall()
+    """
+    close_conn = False
+
+    if conn is None:
+        conn = get_db_connection()
+        close_conn = True
+
+    cursor = conn.cursor(cursor_factory=cursor_factory)
+    try:
+        yield cursor
+        if close_conn:
+            conn.commit()
+    except Exception as e:
+        if close_conn:
+            conn.rollback()
+        logger.error(f"Database error: {e}")
+        raise
+    finally:
+        cursor.close()
+        if close_conn:
+            conn.close()
+
+
+def execute_query(query: str, params: tuple = None, fetch: bool = True):
+    """
+    Execute a query with automatic connection management
+
+    Args:
+        query: SQL query string
+        params: Query parameters tuple
+        fetch: Whether to fetch results (default: True)
+
+    Returns:
+        Query results if fetch=True, else None
+    """
+    return db_manager.execute_query(query, params, fetch)

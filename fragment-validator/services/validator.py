@@ -196,9 +196,11 @@ class FragmentValidator:
         source_name: str,
         auto_approve: bool,
         warnings: List[str],
-        change_analysis: Optional[Dict] = None,  # NEW parameter
+        change_analysis: Optional[Dict] = None,
     ) -> Dict:
         """Build success validation report with change analysis"""
+
+        summary = resolution_result["summary"]
 
         # Build base report
         report = {
@@ -214,15 +216,21 @@ class FragmentValidator:
             "columns": list(mapped_data.columns),
             "validation_warnings": warnings,
             "gsid_resolution": {
-                "total_rows": resolution_result["summary"]["total_rows"],
-                "gsids_resolved": resolution_result["summary"]["gsids_resolved"],
-                "new_subjects": resolution_result["summary"]["new_subjects"],
-                "existing_subjects": resolution_result["summary"]["existing_subjects"],
-                "conflicts": resolution_result["summary"]["conflicts"],
+                "total_rows": summary["total_rows"],
+                "resolved": summary["resolved"],
+                "unresolved": summary["unresolved"],
+                "unique_gsids": summary["unique_gsids"],
+                "new_subjects": summary["created"],
+                "existing_subjects": summary["linked"],
+                "multi_gsid_conflicts": summary["multi_gsid_conflicts"],
+                "center_conflicts": summary["center_conflicts"],
+                "local_id_records_count": len(
+                    resolution_result.get("local_id_records", [])
+                ),
             },
         }
 
-        # Add change analysis if available (NEW)
+        # Add change analysis if available
         if change_analysis:
             report["change_analysis"] = {
                 "enabled": True,
@@ -244,7 +252,7 @@ class FragmentValidator:
                     for update in change_analysis["updates"][:10]
                 ]
 
-            # Flag if there are orphaned records (data in DB but not in incoming)
+            # Flag if there are orphaned records
             if change_analysis["summary"]["orphaned"] > 0:
                 report["validation_warnings"].append(
                     f"Warning: {change_analysis['summary']['orphaned']} records exist in database but not in incoming data"
