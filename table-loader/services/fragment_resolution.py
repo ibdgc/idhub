@@ -3,7 +3,8 @@ import logging
 from typing import Dict, List, Optional
 
 import pandas as pd
-from core.database import db_manager
+from core.database import db_manager, get_db_connection
+from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
 
@@ -128,11 +129,159 @@ class FragmentResolutionService:
             logger.error(f"Failed to analyze changes: {e}", exc_info=True)
             raise
 
+    def get_resolved_conflicts(self, batch_id: str) -> Dict[str, str]:
+        """
+        Get resolved conflicts for a batch
+
+        Args:
+            batch_id: Batch identifier
+
+        Returns:
+            Dict mapping "local_subject_id:identifier_type" -> resolution_action
+        """
+        conn = get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(
+                    """
+                    SELECT 
+                        local_subject_id,
+                        identifier_type,
+                        resolution_action,
+                        existing_center_id,
+                        incoming_center_id
+                    FROM conflict_resolutions
+                    WHERE batch_id = %s
+                      AND status = 'resolved'
+                      AND resolution_action IS NOT NULL
+                """,
+                    (batch_id,),
+                )
+
+                conflicts = cursor.fetchall()
+
+                # Build lookup dict
+                resolutions = {}
+                for conflict in conflicts:
+                    key = (
+                        f"{conflict['local_subject_id']}:{conflict['identifier_type']}"
+                    )
+                    resolutions[key] = conflict["resolution_action"]
+
+                logger.info(
+                    f"Found {len(resolutions)} resolved conflicts for batch {batch_id}"
+                )
+                return resolutions
+
+        except Exception as e:
+            logger.error(f"Failed to get resolved conflicts: {e}")
+            return {}
+        finally:
+            conn.close()
+
+    def apply_conflict_resolutions(
+        self, records: List[Dict], batch_id: str
+    ) -> List[Dict]:
+        """
+        Filter records based on conflict resolutions
+
+        Args:
+            records: List of records to load
+            batch_id: Batch identifier
+
+        Returns:
+            Filtered list of records to load
+        """
+        resolutions = self.get_resolved_conflicts(batch_id)
+
+        if not resolutions:
+            logger.info("No resolved conflicts found - loading all records")
+            return records
+
+        filtered = []
+        skipped = 0
+        updated = 0
+
+        for record in records:
+            local_id = record.get("local_subject_id")
+            id_type = record.get("identifier_type", "primary")
+            key = f"{local_id}:{id_type}"
+
+            resolution = resolutions.get(key)
+
+            if resolution == "keep_existing":
+                # Skip this record - keep what's in the database
+                logger.debug(f"Skipping {key} - keeping existing record")
+                skipped += 1
+                continue
+            elif resolution == "use_incoming":
+                # Load this record (will upsert)
+                logger.debug(f"Loading {key} - using incoming data")
+                filtered.append(record)
+                updated += 1
+            elif resolution == "delete_both":
+                # Skip this record - will be manually deleted
+                logger.debug(f"Skipping {key} - marked for deletion")
+                skipped += 1
+                continue
+            elif resolution == "merge":
+                # Load this record - merge logic handled by upsert
+                logger.debug(f"Loading {key} - merging data")
+                filtered.append(record)
+                updated += 1
+            elif resolution is None:
+                # No conflict for this record - load normally
+                filtered.append(record)
+            else:
+                logger.warning(
+                    f"Unknown resolution action '{resolution}' for {key} - loading anyway"
+                )
+                filtered.append(record)
+
+        logger.info(
+            f"Applied conflict resolutions: {len(filtered)} to load, "
+            f"{skipped} skipped, {updated} resolved conflicts"
+        )
+        return filtered
+
+    def mark_conflicts_as_applied(self, batch_id: str) -> None:
+        """
+        Mark all resolved conflicts for a batch as 'applied'
+
+        Args:
+            batch_id: Batch identifier
+        """
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE conflict_resolutions
+                    SET status = 'applied',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE batch_id = %s
+                      AND status = 'resolved'
+                """,
+                    (batch_id,),
+                )
+
+                rows_updated = cursor.rowcount
+                conn.commit()
+
+                logger.info(
+                    f"Marked {rows_updated} conflicts as applied for batch {batch_id}"
+                )
+
+        except Exception as e:
+            logger.error(f"Failed to mark conflicts as applied: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+
     def _fetch_current_data(self, table_name: str) -> pd.DataFrame:
         """Fetch current data from database table"""
         try:
             query = f"SELECT * FROM {table_name}"
-
             with self.db_manager.get_cursor() as cursor:
                 cursor.execute(query)
                 results = cursor.fetchall()
@@ -166,7 +315,6 @@ class FragmentResolutionService:
             Dictionary of changed fields: {field: {"old": value, "new": value}}
         """
         changes = {}
-
         for col in new_row.index:
             if col not in current_row.index:
                 continue

@@ -125,6 +125,12 @@ class TableLoader:
                 if not dry_run:
                     conn.commit()
                     logger.info(f"✓ Changes committed to {table_name}")
+
+                    # Mark conflicts as applied after successful commit
+                    try:
+                        self.resolution_service.mark_conflicts_as_applied(batch_id)
+                    except Exception as e:
+                        logger.warning(f"Could not mark conflicts as applied: {e}")
                 else:
                     conn.rollback()
                     logger.info(f"✓ Dry run - changes rolled back")
@@ -187,6 +193,11 @@ class TableLoader:
                 table_name="local_subject_ids", exclude_fields=exclude_fields
             )
             records = transformer.transform_records(fragment_df)
+
+            # ✅ Apply conflict resolutions
+            records = self.resolution_service.apply_conflict_resolutions(
+                records, batch_id
+            )
 
             logger.info(
                 f"Prepared {len(records)} local_subject_ids records for loading"
