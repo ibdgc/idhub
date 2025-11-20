@@ -23,13 +23,12 @@ class FragmentValidator:
         s3_client: S3Client,
         nocodb_client: NocoDBClient,
         subject_id_resolver: SubjectIDResolver,
-        db_config: Optional[Dict] = None,
     ):
         self.s3_client = s3_client
         self.nocodb_client = nocodb_client
         self.subject_id_resolver = subject_id_resolver
         self.schema_validator = SchemaValidator(nocodb_client)
-        self.update_detector = UpdateDetector(db_config)
+        self.update_detector = UpdateDetector(nocodb_client)
 
     def process_local_file(
         self,
@@ -39,7 +38,6 @@ class FragmentValidator:
         source_name: str,
         auto_approve: bool = False,
         batch_size: int = 20,
-        detect_changes: bool = True,
     ) -> Dict:
         """
         Process and validate a local CSV file
@@ -51,7 +49,6 @@ class FragmentValidator:
             source_name: Source identifier (e.g., "redcap_pipeline", "manual_upload")
             auto_approve: Whether to auto-approve validation
             batch_size: Batch size for parallel GSID resolution
-            detect_changes: Whether to detect changes against current DB state
 
         Returns:
             Validation report dictionary
@@ -104,47 +101,29 @@ class FragmentValidator:
             # Add GSIDs to mapped data
             mapped_data["global_subject_id"] = resolution_result["gsids"]
 
-            # Step 5: Detect changes (NEW)
+            # Step 5: Detect changes via NocoDB API
             change_analysis = None
-            if detect_changes:
-                logger.info("Analyzing changes against current database state...")
-                try:
-                    from core.config import settings
+            logger.info("Analyzing changes against current database state...")
+            try:
+                change_analysis = self.update_detector.detect_changes(
+                    table_name=table_name,
+                    incoming_data=mapped_data,
+                )
 
-                    natural_key = settings.get_natural_key(table_name)
-
-                    change_analysis = self.update_detector.analyze_changes(
-                        incoming_data=mapped_data,
-                        table_name=table_name,
-                        natural_key=natural_key,
-                    )
-
-                    # Log change summary
-                    summary = change_analysis["summary"]
-                    logger.info(
-                        f"Change detection complete: "
-                        f"{summary['new']} new, "
-                        f"{summary['updated']} updated, "
-                        f"{summary['unchanged']} unchanged"
-                    )
-
-                    # Print detailed summary
-                    logger.info(
-                        self.update_detector.format_change_summary(change_analysis)
-                    )
-
-                except Exception as e:
-                    logger.warning(f"Change detection failed (non-fatal): {e}")
-                    change_analysis = {
-                        "error": str(e),
-                        "summary": {
-                            "total_incoming": len(mapped_data),
-                            "new": len(mapped_data),
-                            "updated": 0,
-                            "unchanged": 0,
-                            "orphaned": 0,
-                        },
-                    }
+                # Log change summary
+                summary = change_analysis["summary"]
+                logger.info(
+                    f"\nChange Summary:\n"
+                    f"{'=' * 60}\n"
+                    f"Total incoming records: {summary['total_incoming']}\n"
+                    f"  New records:          {summary['new']}\n"
+                    f"  Updated records:      {summary['updated']}\n"
+                    f"  Unchanged records:    {summary['unchanged']}\n"
+                    f"  Orphaned records:     {summary['orphaned']}"
+                )
+            except Exception as e:
+                logger.warning(f"Change detection failed (non-fatal): {e}")
+                change_analysis = None
 
             # Step 6: Upload to S3
             logger.info("Uploading validated data to S3...")
@@ -170,7 +149,7 @@ class FragmentValidator:
                 source_name,
                 auto_approve,
                 validation_result.warnings,
-                change_analysis,  # NEW: Include change analysis
+                change_analysis,
             )
 
             # Step 8: Upload validation report
@@ -199,8 +178,35 @@ class FragmentValidator:
         change_analysis: Optional[Dict] = None,
     ) -> Dict:
         """Build success validation report with change analysis"""
-
         summary = resolution_result["summary"]
+
+        # Define which fields should be excluded from database load per table
+        # These are identifier fields that go to local_subject_ids table instead
+        # OR metadata fields used only for GSID resolution
+        TABLE_EXCLUDE_FIELDS = {
+            "lcl": [
+                "consortium_id",
+                "center_id",
+            ],
+            "blood": ["consortium_id", "center_id"],
+            "dna": ["consortium_id", "center_id"],
+            "rna": ["consortium_id", "center_id"],
+            "serum": ["consortium_id", "center_id"],
+            "plasma": ["consortium_id", "center_id"],
+            "stool": ["consortium_id", "center_id"],
+            "tissue": ["consortium_id", "center_id"],
+            # local_subject_ids table has no exclusions (all fields are data)
+            "local_subject_ids": [],
+        }
+
+        # Get exclude fields for this table
+        exclude_from_load = TABLE_EXCLUDE_FIELDS.get(
+            table_name,
+            ["consortium_id"],  # Default: exclude consortium_id
+        )
+
+        # Only include fields that actually exist in the data
+        exclude_from_load = [f for f in exclude_from_load if f in mapped_data.columns]
 
         # Build base report
         report = {
@@ -214,6 +220,7 @@ class FragmentValidator:
             "row_count": len(mapped_data),
             "column_count": len(mapped_data.columns),
             "columns": list(mapped_data.columns),
+            "exclude_from_load": exclude_from_load,
             "validation_warnings": warnings,
             "gsid_resolution": {
                 "total_rows": summary["total_rows"],
@@ -239,28 +246,6 @@ class FragmentValidator:
                 "updated_records_count": len(change_analysis.get("updates", [])),
                 "unchanged_records_count": len(change_analysis.get("unchanged", [])),
                 "orphaned_records_count": len(change_analysis.get("orphaned", [])),
-            }
-
-            # Include sample of updates (first 10)
-            if change_analysis.get("updates"):
-                report["change_analysis"]["sample_updates"] = [
-                    {
-                        "natural_key": update["natural_key"],
-                        "fields_changed": list(update["changes"].keys()),
-                        "change_count": len(update["changes"]),
-                    }
-                    for update in change_analysis["updates"][:10]
-                ]
-
-            # Flag if there are orphaned records
-            if change_analysis["summary"]["orphaned"] > 0:
-                report["validation_warnings"].append(
-                    f"Warning: {change_analysis['summary']['orphaned']} records exist in database but not in incoming data"
-                )
-        else:
-            report["change_analysis"] = {
-                "enabled": False,
-                "reason": "Change detection disabled or failed",
             }
 
         return report

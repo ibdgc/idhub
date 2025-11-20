@@ -54,17 +54,6 @@ def get_aws_credentials():
         return None
 
 
-def get_db_config():
-    """Get database configuration from environment variables"""
-    return {
-        "host": os.getenv("DB_HOST", "localhost"),
-        "database": os.getenv("DB_NAME", "idhub"),
-        "user": os.getenv("DB_USER", "idhub_user"),
-        "password": os.getenv("DB_PASSWORD", ""),
-        "port": int(os.getenv("DB_PORT", "5432")),
-    }
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="Validate and stage data fragments for IDhub"
@@ -93,11 +82,6 @@ def main():
         type=int,
         default=20,
         help="Batch size for parallel GSID resolution (default: 20)",
-    )
-    parser.add_argument(
-        "--no-change-detection",
-        action="store_true",
-        help="Disable change detection against current database state",
     )
     parser.add_argument(
         "--env",
@@ -135,18 +119,11 @@ def main():
         )
         subject_id_resolver = SubjectIDResolver(gsid_client)
 
-        # Get database config
-        db_config = get_db_config()
-        logger.info(
-            f"Database: {db_config['host']}:{db_config['port']}/{db_config['database']}"
-        )
-
         # Initialize validator with DB config
         validator = FragmentValidator(
             s3_client=s3_client,
             nocodb_client=nocodb_client,
             subject_id_resolver=subject_id_resolver,
-            db_config=db_config,
         )
 
         # Process file
@@ -155,7 +132,6 @@ def main():
         logger.info(f"Target table: {args.table_name}")
         logger.info(f"Source: {args.source}")
         logger.info(f"Auto-approve: {args.auto_approve}")
-        logger.info(f"Change detection: {not args.no_change_detection}")
 
         report = validator.process_local_file(
             args.table_name,
@@ -164,7 +140,6 @@ def main():
             args.source,
             args.auto_approve,
             batch_size=args.batch_size,
-            detect_changes=not args.no_change_detection,
         )
 
         if report["status"] == "FAILED":

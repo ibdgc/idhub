@@ -1,262 +1,269 @@
 # fragment-validator/services/update_detector.py
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 import pandas as pd
-import psycopg2
-from psycopg2.extras import RealDictCursor
+
+from .nocodb_client import NocoDBClient
 
 logger = logging.getLogger(__name__)
 
 
 class UpdateDetector:
-    """Detect changes between incoming data and current database state"""
+    """Detects changes between incoming data and existing database records via NocoDB API"""
 
-    def __init__(self, db_config: Optional[Dict] = None):
+    # Natural keys for each table (used to match records)
+    TABLE_NATURAL_KEYS = {
+        "lcl": ["global_subject_id", "niddk_no"],
+        "blood": ["global_subject_id", "sample_id"],
+        "dna": ["global_subject_id", "sample_id"],
+        "rna": ["global_subject_id", "sample_id"],
+        "serum": ["global_subject_id", "sample_id"],
+        "plasma": ["global_subject_id", "sample_id"],
+        "stool": ["global_subject_id", "sample_id"],
+        "tissue": ["global_subject_id", "sample_id"],
+    }
+
+    # Fields to ignore when comparing for changes
+    IGNORE_FIELDS = {
+        "Id",
+        "created_at",
+        "updated_at",
+        "CreatedAt",
+        "UpdatedAt",
+    }
+
+    def __init__(self, nocodb_client: NocoDBClient):
+        self.nocodb_client = nocodb_client
+
+    def detect_changes(
+        self, table_name: str, incoming_data: pd.DataFrame
+    ) -> Dict[str, any]:
         """
-        Initialize update detector
+        Detect changes between incoming data and existing records via NocoDB API
 
         Args:
-            db_config: Database connection config (host, database, user, password, port)
-                      If None, will use environment variables
-        """
-        self.db_config = db_config or self._get_db_config_from_env()
-
-    def _get_db_config_from_env(self) -> Dict:
-        """Get database config from environment variables"""
-        import os
-
-        return {
-            "host": os.getenv("DB_HOST", "localhost"),
-            "database": os.getenv("DB_NAME", "idhub"),
-            "user": os.getenv("DB_USER", "idhub_user"),
-            "password": os.getenv("DB_PASSWORD", ""),
-            "port": int(os.getenv("DB_PORT", "5432")),
-        }
-
-    def analyze_changes(
-        self, incoming_data: pd.DataFrame, table_name: str, natural_key: List[str]
-    ) -> Dict:
-        """
-        Compare incoming data against current database state
-
-        Args:
-            incoming_data: DataFrame with new/updated data
             table_name: Target table name
-            natural_key: List of columns that uniquely identify a record
+            incoming_data: DataFrame with incoming records
 
         Returns:
+            Dictionary with change analysis:
             {
-                "new_records": [...],
-                "updates": [...],
-                "unchanged": [...],
-                "orphaned": [...],
-                "summary": {...}
+                "summary": {
+                    "total_incoming": int,
+                    "new": int,
+                    "updated": int,
+                    "unchanged": int,
+                    "orphaned": int
+                },
+                "new_records": List[Dict],
+                "updates": List[Dict],
+                "unchanged": List[Dict],
+                "orphaned": List[Dict]
             }
         """
-        logger.info(
-            f"Analyzing changes for table '{table_name}' with natural key {natural_key}"
-        )
+        logger.info(f"Analyzing changes for table '{table_name}' via NocoDB API")
 
-        # Validate natural key exists in incoming data
-        missing_keys = [k for k in natural_key if k not in incoming_data.columns]
-        if missing_keys:
-            raise ValueError(f"Natural key columns missing from data: {missing_keys}")
+        # Get natural key for this table
+        natural_key = self.TABLE_NATURAL_KEYS.get(table_name)
+        if not natural_key:
+            logger.warning(
+                f"No natural key defined for table '{table_name}', treating all as new"
+            )
+            return self._all_new_analysis(incoming_data)
 
-        # Fetch current database state
-        current_data = self._fetch_current_data(table_name, natural_key)
+        logger.info(f"Using natural key: {natural_key}")
 
-        if current_data.empty:
-            # No existing data - everything is new
+        # Fetch existing records from NocoDB
+        try:
+            existing_records = self.nocodb_client.get_all_records(table_name)
+            logger.info(f"Fetched {len(existing_records)} existing records from NocoDB")
+        except Exception as e:
+            logger.warning(
+                f"Failed to fetch existing data from NocoDB: {e}. Treating all as new."
+            )
+            return self._all_new_analysis(incoming_data)
+
+        if not existing_records:
             logger.info(f"No existing data in '{table_name}' - all records are new")
-            return {
-                "new_records": incoming_data.to_dict("records"),
-                "updates": [],
-                "unchanged": [],
-                "orphaned": [],
-                "summary": {
-                    "total_incoming": len(incoming_data),
-                    "new": len(incoming_data),
-                    "updated": 0,
-                    "unchanged": 0,
-                    "orphaned": 0,
-                },
-            }
+            return self._all_new_analysis(incoming_data)
+
+        # Convert to DataFrame for easier comparison
+        existing_df = pd.DataFrame(existing_records)
 
         # Perform comparison
-        result = self._compare_dataframes(incoming_data, current_data, natural_key)
-
-        logger.info(
-            f"Change analysis complete: {result['summary']['new']} new, "
-            f"{result['summary']['updated']} updated, "
-            f"{result['summary']['unchanged']} unchanged"
+        return self._compare_dataframes(
+            incoming_data, existing_df, natural_key, table_name
         )
 
-        return result
-
-    def _fetch_current_data(
-        self, table_name: str, natural_key: List[str]
-    ) -> pd.DataFrame:
-        """Fetch current data from database"""
-        try:
-            conn = psycopg2.connect(**self.db_config)
-
-            # Get all columns for the table
-            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(f"SELECT * FROM {table_name} LIMIT 0")
-                columns = [desc[0] for desc in cursor.description]
-
-            # Fetch all data
-            query = f"SELECT * FROM {table_name}"
-            df = pd.read_sql(query, conn)
-
-            conn.close()
-
-            logger.info(f"Fetched {len(df)} existing records from '{table_name}'")
-            return df
-
-        except psycopg2.Error as e:
-            logger.error(f"Database error fetching current data: {e}")
-            # Return empty DataFrame on error (treat all as new)
-            return pd.DataFrame()
-        except Exception as e:
-            logger.error(f"Error fetching current data: {e}")
-            return pd.DataFrame()
+    def _all_new_analysis(self, incoming_data: pd.DataFrame) -> Dict:
+        """Return analysis indicating all records are new"""
+        new_records = incoming_data.to_dict("records")
+        return {
+            "summary": {
+                "total_incoming": len(incoming_data),
+                "new": len(incoming_data),
+                "updated": 0,
+                "unchanged": 0,
+                "orphaned": 0,
+            },
+            "new_records": new_records,
+            "updates": [],
+            "unchanged": [],
+            "orphaned": [],
+        }
 
     def _compare_dataframes(
-        self, incoming: pd.DataFrame, current: pd.DataFrame, natural_key: List[str]
+        self,
+        incoming_df: pd.DataFrame,
+        existing_df: pd.DataFrame,
+        natural_key: List[str],
+        table_name: str,
     ) -> Dict:
-        """Compare incoming data against current database state"""
+        """Compare incoming and existing DataFrames to detect changes"""
 
+        # Verify natural key columns exist
+        missing_in_incoming = [k for k in natural_key if k not in incoming_df.columns]
+        missing_in_existing = [k for k in natural_key if k not in existing_df.columns]
+
+        if missing_in_incoming:
+            logger.warning(
+                f"Natural key columns missing in incoming data: {missing_in_incoming}"
+            )
+            return self._all_new_analysis(incoming_df)
+
+        if missing_in_existing:
+            logger.warning(
+                f"Natural key columns missing in existing data: {missing_in_existing}"
+            )
+            return self._all_new_analysis(incoming_df)
+
+        # Create composite keys for matching
+        incoming_df["_composite_key"] = incoming_df[natural_key].apply(
+            lambda row: tuple(row), axis=1
+        )
+        existing_df["_composite_key"] = existing_df[natural_key].apply(
+            lambda row: tuple(row), axis=1
+        )
+
+        # Build lookup of existing records
+        existing_lookup = {
+            row["_composite_key"]: row for row in existing_df.to_dict("records")
+        }
+
+        # Classify records
         new_records = []
         updates = []
         unchanged = []
 
-        # Create a key for matching
-        incoming["_merge_key"] = (
-            incoming[natural_key].astype(str).agg("||".join, axis=1)
-        )
-        current["_merge_key"] = current[natural_key].astype(str).agg("||".join, axis=1)
+        for incoming_record in incoming_df.to_dict("records"):
+            composite_key = incoming_record["_composite_key"]
 
-        # Get common columns (exclude system columns)
-        exclude_cols = {"_merge_key", "created_at", "updated_at", "id", "Id"}
-        common_cols = [
-            c
-            for c in incoming.columns
-            if c in current.columns and c not in exclude_cols
-        ]
+            # Remove temporary key from record
+            incoming_clean = {
+                k: v for k, v in incoming_record.items() if k != "_composite_key"
+            }
 
-        for idx, incoming_row in incoming.iterrows():
-            merge_key = incoming_row["_merge_key"]
-
-            # Check if record exists in current data
-            matching_rows = current[current["_merge_key"] == merge_key]
-
-            if matching_rows.empty:
+            if composite_key not in existing_lookup:
                 # New record
-                record = incoming_row.drop("_merge_key").to_dict()
-                new_records.append(record)
+                new_records.append(incoming_clean)
             else:
-                # Existing record - check for changes
-                current_row = matching_rows.iloc[0]
-                changes = self._detect_field_changes(
-                    incoming_row, current_row, common_cols
-                )
-
-                if changes:
-                    # Record has changes
-                    natural_key_values = {k: incoming_row[k] for k in natural_key}
+                # Existing record - check if changed
+                existing_record = existing_lookup[composite_key]
+                if self._records_differ(incoming_clean, existing_record):
                     updates.append(
                         {
-                            "natural_key": natural_key_values,
-                            "changes": changes,
-                            "record": incoming_row.drop("_merge_key").to_dict(),
+                            "incoming": incoming_clean,
+                            "existing": existing_record,
+                            "changes": self._get_field_changes(
+                                incoming_clean, existing_record
+                            ),
                         }
                     )
                 else:
-                    # No changes
-                    unchanged.append(incoming_row.drop("_merge_key").to_dict())
+                    unchanged.append(incoming_clean)
 
-        # Detect orphaned records (in DB but not in incoming)
-        incoming_keys = set(incoming["_merge_key"])
-        current_keys = set(current["_merge_key"])
-        orphaned_keys = current_keys - incoming_keys
+        # Find orphaned records (in DB but not in incoming data)
+        incoming_keys = set(incoming_df["_composite_key"])
+        existing_keys = set(existing_df["_composite_key"])
+        orphaned_keys = existing_keys - incoming_keys
 
-        orphaned = []
-        for key in orphaned_keys:
-            orphaned_row = current[current["_merge_key"] == key].iloc[0]
-            orphaned.append(orphaned_row.drop("_merge_key").to_dict())
+        orphaned = [
+            {k: v for k, v in existing_lookup[key].items() if k != "_composite_key"}
+            for key in orphaned_keys
+        ]
+
+        logger.info(
+            f"Change detection complete: {len(new_records)} new, "
+            f"{len(updates)} updated, {len(unchanged)} unchanged, "
+            f"{len(orphaned)} orphaned"
+        )
+
+        # Clean up temporary columns from incoming_df (IMPORTANT!)
+        # This ensures _composite_key doesn't get uploaded to S3
+        if "_composite_key" in incoming_df.columns:
+            incoming_df.drop(columns=["_composite_key"], inplace=True)
 
         return {
-            "new_records": new_records,
-            "updates": updates,
-            "unchanged": unchanged,
-            "orphaned": orphaned,
             "summary": {
-                "total_incoming": len(incoming),
+                "total_incoming": len(incoming_df),
                 "new": len(new_records),
                 "updated": len(updates),
                 "unchanged": len(unchanged),
                 "orphaned": len(orphaned),
             },
+            "new_records": new_records,
+            "updates": updates,
+            "unchanged": unchanged,
+            "orphaned": orphaned,
         }
 
-    def _detect_field_changes(
-        self, incoming_row: pd.Series, current_row: pd.Series, fields: List[str]
-    ) -> Dict:
-        """Detect which fields changed between two rows"""
-        changes = {}
+    def _records_differ(self, record1: Dict, record2: Dict) -> bool:
+        """Check if two records differ (ignoring system fields)"""
+
+        # Get comparable fields (exclude system fields and fields not in both records)
+        fields1 = set(record1.keys()) - self.IGNORE_FIELDS
+        fields2 = set(record2.keys()) - self.IGNORE_FIELDS
+        common_fields = fields1 & fields2
+
+        for field in common_fields:
+            val1 = record1.get(field)
+            val2 = record2.get(field)
+
+            # Normalize None/NaN/empty string
+            val1 = None if pd.isna(val1) or val1 == "" else val1
+            val2 = None if pd.isna(val2) or val2 == "" else val2
+
+            if val1 != val2:
+                return True
+
+        return False
+
+    def _get_field_changes(self, incoming: Dict, existing: Dict) -> List[Dict]:
+        """Get list of field-level changes"""
+        changes = []
+
+        fields = (set(incoming.keys()) | set(existing.keys())) - self.IGNORE_FIELDS
 
         for field in fields:
-            incoming_val = incoming_row.get(field)
-            current_val = current_row.get(field)
+            val_incoming = incoming.get(field)
+            val_existing = existing.get(field)
 
-            # Handle NaN/None comparisons
-            incoming_is_null = pd.isna(incoming_val)
-            current_is_null = pd.isna(current_val)
+            # Normalize
+            val_incoming = (
+                None if pd.isna(val_incoming) or val_incoming == "" else val_incoming
+            )
+            val_existing = (
+                None if pd.isna(val_existing) or val_existing == "" else val_existing
+            )
 
-            if incoming_is_null and current_is_null:
-                # Both null - no change
-                continue
-
-            if incoming_is_null != current_is_null:
-                # One is null, other isn't - this is a change
-                changes[field] = {
-                    "old": None if current_is_null else current_val,
-                    "new": None if incoming_is_null else incoming_val,
-                }
-            elif incoming_val != current_val:
-                # Both have values but they differ
-                changes[field] = {"old": current_val, "new": incoming_val}
+            if val_incoming != val_existing:
+                changes.append(
+                    {
+                        "field": field,
+                        "old_value": val_existing,
+                        "new_value": val_incoming,
+                    }
+                )
 
         return changes
-
-    def format_change_summary(self, changes: Dict) -> str:
-        """Format change summary for display"""
-        summary = changes["summary"]
-        lines = [
-            "\nChange Summary:",
-            "=" * 60,
-            f"Total incoming records: {summary['total_incoming']}",
-            f"  New records:          {summary['new']}",
-            f"  Updated records:      {summary['updated']}",
-            f"  Unchanged records:    {summary['unchanged']}",
-            f"  Orphaned records:     {summary['orphaned']}",
-            "",
-        ]
-
-        if changes["updates"]:
-            lines.append("Updates Preview:")
-            lines.append("-" * 60)
-            for i, update in enumerate(changes["updates"][:5], 1):  # Show first 5
-                key_str = ", ".join(
-                    f"{k}={v}" for k, v in update["natural_key"].items()
-                )
-                lines.append(f"\n  Record {i}: {key_str}")
-                for field, change in update["changes"].items():
-                    lines.append(f"    - {field}: {change['old']} → {change['new']}")
-
-            if len(changes["updates"]) > 5:
-                lines.append(f"\n  ... and {len(changes['updates']) - 5} more updates")
-
-        return "\n".join(lines)

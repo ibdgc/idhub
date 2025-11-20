@@ -16,6 +16,21 @@ logger = logging.getLogger(__name__)
 class TableLoader:
     """Handles loading validated fragments into database tables"""
 
+    # Tables that should use UPSERT instead of INSERT
+    # Key = table name, Value = list of conflict columns (natural key)
+    UPSERT_TABLES = {
+        "subjects": ["global_subject_id"],
+        "local_subject_ids": ["center_id", "local_subject_id", "identifier_type"],
+        "lcl": ["niddk_no"],
+        "blood": ["niddk_no"],  # Assuming similar structure
+        "dna": ["niddk_no"],
+        "rna": ["niddk_no"],
+        "serum": ["niddk_no"],
+        "plasma": ["niddk_no"],
+        "stool": ["niddk_no"],
+        "tissue": ["niddk_no"],
+    }
+
     def __init__(
         self,
         s3_bucket: str,
@@ -90,8 +105,8 @@ class TableLoader:
                     "batch_id": batch_id,
                     "table_name": table_name,
                     "records_loaded": result.get("rows_loaded", 0),
-                    "inserted": result.get("rows_loaded", 0),
-                    "updated": 0,  # No updates in current implementation
+                    "inserted": result.get("inserted", 0),
+                    "updated": result.get("updated", 0),
                     "local_ids_loaded": local_ids_result.get("rows_loaded", 0)
                     if local_ids_result
                     else 0,
@@ -109,7 +124,6 @@ class TableLoader:
         self, table_name: str, fragment_df, dry_run: bool = False
     ) -> Dict[str, Any]:
         """Load records using appropriate strategy"""
-
         # Get exclude fields from validation report
         exclude_from_load = self.validation_report.get("exclude_from_load", [])
         if isinstance(exclude_from_load, str):
@@ -145,11 +159,14 @@ class TableLoader:
                 "rows_analyzed": len(transformed_records),
             }
 
-        return self._insert_records(table_name, transformed_records)
+        # Use upsert if table is in UPSERT_TABLES
+        if table_name in self.UPSERT_TABLES:
+            return self._upsert_records(table_name, transformed_records)
+        else:
+            return self._insert_records(table_name, transformed_records)
 
     def _insert_records(self, table_name: str, records: List[Dict]) -> Dict[str, Any]:
-        """Insert records into table"""
-
+        """Insert records into table (plain INSERT)"""
         if not records:
             return {"status": "skipped", "rows_loaded": 0}
 
@@ -166,13 +183,15 @@ class TableLoader:
                 # Execute batch insert
                 cursor.executemany(query, records)
                 rows_inserted = cursor.rowcount
-
                 self.db_connection.commit()
+
                 logger.info(f"Inserted {rows_inserted} rows into {table_name}")
 
                 return {
                     "status": "success",
                     "rows_loaded": rows_inserted,
+                    "inserted": rows_inserted,
+                    "updated": 0,
                 }
 
         except psycopg2.Error as e:
@@ -180,11 +199,86 @@ class TableLoader:
             logger.error(f"Failed to insert records: {e}")
             raise
 
+    def _upsert_records(self, table_name: str, records: List[Dict]) -> Dict[str, Any]:
+        """Insert or update records (UPSERT)"""
+        if not records:
+            return {"status": "skipped", "rows_loaded": 0}
+
+        # Get conflict columns for this table
+        conflict_columns = self.UPSERT_TABLES.get(table_name, [])
+        if not conflict_columns:
+            logger.warning(
+                f"No conflict columns defined for {table_name}, using plain INSERT"
+            )
+            return self._insert_records(table_name, records)
+
+        # Get all columns from first record
+        columns = list(records[0].keys())
+
+        # Build column lists
+        columns_str = ", ".join(columns)
+        conflict_str = ", ".join(conflict_columns)
+
+        # Build UPDATE SET clause (update all columns except conflict columns)
+        update_columns = [col for col in columns if col not in conflict_columns]
+        update_set = ", ".join([f"{col} = EXCLUDED.{col}" for col in update_columns])
+
+        # Build UPSERT query
+        placeholders = ", ".join([f"%({col})s" for col in columns])
+        query = f"""
+            INSERT INTO {table_name} ({columns_str})
+            VALUES ({placeholders})
+            ON CONFLICT ({conflict_str})
+            DO UPDATE SET {update_set}
+        """
+
+        try:
+            with get_db_cursor(self.db_connection) as cursor:
+                # Track inserts vs updates
+                # First, get existing keys
+                conflict_values = [
+                    tuple(record[col] for col in conflict_columns) for record in records
+                ]
+
+                # Check which records already exist
+                check_query = f"""
+                    SELECT {conflict_str} FROM {table_name}
+                    WHERE ({conflict_str}) IN %s
+                """
+                cursor.execute(check_query, (tuple(conflict_values),))
+                existing_keys = set(cursor.fetchall())
+
+                # Execute upsert
+                cursor.executemany(query, records)
+                rows_affected = cursor.rowcount
+                self.db_connection.commit()
+
+                # Calculate inserts vs updates
+                num_existing = len(existing_keys)
+                num_inserted = len(records) - num_existing
+                num_updated = num_existing
+
+                logger.info(
+                    f"Upserted {rows_affected} rows into {table_name} "
+                    f"({num_inserted} inserted, {num_updated} updated)"
+                )
+
+                return {
+                    "status": "success",
+                    "rows_loaded": rows_affected,
+                    "inserted": num_inserted,
+                    "updated": num_updated,
+                }
+
+        except psycopg2.Error as e:
+            self.db_connection.rollback()
+            logger.error(f"Failed to upsert records: {e}")
+            raise
+
     def _load_local_subject_ids(
         self, batch_id: str, dry_run: bool = False
     ) -> Optional[Dict[str, Any]]:
         """Load local subject IDs if present in batch"""
-
         try:
             local_ids_key = f"staging/validated/{batch_id}/local_subject_ids.csv"
 
@@ -218,7 +312,8 @@ class TableLoader:
                     "rows_analyzed": len(transformed_records),
                 }
 
-            return self._insert_records("local_subject_ids", transformed_records)
+            # Use upsert for local_subject_ids
+            return self._upsert_records("local_subject_ids", transformed_records)
 
         except Exception as e:
             # Local subject IDs are optional, so just log warning
