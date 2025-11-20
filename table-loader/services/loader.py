@@ -115,8 +115,6 @@ class TableLoader:
             # Load data
             conn = get_db_connection()
             try:
-                # Call strategy.load() with correct signature:
-                # load(conn, records, batch_id, source_fragment)
                 result = strategy.load(
                     conn,
                     records,
@@ -190,31 +188,29 @@ class TableLoader:
             )
             records = transformer.transform_records(fragment_df)
 
-            # Filter out conflicts
-            filtered_records = self.resolution_service.filter_conflicts(records)
             logger.info(
-                f"After conflict filtering: {len(filtered_records)} records to load"
+                f"Prepared {len(records)} local_subject_ids records for loading"
             )
 
-            # Get load strategy
+            # Get load strategy (upsert handles conflicts automatically)
             strategy = self._get_load_strategy("local_subject_ids", exclude_fields)
 
             # Load data
             conn = get_db_connection()
             try:
-                # Call strategy.load() with correct signature:
-                # load(conn, records, batch_id, source_fragment)
                 result = strategy.load(
                     conn,
-                    filtered_records,
+                    records,
                     batch_id,
                     source_name,
                 )
 
                 if not dry_run:
                     conn.commit()
+                    logger.info("✓ local_subject_ids changes committed")
                 else:
                     conn.rollback()
+                    logger.info("✓ local_subject_ids dry run - changes rolled back")
 
                 return result
 

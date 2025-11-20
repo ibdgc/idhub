@@ -147,6 +147,7 @@ CREATE TABLE lcl (
     global_subject_id VARCHAR(21) REFERENCES subjects(global_subject_id),
     date_collected DATE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    UNIQUE (global_subject_id, knumber)
 );
 
 CREATE TABLE enteroid (
