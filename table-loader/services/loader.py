@@ -1,6 +1,6 @@
 # table-loader/services/loader.py
 import logging
-from typing import Dict, List
+from typing import Dict
 
 from core.database import get_db_connection, get_db_cursor
 
@@ -40,8 +40,14 @@ class TableLoader:
         },
     }
 
-    def __init__(self):
-        self.s3_client = S3Client()
+    def __init__(self, s3_bucket: str = None):
+        """
+        Initialize TableLoader
+
+        Args:
+            s3_bucket: S3 bucket name for fragments (optional, uses settings default if None)
+        """
+        self.s3_client = S3Client(bucket=s3_bucket)
         self.resolution_service = FragmentResolutionService()
 
     def _get_load_strategy(self, table_name: str, exclude_fields: set) -> LoadStrategy:
@@ -156,12 +162,6 @@ class TableLoader:
         self, batch_id: str, dry_run: bool, exclude_fields: set = None
     ) -> Dict:
         """Load local_subject_ids fragment if present"""
-        logger.info(f"Loading {len(fragment_df)} local subject ID mappings")
-
-        # Get table-specific exclusions for local_subject_ids
-        table_defaults = self.TABLE_DEFAULT_EXCLUSIONS.get("local_subject_ids", set())
-        exclude_fields = (exclude_fields or set()) | table_defaults
-
         try:
             fragment_df = self.s3_client.download_fragment(
                 batch_id, "local_subject_ids"
@@ -170,6 +170,14 @@ class TableLoader:
             if fragment_df.empty:
                 logger.info("No local_subject_ids to load")
                 return {"rows_affected": 0}
+
+            logger.info(f"Loading {len(fragment_df)} local subject ID mappings")
+
+            # Get table-specific exclusions for local_subject_ids
+            table_defaults = self.TABLE_DEFAULT_EXCLUSIONS.get(
+                "local_subject_ids", set()
+            )
+            exclude_fields = (exclude_fields or set()) | table_defaults
 
             # Transform data
             transformer = DataTransformer(
