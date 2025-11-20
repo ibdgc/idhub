@@ -22,7 +22,6 @@ class DataTransformer:
     TABLE_DEFAULT_EXCLUSIONS = {
         "local_subject_ids": {
             "action",  # GSID resolution metadata, not a DB column
-            "source",  # Already captured in created_by
         },
     }
 
