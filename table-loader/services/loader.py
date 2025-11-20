@@ -2,7 +2,7 @@
 import logging
 from typing import Dict
 
-from core.database import get_db_connection, get_db_cursor
+from core.database import get_db_connection
 
 from services.data_transformer import DataTransformer
 from services.fragment_resolution import FragmentResolutionService
@@ -63,12 +63,6 @@ class TableLoader:
                 table_name=table_name, exclude_fields=exclude_fields
             )
 
-    def _extract_table_name(self, s3_key: str) -> str:
-        """Extract table name from S3 key"""
-        # Example: staging/validated/batch_123/blood.csv -> blood
-        filename = s3_key.split("/")[-1]
-        return filename.replace(".csv", "")
-
     def load_batch(self, batch_id: str, dry_run: bool = True) -> Dict:
         """
         Load a validated batch from S3 into database
@@ -92,7 +86,7 @@ class TableLoader:
 
             table_name = report["table_name"]
             s3_location = report["s3_location"]
-            source_name = report.get("source", "unknown")  # Get source from report
+            source_name = report.get("source", "unknown")
 
             # Get exclude fields from validation report
             exclude_from_report = set(report.get("exclude_from_load", []))
@@ -121,14 +115,14 @@ class TableLoader:
             # Load data
             conn = get_db_connection()
             try:
-                with get_db_cursor(conn) as cursor:
-                    # Pass batch_id and source_fragment to load strategy
-                    result = strategy.load(
-                        cursor=cursor,
-                        records=records,
-                        batch_id=batch_id,
-                        source_fragment=source_name,
-                    )
+                # Call strategy.load() with correct signature:
+                # load(conn, records, batch_id, source_fragment)
+                result = strategy.load(
+                    conn,
+                    records,
+                    batch_id,
+                    source_name,
+                )
 
                 if not dry_run:
                     conn.commit()
@@ -153,11 +147,11 @@ class TableLoader:
                 "status": "SUCCESS",
                 "batch_id": batch_id,
                 "table_name": table_name,
-                "records_loaded": result["rows_affected"],
-                "inserted": result.get("inserted", 0),
-                "updated": result.get("updated", 0),
+                "records_loaded": result.get("rows_loaded", 0),
+                "inserted": result.get("rows_loaded", 0),
+                "updated": 0,
                 "local_ids_loaded": (
-                    local_ids_result["rows_affected"] if local_ids_result else 0
+                    local_ids_result.get("rows_loaded", 0) if local_ids_result else 0
                 ),
             }
 
@@ -180,7 +174,7 @@ class TableLoader:
 
             if fragment_df.empty:
                 logger.info("No local_subject_ids to load")
-                return {"rows_affected": 0}
+                return {"rows_loaded": 0}
 
             logger.info(f"Loading {len(fragment_df)} local subject ID mappings")
 
@@ -208,14 +202,14 @@ class TableLoader:
             # Load data
             conn = get_db_connection()
             try:
-                with get_db_cursor(conn) as cursor:
-                    # Pass batch_id and source_fragment to load strategy
-                    result = strategy.load(
-                        cursor=cursor,
-                        records=filtered_records,
-                        batch_id=batch_id,
-                        source_fragment=source_name,
-                    )
+                # Call strategy.load() with correct signature:
+                # load(conn, records, batch_id, source_fragment)
+                result = strategy.load(
+                    conn,
+                    filtered_records,
+                    batch_id,
+                    source_name,
+                )
 
                 if not dry_run:
                     conn.commit()
@@ -229,4 +223,4 @@ class TableLoader:
 
         except FileNotFoundError:
             logger.info("No local_subject_ids fragment found")
-            return {"rows_affected": 0}
+            return {"rows_loaded": 0}
