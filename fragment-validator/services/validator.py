@@ -5,12 +5,12 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
+from .conflict_detector import ConflictDetector
 from .field_mapper import FieldMapper
 from .nocodb_client import NocoDBClient
 from .s3_client import S3Client
 from .schema_validator import SchemaValidator
 from .subject_id_resolver import SubjectIDResolver
-from .update_detector import UpdateDetector
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ class FragmentValidator:
         self.nocodb_client = nocodb_client
         self.subject_id_resolver = subject_id_resolver
         self.schema_validator = SchemaValidator(nocodb_client)
-        self.update_detector = UpdateDetector(nocodb_client)
+        self.conflict_detector = ConflictDetector()
 
     def process_local_file(
         self,
@@ -101,31 +101,22 @@ class FragmentValidator:
             # Add GSIDs to mapped data
             mapped_data["global_subject_id"] = resolution_result["gsids"]
 
-            # Step 5: Detect changes via NocoDB API
-            change_analysis = None
-            logger.info("Analyzing changes against current database state...")
-            try:
-                change_analysis = self.update_detector.detect_changes(
-                    table_name=table_name,
-                    incoming_data=mapped_data,
-                )
+            # Step 4.5: Detect conflicts
+            logger.info("Detecting data conflicts...")
+            conflicts = self.conflict_detector.detect_conflicts(
+                resolution_result, batch_id
+            )
 
-                # Log change summary
-                summary = change_analysis["summary"]
-                logger.info(
-                    f"\nChange Summary:\n"
-                    f"{'=' * 60}\n"
-                    f"Total incoming records: {summary['total_incoming']}\n"
-                    f"  New records:          {summary['new']}\n"
-                    f"  Updated records:      {summary['updated']}\n"
-                    f"  Unchanged records:    {summary['unchanged']}\n"
-                    f"  Orphaned records:     {summary['orphaned']}"
+            # Upload conflicts to NocoDB if any exist
+            if conflicts:
+                logger.warning(
+                    f"⚠️  {len(conflicts)} conflicts detected - uploading to NocoDB"
                 )
-            except Exception as e:
-                logger.warning(f"Change detection failed (non-fatal): {e}")
-                change_analysis = None
+                self._upload_conflicts_to_nocodb(conflicts)
+                # Force manual review if conflicts exist
+                auto_approve = False
 
-            # Step 6: Upload to S3
+            # Step 5: Upload to S3
             logger.info("Uploading validated data to S3...")
             s3_key = f"staging/validated/{batch_id}/{table_name}.csv"
             self.s3_client.upload_dataframe(mapped_data, s3_key)
@@ -139,7 +130,7 @@ class FragmentValidator:
                     f"Wrote {len(local_ids_df)} unique local_subject_ids records"
                 )
 
-            # Step 7: Build validation report
+            # Step 6: Build validation report
             report = self._build_success_report(
                 batch_id,
                 mapped_data,
@@ -149,10 +140,10 @@ class FragmentValidator:
                 source_name,
                 auto_approve,
                 validation_result.warnings,
-                change_analysis,
+                conflicts,
             )
 
-            # Step 8: Upload validation report
+            # Step 7: Upload validation report
             report_key = f"staging/validated/{batch_id}/validation_report.json"
             self.s3_client.upload_json(report, report_key)
             logger.info(f"Uploaded validation report to {report_key}")
@@ -165,6 +156,23 @@ class FragmentValidator:
                 batch_id, [{"type": "exception", "message": str(e)}], []
             )
 
+    def _upload_conflicts_to_nocodb(self, conflicts: List[Dict]) -> None:
+        """Upload conflict records to NocoDB for review"""
+        if not conflicts:
+            return
+
+        try:
+            for conflict in conflicts:
+                # Upload to conflict_resolutions table
+                self.nocodb_client.create_record(
+                    table_name="conflict_resolutions", data=conflict
+                )
+            logger.info(f"Uploaded {len(conflicts)} conflicts to NocoDB")
+        except Exception as e:
+            logger.error(f"Failed to upload conflicts to NocoDB: {e}")
+            # Don't fail the entire validation if conflict upload fails
+            logger.warning("Continuing validation despite conflict upload failure")
+
     def _build_success_report(
         self,
         batch_id: str,
@@ -175,19 +183,20 @@ class FragmentValidator:
         source_name: str,
         auto_approve: bool,
         warnings: List[str],
-        change_analysis: Optional[Dict] = None,
+        conflicts: List[Dict] = None,
     ) -> Dict:
-        """Build success validation report with change analysis"""
+        """Build success validation report with conflict information"""
         summary = resolution_result["summary"]
+        conflicts = conflicts or []
+        has_conflicts = len(conflicts) > 0
+
+        # Force manual review if conflicts exist
+        if has_conflicts:
+            auto_approve = False
 
         # Define which fields should be excluded from database load per table
-        # These are identifier fields that go to local_subject_ids table instead
-        # OR metadata fields used only for GSID resolution
         TABLE_EXCLUDE_FIELDS = {
-            "lcl": [
-                "consortium_id",
-                "center_id",
-            ],
+            "lcl": ["consortium_id", "center_id"],
             "blood": ["consortium_id", "center_id"],
             "dna": ["consortium_id", "center_id"],
             "rna": ["consortium_id", "center_id"],
@@ -195,7 +204,6 @@ class FragmentValidator:
             "plasma": ["consortium_id", "center_id"],
             "stool": ["consortium_id", "center_id"],
             "tissue": ["consortium_id", "center_id"],
-            # local_subject_ids table has no exclusions (all fields are data)
             "local_subject_ids": [],
         }
 
@@ -222,6 +230,8 @@ class FragmentValidator:
             "columns": list(mapped_data.columns),
             "exclude_from_load": exclude_from_load,
             "validation_warnings": warnings,
+            "has_conflicts": has_conflicts,
+            "conflict_summary": ConflictDetector.format_conflict_summary(conflicts),
             "gsid_resolution": {
                 "total_rows": summary["total_rows"],
                 "resolved": summary["resolved"],
@@ -236,17 +246,6 @@ class FragmentValidator:
                 ),
             },
         }
-
-        # Add change analysis if available
-        if change_analysis:
-            report["change_analysis"] = {
-                "enabled": True,
-                "summary": change_analysis["summary"],
-                "new_records_count": len(change_analysis.get("new_records", [])),
-                "updated_records_count": len(change_analysis.get("updates", [])),
-                "unchanged_records_count": len(change_analysis.get("unchanged", [])),
-                "orphaned_records_count": len(change_analysis.get("orphaned", [])),
-            }
 
         return report
 

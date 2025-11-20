@@ -1,11 +1,11 @@
 # fragment-validator/services/__init__.py
+from .conflict_detector import ConflictDetector
 from .field_mapper import FieldMapper
 from .gsid_client import GSIDClient
 from .nocodb_client import NocoDBClient
 from .s3_client import S3Client
 from .schema_validator import SchemaValidator, ValidationResult
 from .subject_id_resolver import SubjectIDResolver
-from .update_detector import UpdateDetector
 from .validator import FragmentValidator
 
 __all__ = [
@@ -17,5 +17,5 @@ __all__ = [
     "ValidationResult",
     "FieldMapper",
     "SubjectIDResolver",
-    "UpdateDetector",
+    "ConflictDetector",
 ]

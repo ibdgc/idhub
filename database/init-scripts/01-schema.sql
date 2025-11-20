@@ -240,6 +240,54 @@ CREATE TABLE fragment_resolutions (
     ))
 );
 
+CREATE TABLE IF NOT EXISTS conflict_resolutions (
+    id SERIAL PRIMARY KEY,
+    batch_id VARCHAR(100) NOT NULL,
+    conflict_type VARCHAR(50) NOT NULL, -- 'center_mismatch', 'duplicate_id', 'multi_gsid'
+    
+    -- Conflicting record details
+    local_subject_id VARCHAR(255) NOT NULL,
+    identifier_type VARCHAR(50) DEFAULT 'consortium_id',
+    
+    -- Center conflict details
+    existing_center_id INTEGER,
+    incoming_center_id INTEGER,
+    existing_gsid VARCHAR(21),
+    incoming_gsid VARCHAR(21),
+    
+    -- Resolution decision
+    resolution_action VARCHAR(50), -- 'keep_existing', 'use_incoming', 'delete_both', 'merge', 'pending'
+    resolution_notes TEXT,
+    
+    -- Metadata
+    detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    resolved_at TIMESTAMP,
+    resolved_by VARCHAR(100),
+    status VARCHAR(50) DEFAULT 'pending', -- 'pending', 'resolved', 'applied'
+    
+    -- Audit trail
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    CONSTRAINT valid_conflict_type CHECK (conflict_type IN (
+        'center_mismatch',
+        'duplicate_id',
+        'multi_gsid'
+    )),
+    CONSTRAINT valid_resolution_action CHECK (resolution_action IN (
+        'keep_existing',
+        'use_incoming',
+        'delete_both',
+        'merge',
+        'pending'
+    )),
+    CONSTRAINT valid_status CHECK (status IN (
+        'pending',
+        'resolved',
+        'applied'
+    ))
+);
+
 -- ============================================================================
 -- INDEXES
 -- ============================================================================
@@ -292,6 +340,10 @@ CREATE INDEX idx_fragment_resolutions_status ON fragment_resolutions(load_status
 CREATE INDEX idx_fragment_resolutions_review ON fragment_resolutions(requires_review) WHERE requires_review = TRUE;
 CREATE INDEX idx_fragment_resolutions_created ON fragment_resolutions(created_at DESC);
 CREATE UNIQUE INDEX idx_fragment_resolutions_unique ON fragment_resolutions(batch_id, table_name, fragment_key);
+CREATE INDEX idx_conflict_resolutions_batch ON conflict_resolutions(batch_id);
+CREATE INDEX idx_conflict_resolutions_status ON conflict_resolutions(status);
+CREATE INDEX idx_conflict_resolutions_local_id ON conflict_resolutions(local_subject_id);
+CREATE INDEX idx_conflict_resolutions_pending ON conflict_resolutions(status) WHERE status = 'pending';
 
 -- ============================================================================
 -- TRIGGERS
@@ -716,3 +768,5 @@ COMMENT ON VIEW v_center_conflicts IS 'Identity resolutions with center mismatch
 COMMENT ON VIEW v_resolution_summary_by_center IS 'Resolution statistics grouped by center';
 COMMENT ON VIEW v_subjects_by_source IS 'Subject counts grouped by source system';
 COMMENT ON VIEW v_recent_data_changes IS 'Most recent data changes across all tables';
+COMMENT ON TABLE conflict_resolutions IS 'Tracks data conflicts requiring manual review and resolution';
+COMMENT ON COLUMN conflict_resolutions.resolution_action IS 'keep_existing: Keep DB record, reject incoming | use_incoming: Delete DB record, load incoming | delete_both: Remove both | merge: Combine data';

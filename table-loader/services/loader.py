@@ -7,6 +7,7 @@ import psycopg2
 from core.database import get_db_connection, get_db_cursor
 from psycopg2.extras import execute_values
 
+from .conflict_resolver import ConflictResolver
 from .data_transformer import DataTransformer
 from .s3_client import S3Client
 
@@ -22,7 +23,7 @@ class TableLoader:
         "subjects": ["global_subject_id"],
         "local_subject_ids": ["center_id", "local_subject_id", "identifier_type"],
         "lcl": ["niddk_no"],
-        "blood": ["niddk_no"],  # Assuming similar structure
+        "blood": ["niddk_no"],
         "dna": ["niddk_no"],
         "rna": ["niddk_no"],
         "serum": ["niddk_no"],
@@ -46,6 +47,7 @@ class TableLoader:
         self.s3_client = S3Client(s3_bucket)
         self.db_connection = db_connection or get_db_connection()
         self.validation_report: Dict[str, Any] = {}
+        self.conflict_resolver = ConflictResolver(self.db_connection)
 
     def load_batch(
         self, batch_id: str, approve: bool = False, dry_run: bool = False
@@ -66,6 +68,17 @@ class TableLoader:
         try:
             # Download and parse validation report
             self.validation_report = self.s3_client.download_validation_report(batch_id)
+
+            # Check for conflicts
+            has_conflicts = self.validation_report.get("has_conflicts", False)
+            resolution_summary = {"total": 0, "actions": {}}
+
+            if has_conflicts and not dry_run:
+                logger.info("Batch has conflicts - applying resolutions...")
+                resolution_summary = self.conflict_resolver.apply_resolutions(batch_id)
+                logger.info(
+                    f"Applied {resolution_summary['total']} conflict resolutions"
+                )
 
             # Check if batch requires approval
             if not dry_run and not approve:
@@ -107,6 +120,9 @@ class TableLoader:
                     "records_loaded": result.get("rows_loaded", 0),
                     "inserted": result.get("inserted", 0),
                     "updated": result.get("updated", 0),
+                    "conflicts_resolved": resolution_summary.get("total", 0)
+                    if has_conflicts
+                    else 0,
                     "local_ids_loaded": local_ids_result.get("rows_loaded", 0)
                     if local_ids_result
                     else 0,
@@ -183,8 +199,8 @@ class TableLoader:
                 # Execute batch insert
                 cursor.executemany(query, records)
                 rows_inserted = cursor.rowcount
-                self.db_connection.commit()
 
+                self.db_connection.commit()
                 logger.info(f"Inserted {rows_inserted} rows into {table_name}")
 
                 return {
@@ -278,6 +294,7 @@ class TableLoader:
                 # Execute upsert
                 cursor.executemany(query, records)
                 rows_affected = cursor.rowcount
+
                 self.db_connection.commit()
 
                 # Calculate inserts vs updates
@@ -329,6 +346,32 @@ class TableLoader:
                 exclude_fields=set(),  # No exclusions for local_subject_ids
             )
             transformed_records = transformer.transform_records(local_ids_df)
+
+            # Filter out records that should be skipped based on conflict resolution
+            if not dry_run:
+                filtered_records = []
+                for record in transformed_records:
+                    should_skip = self.conflict_resolver.should_skip_record(
+                        batch_id,
+                        record["local_subject_id"],
+                        record["center_id"],
+                    )
+                    if should_skip:
+                        logger.info(
+                            f"Skipping record per conflict resolution: "
+                            f"{record['local_subject_id']} (center {record['center_id']})"
+                        )
+                    else:
+                        filtered_records.append(record)
+
+                transformed_records = filtered_records
+                logger.info(
+                    f"After conflict filtering: {len(transformed_records)} records to load"
+                )
+
+            if not transformed_records:
+                logger.info("No local_subject_ids to load after conflict filtering")
+                return None
 
             if dry_run:
                 logger.info(

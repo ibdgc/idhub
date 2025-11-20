@@ -116,3 +116,27 @@ class NocoDBClient:
         except Exception as e:
             logger.error(f"Failed to load local ID cache: {e}")
             raise
+
+    def create_record(self, table_name: str, data: Dict) -> Dict:
+        """
+        Create a single record in NocoDB table
+
+        Args:
+            table_name: Target table name
+            data: Record data as dictionary
+
+        Returns:
+            Created record with ID
+        """
+        table_id = self._get_table_id(table_name)
+        url = f"{self.url}/api/v2/tables/{table_id}/records"
+
+        try:
+            response = requests.post(url, headers=self.headers, json=data)
+            response.raise_for_status()
+            created_record = response.json()
+            logger.debug(f"Created record in {table_name}: {created_record.get('Id')}")
+            return created_record
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to create record in {table_name}: {e}")
+            raise
