@@ -235,18 +235,45 @@ class TableLoader:
         try:
             with get_db_cursor(self.db_connection) as cursor:
                 # Track inserts vs updates
-                # First, get existing keys
+                # Build list of conflict key values from incoming records
                 conflict_values = [
                     tuple(record[col] for col in conflict_columns) for record in records
                 ]
 
                 # Check which records already exist
-                check_query = f"""
-                    SELECT {conflict_str} FROM {table_name}
-                    WHERE ({conflict_str}) IN %s
-                """
-                cursor.execute(check_query, (tuple(conflict_values),))
-                existing_keys = set(cursor.fetchall())
+                if len(conflict_columns) == 1:
+                    # Single column conflict - use IN clause
+                    placeholders_check = ",".join(["%s"] * len(conflict_values))
+                    check_query = f"""
+                        SELECT {conflict_columns[0]} FROM {table_name}
+                        WHERE {conflict_columns[0]} IN ({placeholders_check})
+                    """
+                    cursor.execute(check_query, [v[0] for v in conflict_values])
+                else:
+                    # Multi-column conflict - use VALUES clause
+                    placeholders_check = ",".join(
+                        ["(" + ",".join(["%s"] * len(conflict_columns)) + ")"]
+                        * len(conflict_values)
+                    )
+                    check_query = f"""
+                        SELECT {conflict_str} FROM {table_name}
+                        WHERE ({conflict_str}) IN ({placeholders_check})
+                    """
+                    # Flatten the list of tuples for execute
+                    flat_values = [
+                        item for sublist in conflict_values for item in sublist
+                    ]
+                    cursor.execute(check_query, flat_values)
+
+                # Convert results to set of tuples
+                existing_keys = set()
+                for row in cursor.fetchall():
+                    if len(conflict_columns) == 1:
+                        # Single column - row is a dict-like object
+                        existing_keys.add((row[conflict_columns[0]],))
+                    else:
+                        # Multiple columns - create tuple
+                        existing_keys.add(tuple(row[col] for col in conflict_columns))
 
                 # Execute upsert
                 cursor.executemany(query, records)
