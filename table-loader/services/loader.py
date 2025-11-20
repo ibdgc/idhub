@@ -92,6 +92,7 @@ class TableLoader:
 
             table_name = report["table_name"]
             s3_location = report["s3_location"]
+            source_name = report.get("source", "unknown")  # Get source from report
 
             # Get exclude fields from validation report
             exclude_from_report = set(report.get("exclude_from_load", []))
@@ -121,7 +122,13 @@ class TableLoader:
             conn = get_db_connection()
             try:
                 with get_db_cursor(conn) as cursor:
-                    result = strategy.load(cursor, records)
+                    # Pass batch_id and source_fragment to load strategy
+                    result = strategy.load(
+                        cursor=cursor,
+                        records=records,
+                        batch_id=batch_id,
+                        source_fragment=source_name,
+                    )
 
                 if not dry_run:
                     conn.commit()
@@ -137,7 +144,7 @@ class TableLoader:
             local_ids_result = None
             try:
                 local_ids_result = self._load_local_subject_ids(
-                    batch_id, dry_run, exclude_fields
+                    batch_id, dry_run, exclude_fields, source_name
                 )
             except Exception as e:
                 logger.warning(f"Could not load local_subject_ids: {e}")
@@ -159,7 +166,11 @@ class TableLoader:
             raise
 
     def _load_local_subject_ids(
-        self, batch_id: str, dry_run: bool, exclude_fields: set = None
+        self,
+        batch_id: str,
+        dry_run: bool,
+        exclude_fields: set = None,
+        source_name: str = "unknown",
     ) -> Dict:
         """Load local_subject_ids fragment if present"""
         try:
@@ -198,7 +209,13 @@ class TableLoader:
             conn = get_db_connection()
             try:
                 with get_db_cursor(conn) as cursor:
-                    result = strategy.load(cursor, filtered_records)
+                    # Pass batch_id and source_fragment to load strategy
+                    result = strategy.load(
+                        cursor=cursor,
+                        records=filtered_records,
+                        batch_id=batch_id,
+                        source_fragment=source_name,
+                    )
 
                 if not dry_run:
                     conn.commit()
