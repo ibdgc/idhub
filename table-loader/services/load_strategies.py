@@ -1,4 +1,5 @@
 # table-loader/services/load_strategies.py
+
 import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Set
@@ -93,12 +94,10 @@ class UniversalUpsertStrategy(LoadStrategy):
     """
     Universal UPSERT strategy with change detection and audit logging
 
-    Features:
-    - Handles any table with configurable natural keys
-    - Detects changes before updating
-    - Logs all changes to data_change_audit table
-    - Skips updates when no changes detected
-    - Supports batch operations
+    Special handling for local_subject_ids:
+    - Detects center_id changes by matching on (local_subject_id, identifier_type)
+    - Deletes old records before inserting new ones with updated center_id
+    - Syncs all changes to NocoDB
     """
 
     def __init__(
@@ -108,15 +107,6 @@ class UniversalUpsertStrategy(LoadStrategy):
         exclude_fields: Set[str] = None,
         changed_by: str = "table_loader",
     ):
-        """
-        Initialize universal upsert strategy
-
-        Args:
-            table_name: Target table name
-            natural_key: List of columns that form the natural key
-            exclude_fields: Fields to exclude from upsert
-            changed_by: Source identifier for audit log
-        """
         super().__init__(table_name, exclude_fields)
         self.natural_key = natural_key
         self.changed_by = changed_by
@@ -128,16 +118,7 @@ class UniversalUpsertStrategy(LoadStrategy):
         batch_id: str,
         source_fragment: str,
     ) -> Dict[str, Any]:
-        """
-        Load records with change detection and audit logging
-
-        Process:
-        1. Fetch current state from database
-        2. Compare incoming vs current
-        3. Insert new records
-        4. Update changed records (log to audit)
-        5. Skip unchanged records
-        """
+        """Load records with change detection and audit logging"""
         if not records:
             return {
                 "rows_attempted": 0,
@@ -152,11 +133,16 @@ class UniversalUpsertStrategy(LoadStrategy):
         filtered_records = [self._filter_fields(r) for r in records]
 
         try:
-            # Step 1: Fetch current state
+            # Special handling for local_subject_ids table
+            if self.table_name == "local_subject_ids":
+                return self._load_local_subject_ids_with_center_handling(
+                    conn, filtered_records, batch_id, source_fragment
+                )
+
+            # Standard upsert logic for other tables
             current_records = self._fetch_current_state(conn, filtered_records)
             current_map = {self._make_key(rec): rec for rec in current_records}
 
-            # Step 2: Classify records
             new_records = []
             update_records = []
             unchanged_records = []
@@ -166,10 +152,8 @@ class UniversalUpsertStrategy(LoadStrategy):
                 current = current_map.get(key)
 
                 if current is None:
-                    # New record
                     new_records.append(record)
                 else:
-                    # Check for changes
                     changes = self._detect_changes(record, current)
                     if changes:
                         update_records.append(
@@ -178,7 +162,6 @@ class UniversalUpsertStrategy(LoadStrategy):
                     else:
                         unchanged_records.append(record)
 
-            # Step 3: Execute operations
             rows_inserted = self._insert_new_records(conn, new_records)
             rows_updated = self._update_changed_records(
                 conn, update_records, batch_id, source_fragment
@@ -194,8 +177,8 @@ class UniversalUpsertStrategy(LoadStrategy):
                 "rows_attempted": len(records),
                 "rows_loaded": rows_inserted + rows_updated,
                 "rows_failed": 0,
-                "rows_inserted": rows_inserted,
-                "rows_updated": rows_updated,
+                "inserted": rows_inserted,
+                "updated": rows_updated,
                 "rows_unchanged": len(unchanged_records),
                 "errors": [],
             }
@@ -206,11 +189,310 @@ class UniversalUpsertStrategy(LoadStrategy):
                 "rows_attempted": len(records),
                 "rows_loaded": 0,
                 "rows_failed": len(records),
-                "rows_inserted": 0,
-                "rows_updated": 0,
+                "inserted": 0,
+                "updated": 0,
                 "rows_unchanged": 0,
                 "errors": [str(e)],
             }
+
+    def _load_local_subject_ids_with_center_handling(
+        self,
+        conn: psycopg2.extensions.connection,
+        records: List[Dict[str, Any]],
+        batch_id: str,
+        source_fragment: str,
+    ) -> Dict[str, Any]:
+        """
+        Special handling for local_subject_ids with center_id changes
+
+        Process:
+        1. Find existing records by (local_subject_id, identifier_type) only
+        2. If center_id differs: DELETE old + INSERT new + LOG change
+        3. If center_id same: Standard upsert
+        4. Sync all changes to NocoDB
+        """
+        rows_inserted = 0
+        rows_updated = 0
+        rows_deleted = 0
+        unchanged_records = []
+
+        with conn.cursor() as cursor:
+            for record in records:
+                local_id = record["local_subject_id"]
+                id_type = record["identifier_type"]
+                new_center = record["center_id"]
+                new_gsid = record["global_subject_id"]
+
+                # Find existing record(s) by local_subject_id + identifier_type
+                cursor.execute(
+                    """
+                    SELECT center_id, global_subject_id, created_by, created_at, updated_at
+                    FROM local_subject_ids
+                    WHERE local_subject_id = %s AND identifier_type = %s
+                    """,
+                    (local_id, id_type),
+                )
+                existing = cursor.fetchall()
+
+                if not existing:
+                    # New record - simple insert
+                    self._insert_single_record(cursor, record)
+                    rows_inserted += 1
+                    self._sync_to_nocodb_single(record, "insert")
+
+                elif len(existing) > 1:
+                    # Multiple existing records - log warning
+                    logger.warning(
+                        f"⚠️  Found {len(existing)} existing records for "
+                        f"{id_type}={local_id}. Cleaning up duplicates..."
+                    )
+                    # Delete all existing records
+                    cursor.execute(
+                        """
+                        DELETE FROM local_subject_ids
+                        WHERE local_subject_id = %s AND identifier_type = %s
+                        """,
+                        (local_id, id_type),
+                    )
+                    rows_deleted += cursor.rowcount
+
+                    # Insert new record
+                    self._insert_single_record(cursor, record)
+                    rows_inserted += 1
+
+                    # Log change
+                    self._log_center_change(
+                        cursor,
+                        local_id,
+                        id_type,
+                        existing[0][0],  # old center_id
+                        new_center,
+                        batch_id,
+                        source_fragment,
+                    )
+                    self._sync_to_nocodb_single(record, "insert")
+
+                else:
+                    # Single existing record
+                    old_center, old_gsid, created_by, created_at, updated_at = existing[
+                        0
+                    ]
+
+                    if old_center != new_center:
+                        # Center mismatch - delete old + insert new
+                        logger.info(
+                            f"Center change detected: {id_type}={local_id} "
+                            f"from center_id={old_center} to center_id={new_center}"
+                        )
+
+                        cursor.execute(
+                            """
+                            DELETE FROM local_subject_ids
+                            WHERE center_id = %s AND local_subject_id = %s AND identifier_type = %s
+                            """,
+                            (old_center, local_id, id_type),
+                        )
+                        rows_deleted += cursor.rowcount
+
+                        self._insert_single_record(cursor, record)
+                        rows_inserted += 1
+
+                        self._log_center_change(
+                            cursor,
+                            local_id,
+                            id_type,
+                            old_center,
+                            new_center,
+                            batch_id,
+                            source_fragment,
+                        )
+                        self._sync_to_nocodb_single(record, "update")
+
+                    elif old_gsid != new_gsid:
+                        # GSID change - update
+                        cursor.execute(
+                            """
+                            UPDATE local_subject_ids
+                            SET global_subject_id = %s, updated_at = CURRENT_TIMESTAMP
+                            WHERE center_id = %s AND local_subject_id = %s AND identifier_type = %s
+                            """,
+                            (new_gsid, new_center, local_id, id_type),
+                        )
+                        rows_updated += cursor.rowcount
+
+                        self._log_gsid_change(
+                            cursor,
+                            local_id,
+                            id_type,
+                            new_center,
+                            old_gsid,
+                            new_gsid,
+                            batch_id,
+                            source_fragment,
+                        )
+                        self._sync_to_nocodb_single(record, "update")
+
+                    else:
+                        # No changes
+                        unchanged_records.append(record)
+
+        logger.info(
+            f"local_subject_ids load complete: "
+            f"{rows_inserted} inserted, {rows_updated} updated, "
+            f"{rows_deleted} deleted, {len(unchanged_records)} unchanged"
+        )
+
+        return {
+            "rows_attempted": len(records),
+            "rows_loaded": rows_inserted + rows_updated,
+            "rows_failed": 0,
+            "inserted": rows_inserted,
+            "updated": rows_updated,
+            "rows_deleted": rows_deleted,
+            "rows_unchanged": len(unchanged_records),
+            "errors": [],
+        }
+
+    def _insert_single_record(self, cursor, record: Dict[str, Any]):
+        """Insert a single record"""
+        columns = list(record.keys())
+        placeholders = ", ".join(["%s"] * len(columns))
+
+        query = f"""
+            INSERT INTO {self.table_name} ({", ".join(columns)})
+            VALUES ({placeholders})
+        """
+
+        cursor.execute(query, [record[col] for col in columns])
+
+    def _log_center_change(
+        self,
+        cursor,
+        local_id: str,
+        id_type: str,
+        old_center: int,
+        new_center: int,
+        batch_id: str,
+        source_fragment: str,
+    ):
+        """Log center_id change to audit table"""
+        import json
+
+        record_key = {
+            "local_subject_id": local_id,
+            "identifier_type": id_type,
+        }
+
+        changes = {"center_id": {"old": old_center, "new": new_center}}
+
+        cursor.execute(
+            """
+            INSERT INTO data_change_audit (
+                table_name, record_key, changes, changed_by, 
+                batch_id, source_fragment
+            )
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (
+                self.table_name,
+                json.dumps(record_key),
+                json.dumps(changes),
+                self.changed_by,
+                batch_id,
+                source_fragment,
+            ),
+        )
+
+    def _log_gsid_change(
+        self,
+        cursor,
+        local_id: str,
+        id_type: str,
+        center_id: int,
+        old_gsid: str,
+        new_gsid: str,
+        batch_id: str,
+        source_fragment: str,
+    ):
+        """Log GSID change to audit table"""
+        import json
+
+        record_key = {
+            "center_id": center_id,
+            "local_subject_id": local_id,
+            "identifier_type": id_type,
+        }
+
+        changes = {"global_subject_id": {"old": old_gsid, "new": new_gsid}}
+
+        cursor.execute(
+            """
+            INSERT INTO data_change_audit (
+                table_name, record_key, changes, changed_by, 
+                batch_id, source_fragment
+            )
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (
+                self.table_name,
+                json.dumps(record_key),
+                json.dumps(changes),
+                self.changed_by,
+                batch_id,
+                source_fragment,
+            ),
+        )
+
+    def _sync_to_nocodb_single(self, record: Dict[str, Any], operation: str):
+        """Sync single record to NocoDB"""
+        try:
+            # Import here to avoid circular dependency
+            import os
+            import sys
+
+            sys.path.append(
+                os.path.join(
+                    os.path.dirname(__file__), "..", "..", "fragment-validator"
+                )
+            )
+            from clients.nocodb_client import NocoDBClient
+
+            nocodb = NocoDBClient()
+
+            local_id = record["local_subject_id"]
+            id_type = record["identifier_type"]
+            center_id = record["center_id"]
+
+            if operation == "update":
+                # Find existing record in NocoDB
+                existing = nocodb.get_all_records(
+                    "local_subject_ids",
+                    filters=f"(local_subject_id,eq,{local_id})~and(identifier_type,eq,{id_type})",
+                )
+
+                if existing:
+                    # Delete old records (there might be duplicates)
+                    for old_record in existing:
+                        nocodb.delete_record("local_subject_ids", old_record["Id"])
+
+                # Insert new record
+                nocodb.create_record("local_subject_ids", record)
+
+            elif operation == "insert":
+                # Check if already exists
+                existing = nocodb.get_all_records(
+                    "local_subject_ids",
+                    filters=f"(local_subject_id,eq,{local_id})~and(identifier_type,eq,{id_type})~and(center_id,eq,{center_id})",
+                )
+
+                if not existing:
+                    nocodb.create_record("local_subject_ids", record)
+                else:
+                    # Update existing
+                    nocodb.update_record("local_subject_ids", existing[0]["Id"], record)
+
+        except Exception as e:
+            logger.warning(f"NocoDB sync failed (non-fatal): {e}")
 
     def _make_key(self, record: Dict[str, Any]) -> tuple:
         """Create tuple key from natural key fields"""
@@ -223,11 +505,7 @@ class UniversalUpsertStrategy(LoadStrategy):
         if not records:
             return []
 
-        # Build WHERE clause for natural key matching
-        # Example: WHERE (global_subject_id, sample_id) IN (('GSID-001', 'SMP001'), ...)
         keys = [self._make_key(r) for r in records]
-
-        # Get all columns from first record (excluding excluded fields)
         columns = list(records[0].keys())
 
         query = f"""
@@ -239,37 +517,23 @@ class UniversalUpsertStrategy(LoadStrategy):
         with conn.cursor() as cursor:
             cursor.execute(query, (tuple(keys),))
             rows = cursor.fetchall()
-
-            # Convert to list of dicts
             return [dict(zip(columns, row)) for row in rows]
 
     def _detect_changes(
         self, incoming: Dict[str, Any], current: Dict[str, Any]
     ) -> Dict[str, Dict[str, Any]]:
-        """
-        Detect changes between incoming and current record
-
-        Returns:
-            Dict of changed fields: {"field_name": {"old": value, "new": value}}
-        """
+        """Detect changes between incoming and current record"""
         changes = {}
 
         for field, new_value in incoming.items():
-            # Skip natural key fields (they can't change)
-            if field in self.natural_key:
-                continue
-
-            # Skip excluded fields
-            if field in self.exclude_fields:
+            if field in self.natural_key or field in self.exclude_fields:
                 continue
 
             old_value = current.get(field)
 
-            # Handle None/NULL comparison
             if old_value is None and new_value is None:
                 continue
 
-            # Detect change
             if old_value != new_value:
                 changes[field] = {"old": old_value, "new": new_value}
 
@@ -304,12 +568,7 @@ class UniversalUpsertStrategy(LoadStrategy):
         batch_id: str,
         source_fragment: str,
     ) -> int:
-        """
-        Update changed records and log to audit table
-
-        Args:
-            update_records: List of dicts with 'record', 'changes', 'natural_key'
-        """
+        """Update changed records and log to audit table"""
         if not update_records:
             return 0
 
@@ -321,7 +580,6 @@ class UniversalUpsertStrategy(LoadStrategy):
                 changes = item["changes"]
                 natural_key = item["natural_key"]
 
-                # Build UPDATE query
                 set_clause = ", ".join(f"{field} = %s" for field in changes.keys())
                 where_clause = " AND ".join(
                     f"{field} = %s" for field in self.natural_key
@@ -333,7 +591,6 @@ class UniversalUpsertStrategy(LoadStrategy):
                     WHERE {where_clause}
                 """
 
-                # Execute update
                 cursor.execute(
                     update_query,
                     [changes[f]["new"] for f in changes.keys()] + list(natural_key),
@@ -341,8 +598,6 @@ class UniversalUpsertStrategy(LoadStrategy):
 
                 if cursor.rowcount > 0:
                     rows_updated += cursor.rowcount
-
-                    # Log to audit table
                     self._log_change(
                         cursor, natural_key, changes, batch_id, source_fragment
                     )
@@ -360,7 +615,6 @@ class UniversalUpsertStrategy(LoadStrategy):
         """Log change to data_change_audit table"""
         import json
 
-        # Build record_key JSONB
         record_key = dict(zip(self.natural_key, natural_key))
 
         audit_query = """
@@ -385,11 +639,7 @@ class UniversalUpsertStrategy(LoadStrategy):
 
 
 class UpsertLoadStrategy(LoadStrategy):
-    """
-    Legacy UPSERT strategy (kept for backward compatibility)
-
-    Use UniversalUpsertStrategy for new implementations.
-    """
+    """Legacy UPSERT strategy (kept for backward compatibility)"""
 
     def __init__(
         self,

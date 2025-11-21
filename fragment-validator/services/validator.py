@@ -100,9 +100,31 @@ class FragmentValidator:
             # Add GSIDs to mapped data
             mapped_data["global_subject_id"] = resolution_result["gsids"]
 
-            # Create local_subject_ids DataFrame from resolution result
+            # Create local_subject_ids DataFrame with INCOMING center_id from CSV
             if resolution_result["local_id_records"]:
                 local_ids_df = pd.DataFrame(resolution_result["local_id_records"])
+
+                # CRITICAL: Override center_id with incoming CSV values for conflict detection
+                # The GSID service returns existing center_id, but we need to compare
+                # against the NEW center_id from the incoming data
+                if "center_id" in mapped_data.columns:
+                    # Build a mapping from GSID to incoming center_id
+                    gsid_to_center = dict(
+                        zip(mapped_data["global_subject_id"], mapped_data["center_id"])
+                    )
+
+                    # Update local_ids_df with incoming center_id values
+                    local_ids_df["center_id"] = local_ids_df["global_subject_id"].map(
+                        gsid_to_center
+                    )
+
+                    logger.info(
+                        f"Using incoming center_id values for conflict detection: {local_ids_df['center_id'].unique()}"
+                    )
+                else:
+                    logger.info(
+                        f"No center_id in incoming data, using resolved values: {local_ids_df['center_id'].unique()}"
+                    )
             else:
                 local_ids_df = pd.DataFrame()
 
