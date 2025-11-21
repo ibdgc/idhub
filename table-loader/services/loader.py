@@ -1,6 +1,6 @@
 # table-loader/services/loader.py
 import logging
-from typing import Dict
+from typing import Dict, Optional, Set
 
 from core.database import get_db_connection
 
