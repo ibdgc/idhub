@@ -446,15 +446,17 @@ class UniversalUpsertStrategy(LoadStrategy):
     def _sync_to_nocodb_single(self, record: Dict[str, Any], operation: str):
         """Sync single record to NocoDB"""
         try:
-            # Import here to avoid circular dependency
+            # Add fragment-validator to path
             import os
             import sys
 
-            sys.path.append(
-                os.path.join(
-                    os.path.dirname(__file__), "..", "..", "fragment-validator"
-                )
-            )
+            # Get the project root (parent of table-loader)
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            fragment_validator_path = os.path.join(project_root, "fragment-validator")
+
+            if fragment_validator_path not in sys.path:
+                sys.path.insert(0, fragment_validator_path)
+
             from clients.nocodb_client import NocoDBClient
 
             nocodb = NocoDBClient()
