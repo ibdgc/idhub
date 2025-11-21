@@ -236,40 +236,6 @@ class FragmentResolutionService:
         )
         return filtered
 
-    def mark_conflicts_as_applied(self, batch_id: str) -> None:
-        """
-        Mark all resolved conflicts for a batch as 'applied'
-
-        Args:
-            batch_id: Batch identifier
-        """
-        conn = get_db_connection()
-        try:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    UPDATE conflict_resolutions
-                    SET status = 'applied',
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE batch_id = %s
-                      AND status = 'resolved'
-                """,
-                    (batch_id,),
-                )
-
-                rows_updated = cursor.rowcount
-                conn.commit()
-
-                logger.info(
-                    f"Marked {rows_updated} conflicts as applied for batch {batch_id}"
-                )
-
-        except Exception as e:
-            logger.error(f"Failed to mark conflicts as applied: {e}")
-            conn.rollback()
-        finally:
-            conn.close()
-
     def _fetch_current_data(self, table_name: str) -> pd.DataFrame:
         """Fetch current data from database table"""
         try:
@@ -331,7 +297,10 @@ class FragmentResolutionService:
         batch_id: str,
         table_name: str,
         records_loaded: int,
-        status: str = "loaded",
+        status: str = "success",
+        rows_attempted: int = None,
+        rows_failed: int = 0,
+        error_message: str = None,
     ) -> None:
         """
         Record a successful load in fragment_resolutions table
@@ -339,8 +308,94 @@ class FragmentResolutionService:
         Args:
             batch_id: Batch identifier
             table_name: Table that was loaded
-            records_loaded: Number of records loaded
-            status: Load status (default: "loaded")
+            records_loaded: Number of records successfully loaded
+            status: Load status (success, partial, failed, skipped, preview)
+            rows_attempted: Total rows attempted (defaults to records_loaded + rows_failed)
+            rows_failed: Number of failed rows
+            error_message: Error message if load failed
+        """
+        try:
+            from core.database import get_db_connection
+
+            # Validate status
+            valid_statuses = ["success", "partial", "failed", "skipped", "preview"]
+            if status not in valid_statuses:
+                logger.warning(f"Invalid status '{status}', defaulting to 'success'")
+                status = "success"
+
+            # Calculate rows_attempted if not provided
+            if rows_attempted is None:
+                rows_attempted = records_loaded + rows_failed
+
+            # Determine load strategy based on table
+            load_strategy = (
+                "upsert"
+                if table_name
+                in [
+                    "lcl",
+                    "blood",
+                    "dna",
+                    "rna",
+                    "serum",
+                    "plasma",
+                    "stool",
+                    "tissue",
+                    "local_subject_ids",
+                ]
+                else "standard_insert"
+            )
+
+            # Build fragment key
+            fragment_key = f"staging/validated/{batch_id}/{table_name}.csv"
+
+            conn = get_db_connection()
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO fragment_resolutions 
+                            (batch_id, table_name, fragment_key, load_status, load_strategy,
+                             rows_attempted, rows_loaded, rows_failed, error_message, created_by)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'table_loader')
+                        ON CONFLICT (batch_id, table_name, fragment_key) 
+                        DO UPDATE SET
+                            load_status = EXCLUDED.load_status,
+                            rows_attempted = EXCLUDED.rows_attempted,
+                            rows_loaded = EXCLUDED.rows_loaded,
+                            rows_failed = EXCLUDED.rows_failed,
+                            error_message = EXCLUDED.error_message,
+                            created_at = CURRENT_TIMESTAMP
+                        """,
+                        (
+                            batch_id,
+                            table_name,
+                            fragment_key,
+                            status,
+                            load_strategy,
+                            rows_attempted,
+                            records_loaded,
+                            rows_failed,
+                            error_message,
+                        ),
+                    )
+                conn.commit()
+                logger.info(
+                    f"Recorded load for batch {batch_id}/{table_name}: "
+                    f"{records_loaded}/{rows_attempted} rows loaded"
+                )
+            finally:
+                conn.close()
+
+        except Exception as e:
+            logger.error(f"Failed to record load in fragment_resolutions: {e}")
+            # Don't raise - this is just for tracking
+
+    def mark_conflicts_as_applied(self, batch_id: str) -> None:
+        """
+        Mark all resolved conflicts for a batch as 'applied'
+
+        Args:
+            batch_id: Batch identifier
         """
         try:
             from core.database import get_db_connection
@@ -350,24 +405,30 @@ class FragmentResolutionService:
                 with conn.cursor() as cursor:
                     cursor.execute(
                         """
-                        INSERT INTO fragment_resolutions 
-                            (batch_id, table_name, records_loaded, status, loaded_at)
-                        VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-                        ON CONFLICT (batch_id) 
-                        DO UPDATE SET
-                            records_loaded = EXCLUDED.records_loaded,
-                            status = EXCLUDED.status,
-                            loaded_at = CURRENT_TIMESTAMP
+                        UPDATE conflict_resolutions
+                        SET 
+                            status = 'applied',
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE batch_id = %s 
+                          AND status = 'resolved'
                         """,
-                        (batch_id, table_name, records_loaded, status),
+                        (batch_id,),
                     )
+                    rows_updated = cursor.rowcount
                 conn.commit()
-                logger.info(
-                    f"Recorded load for batch {batch_id} in fragment_resolutions"
-                )
+
+                if rows_updated > 0:
+                    logger.info(
+                        f"Marked {rows_updated} conflicts as applied for batch {batch_id}"
+                    )
+                else:
+                    logger.debug(
+                        f"No resolved conflicts to mark as applied for batch {batch_id}"
+                    )
+
             finally:
                 conn.close()
 
         except Exception as e:
-            logger.error(f"Failed to record load in fragment_resolutions: {e}")
+            logger.error(f"Failed to mark conflicts as applied: {e}")
             # Don't raise - this is just for tracking
