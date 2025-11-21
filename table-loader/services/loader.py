@@ -105,6 +105,21 @@ class TableLoader:
                 f"Found {len(resolved_conflicts)} resolved conflicts for batch {batch_id}"
             )
 
+            # ✅ NEW: Apply center_id updates to subjects table FIRST
+            if not dry_run and resolved_conflicts:
+                try:
+                    subjects_updated = (
+                        self.resolution_service.apply_center_updates_to_subjects(
+                            batch_id
+                        )
+                    )
+                    logger.info(
+                        f"Updated {subjects_updated} subjects with new center_id"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to apply center updates to subjects: {e}")
+                    raise
+
             # Build exclusion set from conflicts
             exclude_ids = set()
             if resolved_conflicts:
@@ -185,7 +200,7 @@ class TableLoader:
                 local_ids_result = self._load_local_subject_ids(
                     batch_id=batch_id,
                     dry_run=dry_run,
-                    exclude_fields=None,  # ✅ Don't pass main table exclusions
+                    exclude_fields=None,
                     source_name=source_name,
                     exclude_ids=exclude_ids,
                 )
@@ -209,7 +224,7 @@ class TableLoader:
                         batch_id=batch_id,
                         table_name=table_name,
                         records_loaded=result.get("rows_loaded", 0),
-                        status="loaded",
+                        status="success",
                     )
                 except Exception as e:
                     logger.warning(

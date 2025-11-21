@@ -432,3 +432,80 @@ class FragmentResolutionService:
         except Exception as e:
             logger.error(f"Failed to mark conflicts as applied: {e}")
             # Don't raise - this is just for tracking
+
+    def apply_center_updates_to_subjects(self, batch_id: str) -> int:
+        """
+        Apply center_id updates from conflict resolutions to subjects table
+
+        When a conflict is resolved with 'use_incoming', we need to update
+        the subject's center_id in the subjects table, not just local_subject_ids.
+
+        Args:
+            batch_id: Batch identifier
+
+        Returns:
+            Number of subjects updated
+        """
+        try:
+            from core.database import get_db_connection
+
+            conn = get_db_connection()
+            try:
+                with conn.cursor() as cursor:
+                    # Get all resolved conflicts with use_incoming action
+                    cursor.execute(
+                        """
+                        SELECT DISTINCT
+                            cr.existing_gsid,
+                            cr.incoming_center_id
+                        FROM conflict_resolutions cr
+                        WHERE cr.batch_id = %s
+                          AND cr.conflict_type = 'center_mismatch'
+                          AND cr.resolution_action = 'use_incoming'
+                          AND cr.status = 'resolved'
+                        """,
+                        (batch_id,),
+                    )
+
+                    conflicts = cursor.fetchall()
+
+                    if not conflicts:
+                        logger.info(f"No center updates needed for batch {batch_id}")
+                        return 0
+
+                    # Update each subject's center_id
+                    updated_count = 0
+                    for conflict in conflicts:
+                        gsid = conflict["existing_gsid"]
+                        new_center_id = conflict["incoming_center_id"]
+
+                        cursor.execute(
+                            """
+                            UPDATE subjects
+                            SET 
+                                center_id = %s,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE global_subject_id = %s
+                              AND center_id != %s  -- Only update if different
+                            """,
+                            (new_center_id, gsid, new_center_id),
+                        )
+
+                        if cursor.rowcount > 0:
+                            updated_count += cursor.rowcount
+                            logger.info(
+                                f"Updated subject {gsid} center_id to {new_center_id}"
+                            )
+
+                    conn.commit()
+                    logger.info(
+                        f"Applied center updates to {updated_count} subjects for batch {batch_id}"
+                    )
+                    return updated_count
+
+            finally:
+                conn.close()
+
+        except Exception as e:
+            logger.error(f"Failed to apply center updates to subjects: {e}")
+            raise
