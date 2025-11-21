@@ -9,7 +9,7 @@ from services.fragment_resolution import FragmentResolutionService
 from services.load_strategies import (
     LoadStrategy,
     StandardLoadStrategy,
-    UpsertLoadStrategy,
+    UniversalUpsertStrategy,
 )
 from services.s3_client import S3Client
 
@@ -52,10 +52,15 @@ class TableLoader:
     def _get_load_strategy(self, table_name: str, exclude_fields: set) -> LoadStrategy:
         """Get appropriate load strategy for table"""
         if table_name in self.UPSERT_TABLES:
-            return UpsertLoadStrategy(
+            # Use UniversalUpsertStrategy with proper change detection
+
+            return UniversalUpsertStrategy(
                 table_name=table_name,
-                conflict_columns=self.UPSERT_TABLES[table_name],
+                natural_key=self.UPSERT_TABLES[
+                    table_name
+                ],  # These ARE your natural keys
                 exclude_fields=exclude_fields,
+                changed_by="table_loader",
             )
         else:
             return StandardLoadStrategy(
