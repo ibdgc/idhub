@@ -325,3 +325,49 @@ class FragmentResolutionService:
                 }
 
         return changes
+
+    def record_load(
+        self,
+        batch_id: str,
+        table_name: str,
+        records_loaded: int,
+        status: str = "loaded",
+    ) -> None:
+        """
+        Record a successful load in fragment_resolutions table
+
+        Args:
+            batch_id: Batch identifier
+            table_name: Table that was loaded
+            records_loaded: Number of records loaded
+            status: Load status (default: "loaded")
+        """
+        try:
+            from core.database import get_db_connection
+
+            conn = get_db_connection()
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO fragment_resolutions 
+                            (batch_id, table_name, records_loaded, status, loaded_at)
+                        VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        ON CONFLICT (batch_id) 
+                        DO UPDATE SET
+                            records_loaded = EXCLUDED.records_loaded,
+                            status = EXCLUDED.status,
+                            loaded_at = CURRENT_TIMESTAMP
+                        """,
+                        (batch_id, table_name, records_loaded, status),
+                    )
+                conn.commit()
+                logger.info(
+                    f"Recorded load for batch {batch_id} in fragment_resolutions"
+                )
+            finally:
+                conn.close()
+
+        except Exception as e:
+            logger.error(f"Failed to record load in fragment_resolutions: {e}")
+            # Don't raise - this is just for tracking

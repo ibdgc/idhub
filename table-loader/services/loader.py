@@ -183,7 +183,11 @@ class TableLoader:
             local_ids_result = None
             try:
                 local_ids_result = self._load_local_subject_ids(
-                    batch_id, dry_run, exclude_fields, source_name, exclude_ids
+                    batch_id=batch_id,
+                    dry_run=dry_run,
+                    exclude_fields=None,  # ✅ Don't pass main table exclusions
+                    source_name=source_name,
+                    exclude_ids=exclude_ids,
                 )
             except Exception as e:
                 logger.warning(f"Could not load local_subject_ids: {e}", exc_info=True)
@@ -233,7 +237,7 @@ class TableLoader:
         self,
         batch_id: str,
         dry_run: bool,
-        exclude_fields: set = None,
+        exclude_fields: set = None,  # ❌ Don't use this - it's from the main table!
         source_name: str = "unknown",
         exclude_ids: set = None,
     ) -> Dict:
@@ -265,15 +269,17 @@ class TableLoader:
                         f"Filtered out {filtered_count} local_subject_ids based on conflict resolution"
                     )
 
-            # Get table-specific exclusions for local_subject_ids
-            table_defaults = self.TABLE_DEFAULT_EXCLUSIONS.get(
+            # ✅ Use ONLY local_subject_ids-specific exclusions (don't inherit from main table)
+            local_ids_exclude = self.TABLE_DEFAULT_EXCLUSIONS.get(
                 "local_subject_ids", set()
             )
-            exclude_fields = (exclude_fields or set()) | table_defaults
+
+            logger.info(f"Exclusions for local_subject_ids: {local_ids_exclude}")
 
             # Transform data
             transformer = DataTransformer(
-                table_name="local_subject_ids", exclude_fields=exclude_fields
+                table_name="local_subject_ids",
+                exclude_fields=local_ids_exclude,  # ✅ Use local_ids_exclude, not exclude_fields
             )
             records = transformer.transform_records(fragment_df)
 
@@ -282,7 +288,7 @@ class TableLoader:
             )
 
             # Get load strategy (upsert handles conflicts automatically)
-            strategy = self._get_load_strategy("local_subject_ids", exclude_fields)
+            strategy = self._get_load_strategy("local_subject_ids", local_ids_exclude)
 
             # Load data
             conn = get_db_connection()
