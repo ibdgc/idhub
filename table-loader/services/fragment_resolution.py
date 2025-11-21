@@ -509,3 +509,88 @@ class FragmentResolutionService:
         except Exception as e:
             logger.error(f"Failed to apply center updates to subjects: {e}")
             raise
+
+    def apply_center_updates_to_local_ids(self, batch_id: str, conn) -> int:
+        """
+        Apply center_id updates from conflict resolutions to local_subject_ids table
+
+        For center_mismatch conflicts with use_incoming:
+        - DELETE old record (old center_id)
+        - INSERT new record (new center_id)
+
+        This is necessary because center_id is part of the primary key.
+
+        Args:
+            batch_id: Batch identifier
+            conn: Database connection
+
+        Returns:
+            Number of records updated
+        """
+        try:
+            with conn.cursor() as cursor:
+                # Get all resolved conflicts with use_incoming action
+                cursor.execute(
+                    """
+                    SELECT 
+                        cr.local_subject_id,
+                        cr.identifier_type,
+                        cr.existing_center_id,
+                        cr.incoming_center_id,
+                        cr.existing_gsid
+                    FROM conflict_resolutions cr
+                    WHERE cr.batch_id = %s
+                      AND cr.conflict_type = 'center_mismatch'
+                      AND cr.resolution_action = 'use_incoming'
+                      AND cr.status IN ('resolved', 'pending')
+                    """,
+                    (batch_id,),
+                )
+
+                conflicts = cursor.fetchall()
+
+                if not conflicts:
+                    logger.info(
+                        f"No center updates needed for local_subject_ids in batch {batch_id}"
+                    )
+                    return 0
+
+                updated_count = 0
+                for conflict in conflicts:
+                    local_id = conflict["local_subject_id"]
+                    id_type = conflict["identifier_type"]
+                    old_center = conflict["existing_center_id"]
+                    new_center = conflict["incoming_center_id"]
+                    gsid = conflict["existing_gsid"]
+
+                    # Delete old record
+                    cursor.execute(
+                        """
+                        DELETE FROM local_subject_ids
+                        WHERE center_id = %s
+                          AND local_subject_id = %s
+                          AND identifier_type = %s
+                        """,
+                        (old_center, local_id, id_type),
+                    )
+
+                    deleted = cursor.rowcount
+
+                    # Insert new record (will be done by UPSERT in main load)
+                    # We just need to ensure the old one is gone
+
+                    if deleted > 0:
+                        updated_count += deleted
+                        logger.info(
+                            f"Deleted old local_subject_id: center={old_center}, "
+                            f"id={local_id}, type={id_type} (will be replaced with center={new_center})"
+                        )
+
+                logger.info(
+                    f"Prepared {updated_count} local_subject_id records for center update in batch {batch_id}"
+                )
+                return updated_count
+
+        except Exception as e:
+            logger.error(f"Failed to apply center updates to local_subject_ids: {e}")
+            raise
