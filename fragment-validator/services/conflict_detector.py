@@ -1,88 +1,193 @@
 # fragment-validator/services/conflict_detector.py
 import logging
-from typing import Dict, List
+from typing import Dict, List, Tuple
+
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 
 class ConflictDetector:
-    """Detects and categorizes data conflicts during validation"""
+    """Detects data conflicts between incoming fragments and existing NocoDB state"""
 
-    @staticmethod
-    def detect_conflicts(resolution_result: Dict, batch_id: str) -> List[Dict]:
+    def __init__(self, nocodb_client):
         """
-        Detect conflicts from GSID resolution results
+        Args:
+            nocodb_client: NocoDBClient instance
+        """
+        self.nocodb_client = nocodb_client
+
+    def detect_conflicts(
+        self,
+        batch_id: str,
+        local_subject_ids_df: pd.DataFrame,
+    ) -> Tuple[List[Dict], Dict]:
+        """
+        Detect conflicts between incoming data and existing NocoDB records
 
         Args:
-            resolution_result: Result from SubjectIDResolver.resolve_batch()
-            batch_id: Current batch identifier
+            batch_id: Batch identifier
+            local_subject_ids_df: DataFrame with local_subject_id mappings
 
         Returns:
-            List of conflict records
+            Tuple of (conflicts_list, summary_dict)
         """
+        logger.info("Detecting data conflicts against NocoDB database...")
+
         conflicts = []
-        local_id_records = resolution_result.get("local_id_records", [])
 
-        for record in local_id_records:
-            action = record.get("action", "")
+        # Get unique (local_subject_id, identifier_type) pairs
+        unique_pairs = local_subject_ids_df[
+            ["local_subject_id", "identifier_type", "center_id", "global_subject_id"]
+        ].drop_duplicates()
 
-            # Center mismatch conflict
-            if action == "review_required":
-                conflict = {
-                    "batch_id": batch_id,
-                    "conflict_type": "center_mismatch",
-                    "local_subject_id": record["local_subject_id"],
-                    "identifier_type": record["identifier_type"],
-                    "incoming_center_id": record["center_id"],
-                    "incoming_gsid": record["global_subject_id"],
-                    "existing_center_id": record.get("existing_center_id"),
-                    "existing_gsid": record.get("existing_gsid"),
-                    "resolution_action": "pending",
-                    "status": "pending",
-                }
-                conflicts.append(conflict)
-                logger.warning(
-                    f"Center conflict: {record['local_subject_id']} - "
-                    f"existing center {record.get('existing_center_id')} vs "
-                    f"incoming center {record['center_id']}"
-                )
+        logger.info(f"Checking {len(unique_pairs)} unique ID pairs for conflicts...")
 
-            # Multi-GSID conflict
-            elif action == "multi_gsid_conflict":
-                matched_gsids = record.get("matched_gsids", [])
-                conflict = {
-                    "batch_id": batch_id,
-                    "conflict_type": "multi_gsid",
-                    "local_subject_id": record["local_subject_id"],
-                    "identifier_type": record["identifier_type"],
-                    "incoming_center_id": record["center_id"],
-                    "existing_gsid": matched_gsids[0] if matched_gsids else None,
-                    "incoming_gsid": matched_gsids[1]
-                    if len(matched_gsids) > 1
-                    else None,
-                    "resolution_action": "pending",
-                    "status": "pending",
-                    "resolution_notes": f"Multiple GSIDs found: {', '.join(matched_gsids)}",
-                }
-                conflicts.append(conflict)
-                logger.error(
-                    f"Multi-GSID conflict: {record['local_subject_id']} "
-                    f"maps to {len(matched_gsids)} different GSIDs"
-                )
+        # Query NocoDB for existing mappings
+        existing_mappings = self._fetch_existing_mappings_from_nocodb(
+            unique_pairs["local_subject_id"].tolist(),
+            unique_pairs["identifier_type"].tolist(),
+        )
+
+        logger.info(f"Found {len(existing_mappings)} existing mappings in NocoDB")
+
+        # Check each incoming record for conflicts
+        for _, row in unique_pairs.iterrows():
+            local_id = row["local_subject_id"]
+            id_type = row["identifier_type"]
+            incoming_center = row["center_id"]
+            incoming_gsid = row["global_subject_id"]
+
+            key = (local_id, id_type)
+
+            if key in existing_mappings:
+                existing = existing_mappings[key]
+                existing_center = existing["center_id"]
+                existing_gsid = existing["global_subject_id"]
+
+                # Check for center mismatch
+                if existing_center != incoming_center:
+                    conflict = {
+                        "batch_id": batch_id,
+                        "conflict_type": "center_mismatch",
+                        "local_subject_id": local_id,
+                        "identifier_type": id_type,
+                        "existing_center_id": int(existing_center),
+                        "incoming_center_id": int(incoming_center),
+                        "existing_gsid": existing_gsid,
+                        "incoming_gsid": incoming_gsid,
+                        "resolution_action": None,
+                        "status": "pending",
+                    }
+                    conflicts.append(conflict)
+
+                    logger.warning(
+                        f"⚠️  Center conflict: {id_type}={local_id} - "
+                        f"NocoDB has center_id={existing_center} (GSID={existing_gsid}), "
+                        f"incoming has center_id={incoming_center} (GSID={incoming_gsid})"
+                    )
+
+                # Check for GSID mismatch (same ID maps to different GSIDs)
+                elif existing_gsid != incoming_gsid:
+                    conflict = {
+                        "batch_id": batch_id,
+                        "conflict_type": "multi_gsid",
+                        "local_subject_id": local_id,
+                        "identifier_type": id_type,
+                        "existing_center_id": int(existing_center),
+                        "incoming_center_id": int(incoming_center),
+                        "existing_gsid": existing_gsid,
+                        "incoming_gsid": incoming_gsid,
+                        "resolution_action": None,
+                        "status": "pending",
+                    }
+                    conflicts.append(conflict)
+
+                    logger.warning(
+                        f"⚠️  GSID conflict: {id_type}={local_id} - "
+                        f"NocoDB has GSID={existing_gsid}, incoming has GSID={incoming_gsid}"
+                    )
+
+        # Build summary
+        summary = self._build_conflict_summary(conflicts)
 
         logger.info(f"Detected {len(conflicts)} conflicts in batch {batch_id}")
-        return conflicts
 
-    @staticmethod
-    def format_conflict_summary(conflicts: List[Dict]) -> Dict:
-        """Format conflicts for validation report"""
-        by_type = {}
-        for conflict in conflicts:
-            conflict_type = conflict["conflict_type"]
-            by_type[conflict_type] = by_type.get(conflict_type, 0) + 1
+        return conflicts, summary
 
-        return {
+    def _fetch_existing_mappings_from_nocodb(
+        self, local_ids: List[str], id_types: List[str]
+    ) -> Dict[Tuple[str, str], Dict]:
+        """
+        Fetch existing mappings from NocoDB API
+
+        Args:
+            local_ids: List of local_subject_ids to check
+            id_types: List of identifier_types to check
+
+        Returns:
+            Dict mapping (local_subject_id, identifier_type) -> {center_id, global_subject_id}
+        """
+        try:
+            # Get all records from local_subject_ids table via NocoDB API
+            all_records = self.nocodb_client.get_all_records("local_subject_ids")
+
+            # Build lookup dict, filtering to only the IDs we care about
+            mappings = {}
+            local_ids_set = set(local_ids)
+            id_types_set = set(id_types)
+
+            for record in all_records:
+                local_id = record.get("local_subject_id")
+                id_type = record.get("identifier_type")
+
+                # Only include records we're checking
+                if local_id in local_ids_set and id_type in id_types_set:
+                    key = (local_id, id_type)
+                    mappings[key] = {
+                        "center_id": record.get("center_id"),
+                        "global_subject_id": record.get("global_subject_id"),
+                    }
+
+            return mappings
+
+        except Exception as e:
+            logger.error(f"Failed to fetch existing mappings from NocoDB: {e}")
+            return {}
+
+    def _build_conflict_summary(self, conflicts: List[Dict]) -> Dict:
+        """Build summary statistics for conflicts"""
+        summary = {
             "total_conflicts": len(conflicts),
-            "by_type": by_type,
+            "by_type": {},
             "requires_review": len(conflicts) > 0,
         }
+
+        # Count by conflict type
+        for conflict in conflicts:
+            conflict_type = conflict["conflict_type"]
+            summary["by_type"][conflict_type] = (
+                summary["by_type"].get(conflict_type, 0) + 1
+            )
+
+        return summary
+
+    def upload_conflicts_to_nocodb(self, conflicts: List[Dict]) -> None:
+        """
+        Upload conflicts to conflict_resolutions table in NocoDB
+
+        Args:
+            conflicts: List of conflict dictionaries
+        """
+        if not conflicts:
+            logger.info("No conflicts to upload")
+            return
+
+        try:
+            # Use the existing upload_conflicts method
+            self.nocodb_client.upload_conflicts(conflicts)
+            logger.info(f"✓ Uploaded {len(conflicts)} conflicts to NocoDB")
+
+        except Exception as e:
+            logger.error(f"Failed to upload conflicts to NocoDB: {e}")
+            raise

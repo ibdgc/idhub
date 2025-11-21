@@ -31,13 +31,12 @@ class NocoDBClient:
             raise ValueError("No NocoDB bases found")
 
         base_id = bases[0]["id"]
-        base_title = bases[0].get("title", "Unknown")
         self._base_id_cache = base_id
-        logger.info(f"Auto-detected NocoDB base: '{base_title}' (ID: {base_id})")
+        logger.info(f"Auto-detected base ID: {base_id}")
         return base_id
 
-    def get_table_id(self, table_name: str) -> str:
-        """Get table ID by name (cached after first lookup)"""
+    def _get_table_id(self, table_name: str) -> str:
+        """Get table ID from table name (cached after first call)"""
         if table_name in self._table_id_cache:
             return self._table_id_cache[table_name]
 
@@ -47,33 +46,45 @@ class NocoDBClient:
         response.raise_for_status()
 
         tables = response.json().get("list", [])
-        table = next((t for t in tables if t["table_name"] == table_name), None)
+        for table in tables:
+            if table["table_name"] == table_name:
+                table_id = table["id"]
+                self._table_id_cache[table_name] = table_id
+                logger.debug(f"Cached table ID for '{table_name}': {table_id}")
+                return table_id
 
-        if not table:
-            raise ValueError(f"Table '{table_name}' not found in NocoDB base")
+        raise ValueError(f"Table '{table_name}' not found in NocoDB")
 
-        table_id = table["id"]
-        self._table_id_cache[table_name] = table_id
-        logger.info(f"Found table '{table_name}' (ID: {table_id})")
-        return table_id
+    def get_table_id(self, table_name: str) -> str:
+        """
+        Public method to get table ID
 
-    def get_table_metadata(self, table_name: str) -> dict:
-        """Get full table metadata including columns"""
-        table_id = self.get_table_id(table_name)
+        Args:
+            table_name: Name of the table
+
+        Returns:
+            Table ID string
+        """
+        return self._get_table_id(table_name)
+
+    def get_table_metadata(self, table_name: str) -> Dict:
+        """Get table metadata including columns"""
+        table_id = self._get_table_id(table_name)
         url = f"{self.url}/api/v2/meta/tables/{table_id}"
+
         response = requests.get(url, headers=self.headers)
         response.raise_for_status()
+
         return response.json()
 
-    def get_all_records(self, table_name: str, limit: int = 1000) -> List[dict]:
+    def get_all_records(self, table_name: str, limit: int = 1000) -> List[Dict]:
         """Fetch all records from a table with pagination"""
-        table_id = self.get_table_id(table_name)
-        records_url = f"{self.url}/api/v2/tables/{table_id}/records"
-
+        table_id = self._get_table_id(table_name)
         all_records = []
         offset = 0
 
         while True:
+            records_url = f"{self.url}/api/v2/tables/{table_id}/records"
             response = requests.get(
                 records_url,
                 headers=self.headers,
@@ -111,32 +122,32 @@ class NocoDBClient:
                 )
                 cache[key] = record["global_subject_id"]
 
-            logger.info(f"Loaded {len(cache)} unique local IDs into cache")
+            logger.info(f"Loaded {len(cache)} local_subject_id mappings into cache")
             return cache
+
         except Exception as e:
-            logger.error(f"Failed to load local ID cache: {e}")
-            raise
+            logger.warning(f"Could not load local_subject_ids cache: {e}")
+            return {}
 
-    def create_record(self, table_name: str, data: Dict) -> Dict:
-        """
-        Create a single record in NocoDB table
-
-        Args:
-            table_name: Target table name
-            data: Record data as dictionary
-
-        Returns:
-            Created record with ID
-        """
-        table_id = self._get_table_id(table_name)
-        url = f"{self.url}/api/v2/tables/{table_id}/records"
+    def upload_conflicts(self, conflicts: List[Dict]) -> None:
+        """Upload conflicts to conflict_resolutions table in NocoDB"""
+        if not conflicts:
+            logger.info("No conflicts to upload")
+            return
 
         try:
-            response = requests.post(url, headers=self.headers, json=data)
+            table_id = self._get_table_id("conflict_resolutions")
+            url = f"{self.url}/api/v2/tables/{table_id}/records"
+
+            # Batch upload (NocoDB supports bulk insert)
+            response = requests.post(
+                url,
+                headers=self.headers,
+                json=conflicts,
+            )
             response.raise_for_status()
-            created_record = response.json()
-            logger.debug(f"Created record in {table_name}: {created_record.get('Id')}")
-            return created_record
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to create record in {table_name}: {e}")
+            logger.info(f"✓ Uploaded {len(conflicts)} conflicts to NocoDB")
+
+        except Exception as e:
+            logger.error(f"Failed to upload conflicts to NocoDB: {e}")
             raise

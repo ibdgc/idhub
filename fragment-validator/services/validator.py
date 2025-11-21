@@ -1,7 +1,7 @@
 # fragment-validator/services/validator.py
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import pandas as pd
 
@@ -28,7 +28,7 @@ class FragmentValidator:
         self.nocodb_client = nocodb_client
         self.subject_id_resolver = subject_id_resolver
         self.schema_validator = SchemaValidator(nocodb_client)
-        self.conflict_detector = ConflictDetector()
+        self.conflict_detector = ConflictDetector(nocodb_client)
 
     def process_local_file(
         self,
@@ -69,6 +69,7 @@ class FragmentValidator:
             field_mapping = mapping_config.get("field_mapping", {})
             subject_id_candidates = mapping_config.get("subject_id_candidates", [])
             center_id_field = mapping_config.get("center_id_field")
+            default_center_id = mapping_config.get("default_center_id", 0)
 
             mapped_data = FieldMapper.apply_mapping(
                 raw_data, field_mapping, subject_id_candidates, center_id_field
@@ -87,10 +88,8 @@ class FragmentValidator:
 
             # Step 4: Resolve subject IDs to GSIDs
             logger.info("Resolving subject IDs to GSIDs...")
-            default_center_id = mapping_config.get("default_center_id", 0)
-
             resolution_result = self.subject_id_resolver.resolve_batch(
-                data=mapped_data,
+                mapped_data,
                 candidate_fields=subject_id_candidates,
                 center_id_field=center_id_field,
                 default_center_id=default_center_id,
@@ -101,10 +100,17 @@ class FragmentValidator:
             # Add GSIDs to mapped data
             mapped_data["global_subject_id"] = resolution_result["gsids"]
 
-            # Step 4.5: Detect conflicts
+            # Create local_subject_ids DataFrame from resolution result
+            if resolution_result["local_id_records"]:
+                local_ids_df = pd.DataFrame(resolution_result["local_id_records"])
+            else:
+                local_ids_df = pd.DataFrame()
+
+            # Step 5: Detect conflicts by comparing against NocoDB
             logger.info("Detecting data conflicts...")
-            conflicts = self.conflict_detector.detect_conflicts(
-                resolution_result, batch_id
+            conflicts, conflict_summary = self.conflict_detector.detect_conflicts(
+                batch_id=batch_id,
+                local_subject_ids_df=local_ids_df,
             )
 
             # Upload conflicts to NocoDB if any exist
@@ -112,25 +118,28 @@ class FragmentValidator:
                 logger.warning(
                     f"⚠️  {len(conflicts)} conflicts detected - uploading to NocoDB"
                 )
-                self._upload_conflicts_to_nocodb(conflicts)
-                # Force manual review if conflicts exist
-                auto_approve = False
+                try:
+                    self.conflict_detector.upload_conflicts_to_nocodb(conflicts)
+                except Exception as e:
+                    logger.error(f"Failed to upload conflicts to NocoDB: {e}")
+                    logger.warning(
+                        "Continuing validation despite conflict upload failure"
+                    )
 
-            # Step 5: Upload to S3
+            # Step 6: Upload to S3
             logger.info("Uploading validated data to S3...")
             s3_key = f"staging/validated/{batch_id}/{table_name}.csv"
             self.s3_client.upload_dataframe(mapped_data, s3_key)
 
             # Upload local_subject_ids separately
-            if resolution_result["local_id_records"]:
-                local_ids_df = pd.DataFrame(resolution_result["local_id_records"])
+            if not local_ids_df.empty:
                 local_ids_key = f"staging/validated/{batch_id}/local_subject_ids.csv"
                 self.s3_client.upload_dataframe(local_ids_df, local_ids_key)
                 logger.info(
                     f"Wrote {len(local_ids_df)} unique local_subject_ids records"
                 )
 
-            # Step 6: Build validation report
+            # Step 7: Build validation report
             report = self._build_success_report(
                 batch_id,
                 mapped_data,
@@ -141,12 +150,16 @@ class FragmentValidator:
                 auto_approve,
                 validation_result.warnings,
                 conflicts,
+                conflict_summary,
             )
 
-            # Step 7: Upload validation report
+            # Step 8: Upload validation report
             report_key = f"staging/validated/{batch_id}/validation_report.json"
             self.s3_client.upload_json(report, report_key)
             logger.info(f"Uploaded validation report to {report_key}")
+
+            logger.info("✓ Validation successful")
+            logger.info(f"{'=' * 60}")
 
             return report
 
@@ -155,23 +168,6 @@ class FragmentValidator:
             return self._build_failure_report(
                 batch_id, [{"type": "exception", "message": str(e)}], []
             )
-
-    def _upload_conflicts_to_nocodb(self, conflicts: List[Dict]) -> None:
-        """Upload conflict records to NocoDB for review"""
-        if not conflicts:
-            return
-
-        try:
-            for conflict in conflicts:
-                # Upload to conflict_resolutions table
-                self.nocodb_client.create_record(
-                    table_name="conflict_resolutions", data=conflict
-                )
-            logger.info(f"Uploaded {len(conflicts)} conflicts to NocoDB")
-        except Exception as e:
-            logger.error(f"Failed to upload conflicts to NocoDB: {e}")
-            # Don't fail the entire validation if conflict upload fails
-            logger.warning("Continuing validation despite conflict upload failure")
 
     def _build_success_report(
         self,
@@ -183,11 +179,11 @@ class FragmentValidator:
         source_name: str,
         auto_approve: bool,
         warnings: List[str],
-        conflicts: List[Dict] = None,
+        conflicts: List[Dict],
+        conflict_summary: Dict,
     ) -> Dict:
         """Build success validation report with conflict information"""
         summary = resolution_result["summary"]
-        conflicts = conflicts or []
         has_conflicts = len(conflicts) > 0
 
         # Force manual review if conflicts exist
@@ -231,7 +227,7 @@ class FragmentValidator:
             "exclude_from_load": exclude_from_load,
             "validation_warnings": warnings,
             "has_conflicts": has_conflicts,
-            "conflict_summary": ConflictDetector.format_conflict_summary(conflicts),
+            "conflict_summary": conflict_summary,
             "gsid_resolution": {
                 "total_rows": summary["total_rows"],
                 "resolved": summary["resolved"],
@@ -239,8 +235,8 @@ class FragmentValidator:
                 "unique_gsids": summary["unique_gsids"],
                 "new_subjects": summary["created"],
                 "existing_subjects": summary["linked"],
-                "multi_gsid_conflicts": summary["multi_gsid_conflicts"],
-                "center_conflicts": summary["center_conflicts"],
+                "multi_gsid_conflicts": summary.get("multi_gsid_conflicts", 0),
+                "center_conflicts": summary.get("center_conflicts", 0),
                 "local_id_records_count": len(
                     resolution_result.get("local_id_records", [])
                 ),
