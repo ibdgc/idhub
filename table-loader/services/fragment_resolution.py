@@ -129,55 +129,47 @@ class FragmentResolutionService:
             logger.error(f"Failed to analyze changes: {e}", exc_info=True)
             raise
 
-    def get_resolved_conflicts(self, batch_id: str) -> Dict[str, str]:
+    def get_resolved_conflicts(self, batch_id: str) -> List[Dict]:
         """
-        Get resolved conflicts for a batch
+        Get all resolved conflicts for a batch from NocoDB
 
         Args:
             batch_id: Batch identifier
 
         Returns:
-            Dict mapping "local_subject_id:identifier_type" -> resolution_action
+            List of resolved conflict records
         """
-        conn = get_db_connection()
+        logger.info(f"Fetching resolved conflicts for batch {batch_id}...")
+
         try:
-            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(
-                    """
-                    SELECT 
-                        local_subject_id,
-                        identifier_type,
-                        resolution_action,
-                        existing_center_id,
-                        incoming_center_id
-                    FROM conflict_resolutions
-                    WHERE batch_id = %s
-                      AND status = 'resolved'
-                      AND resolution_action IS NOT NULL
-                """,
-                    (batch_id,),
-                )
+            # Get all conflicts from NocoDB
+            all_conflicts = self.nocodb_client.get_all_records("conflict_resolutions")
 
-                conflicts = cursor.fetchall()
+            # Filter to this batch and resolved status
+            resolved_conflicts = [
+                c
+                for c in all_conflicts
+                if c.get("batch_id") == batch_id and c.get("status") == "resolved"
+            ]
 
-                # Build lookup dict
-                resolutions = {}
-                for conflict in conflicts:
-                    key = (
-                        f"{conflict['local_subject_id']}:{conflict['identifier_type']}"
+            logger.info(
+                f"Found {len(resolved_conflicts)} resolved conflicts for batch {batch_id}"
+            )
+
+            # Debug: show what we found
+            if resolved_conflicts:
+                for conflict in resolved_conflicts[:5]:  # Show first 5
+                    logger.info(
+                        f"  - {conflict.get('local_subject_id')} "
+                        f"({conflict.get('identifier_type')}): "
+                        f"action={conflict.get('resolution_action')}"
                     )
-                    resolutions[key] = conflict["resolution_action"]
 
-                logger.info(
-                    f"Found {len(resolutions)} resolved conflicts for batch {batch_id}"
-                )
-                return resolutions
+            return resolved_conflicts
 
         except Exception as e:
-            logger.error(f"Failed to get resolved conflicts: {e}")
-            return {}
-        finally:
-            conn.close()
+            logger.error(f"Failed to fetch resolved conflicts: {e}")
+            return []
 
     def apply_conflict_resolutions(
         self, records: List[Dict], batch_id: str
