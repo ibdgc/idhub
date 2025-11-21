@@ -101,7 +101,8 @@ class TableLoader:
                 if not dry_run and resolved_conflicts:
                     subjects_updated = (
                         self.resolution_service.apply_center_updates_to_subjects(
-                            batch_id
+                            batch_id,
+                            conn,
                         )
                     )
                     logger.info(
@@ -247,7 +248,7 @@ class TableLoader:
         exclude_fields: Optional[set],
         source_name: str,
         exclude_ids: set,
-        conn=None,  # ✅ Add this parameter
+        conn=None,
     ) -> Optional[Dict]:
         """Load local_subject_ids fragment if present"""
         try:
