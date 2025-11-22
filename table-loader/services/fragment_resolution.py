@@ -123,38 +123,54 @@ class FragmentResolutionService:
             raise
 
     def get_resolved_conflicts(self, batch_id: str) -> List[Dict]:
-        """Get all resolved conflicts for a batch from NocoDB"""
+        """Get all resolved conflicts for a batch from PostgreSQL"""
         logger.info(f"Fetching resolved conflicts for batch {batch_id}...")
 
-        if not self.nocodb_client:
-            logger.warning("NocoDB client not available - cannot fetch conflicts")
-            return []
-
         try:
-            all_conflicts = self.nocodb_client.get_all_records("conflict_resolutions")
+            from core.database import get_db_connection
 
-            resolved_conflicts = [
-                c
-                for c in all_conflicts
-                if c.get("batch_id") == batch_id and c.get("status") == "resolved"
-            ]
-
-            logger.info(
-                f"Found {len(resolved_conflicts)} resolved conflicts for batch {batch_id}"
-            )
-
-            if resolved_conflicts:
-                for conflict in resolved_conflicts[:5]:
-                    logger.info(
-                        f"  - {conflict.get('local_subject_id')} "
-                        f"({conflict.get('identifier_type')}): "
-                        f"action={conflict.get('resolution_action')}"
+            conn = get_db_connection()
+            try:
+                with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                    cursor.execute(
+                        """
+                        SELECT 
+                            batch_id,
+                            local_subject_id,
+                            identifier_type,
+                            conflict_type,
+                            resolution_action,
+                            status,
+                            existing_gsid,
+                            existing_center_id,
+                            incoming_center_id
+                        FROM conflict_resolutions
+                        WHERE batch_id = %s 
+                          AND status = 'resolved'
+                        """,
+                        (batch_id,),
                     )
 
-            return resolved_conflicts
+                    resolved_conflicts = cursor.fetchall()
+
+                    logger.info(
+                        f"Found {len(resolved_conflicts)} resolved conflicts for batch {batch_id}"
+                    )
+
+                    if resolved_conflicts:
+                        for conflict in resolved_conflicts[:5]:
+                            logger.info(
+                                f"  - {conflict.get('local_subject_id')} "
+                                f"({conflict.get('identifier_type')}): "
+                                f"action={conflict.get('resolution_action')}"
+                            )
+
+                    return resolved_conflicts
+            finally:
+                conn.close()
 
         except Exception as e:
-            logger.error(f"Failed to fetch resolved conflicts: {e}")
+            logger.error(f"Failed to fetch resolved conflicts: {e}", exc_info=True)
             return []
 
     def apply_conflict_resolutions(
