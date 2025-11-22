@@ -94,19 +94,33 @@ class TableLoader:
                 f"Found {len(resolved_conflicts)} resolved conflicts for batch {batch_id}"
             )
 
+            # 🔍 DEBUG: Log what we found
+            logger.info(f"🔍 DEBUG: dry_run = {dry_run}")
+            logger.info(f"🔍 DEBUG: resolved_conflicts = {len(resolved_conflicts)}")
+            if resolved_conflicts:
+                logger.info(f"🔍 DEBUG: First conflict: {resolved_conflicts[0]}")
+
             # Get database connection (reuse for all operations)
             conn = get_db_connection()
             try:
                 # ✅ Step 1: Apply center updates to subjects table
+                logger.info("🔍 DEBUG: Checking if we should update subjects...")
                 if not dry_run and resolved_conflicts:
+                    logger.info(
+                        "🔍 DEBUG: YES - Calling apply_center_updates_to_subjects"
+                    )
                     subjects_updated = (
                         self.resolution_service.apply_center_updates_to_subjects(
-                            batch_id,
-                            conn,
+                            batch_id, conn
                         )
                     )
                     logger.info(
-                        f"Updated {subjects_updated} subjects with new center_id"
+                        f"✅ Updated {subjects_updated} subjects with new center_id"
+                    )
+                else:
+                    logger.info(
+                        f"🔍 DEBUG: NO - Skipping subjects update. "
+                        f"dry_run={dry_run}, has_conflicts={len(resolved_conflicts) > 0}"
                     )
 
                 # Build exclusion set from conflicts

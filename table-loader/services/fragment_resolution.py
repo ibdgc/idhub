@@ -471,14 +471,20 @@ class FragmentResolutionService:
         Returns:
             Number of subjects updated
         """
+        logger.info(
+            f"🔍 DEBUG: apply_center_updates_to_subjects called for batch {batch_id}"
+        )
+
         should_close = False
         if conn is None:
+            logger.info("🔍 DEBUG: Creating new connection")
             conn = get_db_connection()
             should_close = True
 
         try:
             # Use RealDictCursor to get dict results
             with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                logger.info("🔍 DEBUG: Executing query to find conflicts...")
                 # Get all resolved conflicts with use_incoming action
                 cursor.execute(
                     """
@@ -496,6 +502,7 @@ class FragmentResolutionService:
                 )
 
                 conflicts = cursor.fetchall()
+                logger.info(f"🔍 DEBUG: Query returned {len(conflicts)} conflicts")
 
                 if not conflicts:
                     logger.info(f"No center updates needed for batch {batch_id}")
