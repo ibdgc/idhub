@@ -241,52 +241,55 @@ CREATE TABLE fragment_resolutions (
     ))
 );
 
-CREATE TABLE IF NOT EXISTS conflict_resolutions (
+CREATE TYPE conflict_type_enum AS ENUM (
+    'center_mismatch',
+    'duplicate_id',
+    'multi_gsid'
+);
+
+CREATE TYPE resolution_action_enum AS ENUM (
+    'keep_existing',
+    'use_incoming',
+    'delete_both',
+    'merge',
+    'pending'
+);
+
+CREATE TYPE status_enum AS ENUM (
+    'pending',
+    'resolved',
+    'applied'
+);
+
+-- Then create the table using these ENUM types
+CREATE TABLE conflict_resolutions (
     id SERIAL PRIMARY KEY,
     batch_id VARCHAR(100) NOT NULL,
-    conflict_type VARCHAR(50) NOT NULL, -- 'center_mismatch', 'duplicate_id', 'multi_gsid'
-    
+    conflict_type conflict_type_enum NOT NULL,
+
     -- Conflicting record details
     local_subject_id VARCHAR(255) NOT NULL,
     identifier_type VARCHAR(50) DEFAULT 'consortium_id',
-    
+
     -- Center conflict details
     existing_center_id INTEGER,
     incoming_center_id INTEGER,
     existing_gsid VARCHAR(21),
     incoming_gsid VARCHAR(21),
-    
+
     -- Resolution decision
-    resolution_action VARCHAR(50), -- 'keep_existing', 'use_incoming', 'delete_both', 'merge', 'pending'
+    resolution_action resolution_action_enum,
     resolution_notes TEXT,
-    
+
     -- Metadata
     detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     resolved_at TIMESTAMP,
     resolved_by VARCHAR(100),
-    status VARCHAR(50) DEFAULT 'pending', -- 'pending', 'resolved', 'applied'
-    
+    status status_enum DEFAULT 'pending',
+
     -- Audit trail
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    CONSTRAINT valid_conflict_type CHECK (conflict_type IN (
-        'center_mismatch',
-        'duplicate_id',
-        'multi_gsid'
-    )),
-    CONSTRAINT valid_resolution_action CHECK (resolution_action IN (
-        'keep_existing',
-        'use_incoming',
-        'delete_both',
-        'merge',
-        'pending'
-    )),
-    CONSTRAINT valid_status CHECK (status IN (
-        'pending',
-        'resolved',
-        'applied'
-    ))
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ============================================================================
