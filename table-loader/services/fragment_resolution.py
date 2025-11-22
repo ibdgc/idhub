@@ -26,7 +26,7 @@ class FragmentResolutionService:
             if fragment_validator_path not in sys.path:
                 sys.path.insert(0, fragment_validator_path)
 
-            from clients.nocodb_client import NocoDBClient
+            from clients.nocodb_client import NocoDBClient  # type: ignore
 
             self.nocodb_client = NocoDBClient()
             logger.info("✓ NocoDB client initialized")
@@ -127,8 +127,6 @@ class FragmentResolutionService:
         logger.info(f"Fetching resolved conflicts for batch {batch_id}...")
 
         try:
-            from core.database import get_db_connection
-
             conn = get_db_connection()
             try:
                 with conn.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -284,8 +282,6 @@ class FragmentResolutionService:
     ) -> None:
         """Record a successful load in fragment_resolutions table"""
         try:
-            from core.database import get_db_connection
-
             valid_statuses = ["success", "partial", "failed", "skipped", "preview"]
             if status not in valid_statuses:
                 logger.warning(f"Invalid status '{status}', defaulting to 'success'")
@@ -357,8 +353,6 @@ class FragmentResolutionService:
     def mark_conflicts_as_applied(self, batch_id: str) -> None:
         """Mark all resolved conflicts for a batch as 'applied'"""
         try:
-            from core.database import get_db_connection
-
             conn = get_db_connection()
             try:
                 with conn.cursor() as cursor:
@@ -391,91 +385,6 @@ class FragmentResolutionService:
         except Exception as e:
             logger.error(f"Failed to mark conflicts as applied: {e}")
 
-    def apply_center_updates_to_subjects(self, batch_id: str) -> int:
-        """
-        Apply center_id updates from conflict resolutions to subjects table
-
-        Uses RealDictCursor to get dictionary results from PostgreSQL
-        """
-        try:
-            from core.database import get_db_connection
-
-            conn = get_db_connection()
-            try:
-                # Use RealDictCursor to get dict results
-                with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                    # Get all resolved conflicts with use_incoming action
-                    cursor.execute(
-                        """
-                        SELECT DISTINCT
-                            cr.existing_gsid,
-                            cr.incoming_center_id,
-                            cr.existing_center_id
-                        FROM conflict_resolutions cr
-                        WHERE cr.batch_id = %s
-                          AND cr.conflict_type = 'center_mismatch'
-                          AND cr.resolution_action = 'use_incoming'
-                          AND cr.status = 'resolved'
-                        """,
-                        (batch_id,),
-                    )
-
-                    conflicts = cursor.fetchall()
-
-                    if not conflicts:
-                        logger.info(f"No center updates needed for batch {batch_id}")
-                        return 0
-
-                    logger.info(f"Found {len(conflicts)} subjects to update")
-
-                    # Update each subject's center_id
-                    updated_count = 0
-                    for conflict in conflicts:
-                        gsid = conflict["existing_gsid"]
-                        new_center_id = conflict["incoming_center_id"]
-                        old_center_id = conflict["existing_center_id"]
-
-                        logger.info(
-                            f"Updating subject {gsid}: center_id {old_center_id} → {new_center_id}"
-                        )
-
-                        cursor.execute(
-                            """
-                            UPDATE subjects
-                            SET 
-                                center_id = %s,
-                                updated_at = CURRENT_TIMESTAMP
-                            WHERE global_subject_id = %s
-                              AND center_id = %s  -- Only update if still has old center
-                            """,
-                            (new_center_id, gsid, old_center_id),
-                        )
-
-                        if cursor.rowcount > 0:
-                            updated_count += cursor.rowcount
-                            logger.info(
-                                f"✓ Updated subject {gsid} center_id to {new_center_id}"
-                            )
-                        else:
-                            logger.warning(
-                                f"⚠️  Subject {gsid} not updated (may have been changed already)"
-                            )
-
-                    conn.commit()
-                    logger.info(
-                        f"Applied center updates to {updated_count} subjects for batch {batch_id}"
-                    )
-                    return updated_count
-
-            finally:
-                conn.close()
-
-        except Exception as e:
-            logger.error(
-                f"Failed to apply center updates to subjects: {e}", exc_info=True
-            )
-            raise
-
     def apply_center_updates_to_subjects(self, batch_id: str, conn=None) -> int:
         """
         Apply center_id updates from conflict resolutions to subjects table
@@ -496,12 +405,13 @@ class FragmentResolutionService:
             logger.info("🔍 DEBUG: Creating new connection")
             conn = get_db_connection()
             should_close = True
+        else:
+            logger.info("🔍 DEBUG: Using provided connection")
 
         try:
-            # Use RealDictCursor to get dict results
             with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                 logger.info("🔍 DEBUG: Executing query to find conflicts...")
-                # Get all resolved conflicts with use_incoming action
+
                 cursor.execute(
                     """
                     SELECT DISTINCT
@@ -526,7 +436,6 @@ class FragmentResolutionService:
 
                 logger.info(f"Found {len(conflicts)} subjects to update")
 
-                # Update each subject's center_id
                 updated_count = 0
                 for conflict in conflicts:
                     gsid = conflict["existing_gsid"]
@@ -559,7 +468,6 @@ class FragmentResolutionService:
                             f"⚠️  Subject {gsid} not updated (may have been changed already)"
                         )
 
-                # Only commit if we created our own connection
                 if should_close:
                     conn.commit()
 
@@ -578,3 +486,100 @@ class FragmentResolutionService:
         finally:
             if should_close:
                 conn.close()
+
+    def apply_center_updates_to_local_ids(self, batch_id: str, conn) -> int:
+        """
+        Apply center_id updates from conflict resolutions to local_subject_ids table
+
+        For center_mismatch conflicts with use_incoming:
+        - DELETE old record (old center_id)
+        - INSERT will happen via normal upsert
+
+        Args:
+            batch_id: Batch identifier
+            conn: Database connection (required - part of transaction)
+
+        Returns:
+            Number of old records deleted
+        """
+        logger.info(
+            f"🔍 DEBUG: apply_center_updates_to_local_ids called for batch {batch_id}"
+        )
+
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                logger.info("🔍 DEBUG: Querying for center_id conflicts...")
+
+                cursor.execute(
+                    """
+                    SELECT 
+                        cr.local_subject_id,
+                        cr.identifier_type,
+                        cr.existing_center_id,
+                        cr.incoming_center_id,
+                        cr.existing_gsid
+                    FROM conflict_resolutions cr
+                    WHERE cr.batch_id = %s
+                      AND cr.conflict_type = 'center_mismatch'
+                      AND cr.resolution_action = 'use_incoming'
+                      AND cr.status = 'resolved'
+                    """,
+                    (batch_id,),
+                )
+
+                conflicts = cursor.fetchall()
+                logger.info(
+                    f"🔍 DEBUG: Found {len(conflicts)} local_subject_id conflicts"
+                )
+
+                if not conflicts:
+                    logger.info(
+                        f"No center updates needed for local_subject_ids in batch {batch_id}"
+                    )
+                    return 0
+
+                deleted_count = 0
+                for conflict in conflicts:
+                    local_id = conflict["local_subject_id"]
+                    id_type = conflict["identifier_type"]
+                    old_center = conflict["existing_center_id"]
+                    new_center = conflict["incoming_center_id"]
+
+                    logger.info(
+                        f"Deleting old local_subject_id: center={old_center}, "
+                        f"id={local_id}, type={id_type}"
+                    )
+
+                    cursor.execute(
+                        """
+                        DELETE FROM local_subject_ids
+                        WHERE center_id = %s
+                          AND local_subject_id = %s
+                          AND identifier_type = %s
+                        """,
+                        (old_center, local_id, id_type),
+                    )
+
+                    deleted = cursor.rowcount
+
+                    if deleted > 0:
+                        deleted_count += deleted
+                        logger.info(
+                            f"✓ Deleted old record (will be replaced with center={new_center})"
+                        )
+                    else:
+                        logger.warning(
+                            f"⚠️  No old record found to delete for {id_type}={local_id}"
+                        )
+
+                logger.info(
+                    f"Deleted {deleted_count} old local_subject_id records for batch {batch_id}"
+                )
+                return deleted_count
+
+        except Exception as e:
+            logger.error(
+                f"Failed to apply center updates to local_subject_ids: {e}",
+                exc_info=True,
+            )
+            raise
