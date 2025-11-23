@@ -122,55 +122,6 @@ class FragmentResolutionService:
             logger.error(f"Failed to analyze changes: {e}", exc_info=True)
             raise
 
-    def get_resolved_conflicts(self, batch_id: str) -> List[Dict]:
-        """Get all resolved conflicts for a batch from PostgreSQL"""
-        logger.info(f"Fetching resolved conflicts for batch {batch_id}...")
-
-        try:
-            conn = get_db_connection()
-            try:
-                with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                    cursor.execute(
-                        """
-                        SELECT 
-                            batch_id,
-                            local_subject_id,
-                            identifier_type,
-                            conflict_type,
-                            resolution_action,
-                            status,
-                            existing_gsid,
-                            existing_center_id,
-                            incoming_center_id
-                        FROM conflict_resolutions
-                        WHERE batch_id = %s 
-                          AND status = 'resolved'
-                        """,
-                        (batch_id,),
-                    )
-
-                    resolved_conflicts = cursor.fetchall()
-
-                    logger.info(
-                        f"Found {len(resolved_conflicts)} resolved conflicts for batch {batch_id}"
-                    )
-
-                    if resolved_conflicts:
-                        for conflict in resolved_conflicts[:5]:
-                            logger.info(
-                                f"  - {conflict.get('local_subject_id')} "
-                                f"({conflict.get('identifier_type')}): "
-                                f"action={conflict.get('resolution_action')}"
-                            )
-
-                    return resolved_conflicts
-            finally:
-                conn.close()
-
-        except Exception as e:
-            logger.error(f"Failed to fetch resolved conflicts: {e}", exc_info=True)
-            return []
-
     def apply_conflict_resolutions(
         self, records: List[Dict], batch_id: str
     ) -> List[Dict]:
@@ -350,8 +301,58 @@ class FragmentResolutionService:
         except Exception as e:
             logger.error(f"Failed to record load in fragment_resolutions: {e}")
 
+    def get_resolved_conflicts(self, batch_id: str) -> List[Dict]:
+        """Get all resolved conflicts for a batch from PostgreSQL"""
+        logger.info(f"Fetching resolved conflicts for batch {batch_id}...")
+
+        try:
+            conn = get_db_connection()
+            try:
+                with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                    cursor.execute(
+                        """
+                        SELECT 
+                            batch_id,
+                            local_subject_id,
+                            identifier_type,
+                            conflict_type,
+                            resolution_action,
+                            resolved,
+                            existing_gsid,
+                            existing_center_id,
+                            incoming_center_id
+                        FROM conflict_resolutions
+                        WHERE batch_id = %s 
+                          AND resolution_action IS NOT NULL
+                          AND resolved = FALSE
+                        """,
+                        (batch_id,),
+                    )
+
+                    resolved_conflicts = cursor.fetchall()
+
+                    logger.info(
+                        f"Found {len(resolved_conflicts)} resolved conflicts for batch {batch_id}"
+                    )
+
+                    if resolved_conflicts:
+                        for conflict in resolved_conflicts[:5]:
+                            logger.info(
+                                f"  - {conflict.get('local_subject_id')} "
+                                f"({conflict.get('identifier_type')}): "
+                                f"action={conflict.get('resolution_action')}"
+                            )
+
+                    return resolved_conflicts
+            finally:
+                conn.close()
+
+        except Exception as e:
+            logger.error(f"Failed to fetch resolved conflicts: {e}", exc_info=True)
+            return []
+
     def mark_conflicts_as_applied(self, batch_id: str) -> None:
-        """Mark all resolved conflicts for a batch as 'applied'"""
+        """Mark all resolved conflicts for a batch as applied"""
         try:
             conn = get_db_connection()
             try:
@@ -360,10 +361,12 @@ class FragmentResolutionService:
                         """
                         UPDATE conflict_resolutions
                         SET 
-                            status = 'applied',
+                            resolved = TRUE,
+                            resolved_at = CURRENT_TIMESTAMP,
                             updated_at = CURRENT_TIMESTAMP
                         WHERE batch_id = %s 
-                          AND status = 'resolved'
+                          AND resolution_action IS NOT NULL
+                          AND resolved = FALSE
                         """,
                         (batch_id,),
                     )
@@ -386,16 +389,7 @@ class FragmentResolutionService:
             logger.error(f"Failed to mark conflicts as applied: {e}")
 
     def apply_center_updates_to_subjects(self, batch_id: str, conn=None) -> int:
-        """
-        Apply center_id updates from conflict resolutions to subjects table
-
-        Args:
-            batch_id: Batch identifier
-            conn: Database connection (optional, will create new if None)
-
-        Returns:
-            Number of subjects updated
-        """
+        """Apply center_id updates from conflict resolutions to subjects table"""
         logger.info(
             f"🔍 DEBUG: apply_center_updates_to_subjects called for batch {batch_id}"
         )
@@ -422,7 +416,7 @@ class FragmentResolutionService:
                     WHERE cr.batch_id = %s
                       AND cr.conflict_type = 'center_mismatch'
                       AND cr.resolution_action = 'use_incoming'
-                      AND cr.status = 'resolved'
+                      AND cr.resolved = FALSE
                     """,
                     (batch_id,),
                 )
@@ -488,20 +482,7 @@ class FragmentResolutionService:
                 conn.close()
 
     def apply_center_updates_to_local_ids(self, batch_id: str, conn) -> int:
-        """
-        Apply center_id updates from conflict resolutions to local_subject_ids table
-
-        For center_mismatch conflicts with use_incoming:
-        - DELETE old record (old center_id)
-        - INSERT will happen via normal upsert
-
-        Args:
-            batch_id: Batch identifier
-            conn: Database connection (required - part of transaction)
-
-        Returns:
-            Number of old records deleted
-        """
+        """Apply center_id updates from conflict resolutions to local_subject_ids table"""
         logger.info(
             f"🔍 DEBUG: apply_center_updates_to_local_ids called for batch {batch_id}"
         )
@@ -522,7 +503,7 @@ class FragmentResolutionService:
                     WHERE cr.batch_id = %s
                       AND cr.conflict_type = 'center_mismatch'
                       AND cr.resolution_action = 'use_incoming'
-                      AND cr.status = 'resolved'
+                      AND cr.resolved = FALSE
                     """,
                     (batch_id,),
                 )

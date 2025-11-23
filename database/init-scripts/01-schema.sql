@@ -255,13 +255,6 @@ CREATE TYPE resolution_action_enum AS ENUM (
     'pending'
 );
 
-CREATE TYPE status_enum AS ENUM (
-    'pending',
-    'resolved',
-    'applied'
-);
-
--- Then create the table using these ENUM types
 CREATE TABLE conflict_resolutions (
     id SERIAL PRIMARY KEY,
     batch_id VARCHAR(100) NOT NULL,
@@ -280,12 +273,12 @@ CREATE TABLE conflict_resolutions (
     -- Resolution decision
     resolution_action resolution_action_enum,
     resolution_notes TEXT,
+    resolved BOOLEAN DEFAULT FALSE NOT NULL,  -- Replaces status='applied'
 
     -- Metadata
     detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     resolved_at TIMESTAMP,
     resolved_by VARCHAR(100),
-    status status_enum DEFAULT 'pending',
 
     -- Audit trail
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -345,9 +338,9 @@ CREATE INDEX idx_fragment_resolutions_review ON fragment_resolutions(requires_re
 CREATE INDEX idx_fragment_resolutions_created ON fragment_resolutions(created_at DESC);
 CREATE UNIQUE INDEX idx_fragment_resolutions_unique ON fragment_resolutions(batch_id, table_name, fragment_key);
 CREATE INDEX idx_conflict_resolutions_batch ON conflict_resolutions(batch_id);
-CREATE INDEX idx_conflict_resolutions_status ON conflict_resolutions(status);
+CREATE INDEX idx_conflict_resolutions_resolved ON conflict_resolutions(resolved);
 CREATE INDEX idx_conflict_resolutions_local_id ON conflict_resolutions(local_subject_id);
-CREATE INDEX idx_conflict_resolutions_pending ON conflict_resolutions(status) WHERE status = 'pending';
+CREATE INDEX idx_conflict_resolutions_pending ON conflict_resolutions(resolution_action) WHERE resolution_action IS NULL;
 
 -- ============================================================================
 -- TRIGGERS
@@ -773,4 +766,5 @@ COMMENT ON VIEW v_resolution_summary_by_center IS 'Resolution statistics grouped
 COMMENT ON VIEW v_subjects_by_source IS 'Subject counts grouped by source system';
 COMMENT ON VIEW v_recent_data_changes IS 'Most recent data changes across all tables';
 COMMENT ON TABLE conflict_resolutions IS 'Tracks data conflicts requiring manual review and resolution';
-COMMENT ON COLUMN conflict_resolutions.resolution_action IS 'keep_existing: Keep DB record, reject incoming | use_incoming: Delete DB record, load incoming | delete_both: Remove both | merge: Combine data';
+COMMENT ON COLUMN conflict_resolutions.resolution_action IS 'NULL=pending review | keep_existing/use_incoming/delete_both/merge=resolved but not applied';
+COMMENT ON COLUMN conflict_resolutions.resolved IS 'TRUE when resolution has been applied to database';

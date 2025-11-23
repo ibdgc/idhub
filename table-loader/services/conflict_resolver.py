@@ -14,12 +14,12 @@ class ConflictResolver:
         self.db_connection = db_connection
 
     def get_pending_resolutions(self, batch_id: str) -> List[Dict]:
-        """Get all resolved conflicts for a batch"""
+        """Get all resolved conflicts for a batch (resolution_action set, not yet applied)"""
         query = """
             SELECT * FROM conflict_resolutions
             WHERE batch_id = %s
-              AND status = 'resolved'
               AND resolution_action IS NOT NULL
+              AND resolved = FALSE
             ORDER BY id
         """
 
@@ -53,14 +53,12 @@ class ConflictResolver:
             action = resolution["resolution_action"]
 
             if action == "keep_existing":
-                # Do nothing - existing record stays, incoming will be skipped
                 actions_taken["keep_existing"] += 1
                 logger.info(
                     f"Keeping existing record for {resolution['local_subject_id']}"
                 )
 
             elif action == "use_incoming":
-                # Delete existing record, incoming will be loaded
                 self._delete_existing_record(resolution)
                 actions_taken["use_incoming"] += 1
                 logger.info(
@@ -69,7 +67,6 @@ class ConflictResolver:
                 )
 
             elif action == "delete_both":
-                # Delete existing record, mark incoming to skip
                 self._delete_existing_record(resolution)
                 self._mark_incoming_skip(resolution)
                 actions_taken["delete_both"] += 1
@@ -78,7 +75,6 @@ class ConflictResolver:
                 )
 
             elif action == "merge":
-                # Complex merge logic - for now, log and skip
                 logger.warning(
                     f"Merge action not yet implemented for {resolution['local_subject_id']}"
                 )
@@ -115,7 +111,6 @@ class ConflictResolver:
 
     def _mark_incoming_skip(self, resolution: Dict) -> None:
         """Mark incoming record to be skipped during load"""
-        # This will be checked by the loader before inserting
         query = """
             UPDATE conflict_resolutions
             SET resolution_notes = COALESCE(resolution_notes, '') || ' [SKIP_INCOMING]'
@@ -129,8 +124,8 @@ class ConflictResolver:
         """Mark conflict resolution as applied"""
         query = """
             UPDATE conflict_resolutions
-            SET status = 'applied',
-                updated_at = CURRENT_TIMESTAMP
+            SET resolved = TRUE, 
+                resolved_at = CURRENT_TIMESTAMP
             WHERE id = %s
         """
 
@@ -146,8 +141,9 @@ class ConflictResolver:
             FROM conflict_resolutions
             WHERE batch_id = %s
               AND local_subject_id = %s
-              AND incoming_center_id = %s
-              AND status IN ('resolved', 'applied')
+              AND existing_center_id = %s
+              AND resolution_action IS NOT NULL
+              AND resolved = FALSE
         """
 
         with get_db_cursor(self.db_connection) as cursor:
@@ -160,11 +156,9 @@ class ConflictResolver:
             action = result["resolution_action"]
             notes = result.get("resolution_notes", "")
 
-            # Skip if action is keep_existing or delete_both
             if action in ("keep_existing", "delete_both"):
                 return True
 
-            # Skip if marked with SKIP_INCOMING flag
             if "[SKIP_INCOMING]" in notes:
                 return True
 

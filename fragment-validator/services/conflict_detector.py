@@ -70,7 +70,6 @@ class ConflictDetector:
                         "existing_gsid": existing_gsid,
                         "incoming_gsid": incoming_gsid,
                         "resolution_action": None,
-                        "status": "pending",
                     }
                     conflicts.append(conflict)
 
@@ -91,7 +90,6 @@ class ConflictDetector:
                         "existing_gsid": existing_gsid,
                         "incoming_gsid": incoming_gsid,
                         "resolution_action": None,
-                        "status": "pending",
                     }
                     conflicts.append(conflict)
 
