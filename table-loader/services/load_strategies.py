@@ -1,11 +1,12 @@
 # table-loader/services/load_strategies.py
-
 import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Set
 
 import psycopg2
 from psycopg2.extras import RealDictCursor, execute_values
+
+logger = logging.getLogger(__name__)
 
 
 class LoadStrategy(ABC):
@@ -502,7 +503,7 @@ class UniversalUpsertStrategy(LoadStrategy):
         conn: psycopg2.extensions.connection,
         records: List[Dict[str, Any]],
         batch_size: int = 1000,
-    ) -> List[Dict[str, Any]]:  # Changed return type
+    ) -> List[Dict[str, Any]]:
         """
         Fetch current state of records from database in batches
 
@@ -514,6 +515,11 @@ class UniversalUpsertStrategy(LoadStrategy):
         Returns:
             List of current database records
         """
+        import logging
+
+        from psycopg2.extras import RealDictCursor
+
+        logger = logging.getLogger(__name__)
         current_records = []
 
         if not records:
@@ -556,8 +562,6 @@ class UniversalUpsertStrategy(LoadStrategy):
                 params = [val for key in batch_keys for val in key]
 
             try:
-                from psycopg2.extras import RealDictCursor
-
                 with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                     cursor.execute(query, params)
                     rows = cursor.fetchall()
