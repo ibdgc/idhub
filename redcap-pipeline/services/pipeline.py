@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Dict, List
 
 import requests
+from core.config import settings
 
 from services.center_resolver import CenterResolver
 from services.data_processor import DataProcessor
@@ -22,7 +23,9 @@ class REDCapPipeline:
         self.project_name = project_config.get("name")
 
         self.redcap_client = REDCapClient(project_config)
-        self.gsid_client = GSIDClient()
+        self.gsid_client = GSIDClient(
+            service_url=settings.GSID_SERVICE_URL, api_key=settings.GSID_API_KEY
+        )
         self.center_resolver = CenterResolver()
         self.data_processor = DataProcessor(project_config)
         self.s3_uploader = S3Uploader()

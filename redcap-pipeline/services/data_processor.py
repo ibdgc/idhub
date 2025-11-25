@@ -4,6 +4,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from core.config import settings
 from core.database import get_db_connection, return_db_connection
 from psycopg2.extras import RealDictCursor
 
@@ -24,7 +25,9 @@ class DataProcessor:
 
         # Initialize dependencies
         self.center_resolver = CenterResolver()
-        self.gsid_client = GSIDClient()
+        self.gsid_client = GSIDClient(
+            service_url=settings.GSID_SERVICE_URL, api_key=settings.GSID_API_KEY
+        )
         self.s3_uploader = S3Uploader()
 
         # Cache subject ID fields from mappings
