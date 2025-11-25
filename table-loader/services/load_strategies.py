@@ -5,9 +5,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Set
 
 import psycopg2
-from psycopg2.extras import execute_values
-
-logger = logging.getLogger(__name__)
+from psycopg2.extras import RealDictCursor, execute_values
 
 
 class LoadStrategy(ABC):
@@ -93,7 +91,6 @@ class StandardLoadStrategy(LoadStrategy):
 class UniversalUpsertStrategy(LoadStrategy):
     """
     Universal UPSERT strategy with change detection and audit logging
-
     Special handling for local_subject_ids:
     - Detects center_id changes by matching on (local_subject_id, identifier_type)
     - Deletes old records before inserting new ones with updated center_id
@@ -501,25 +498,88 @@ class UniversalUpsertStrategy(LoadStrategy):
         return tuple(record.get(field) for field in self.natural_key)
 
     def _fetch_current_state(
-        self, conn: psycopg2.extensions.connection, records: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        """Fetch current state of records from database"""
-        if not records:
-            return []
-
-        keys = [self._make_key(r) for r in records]
-        columns = list(records[0].keys())
-
-        query = f"""
-            SELECT {", ".join(columns)}
-            FROM {self.table_name}
-            WHERE ({", ".join(self.natural_key)}) IN %s
+        self,
+        conn: psycopg2.extensions.connection,
+        records: List[Dict[str, Any]],
+        batch_size: int = 1000,
+    ) -> List[Dict[str, Any]]:  # Changed return type
         """
+        Fetch current state of records from database in batches
 
-        with conn.cursor() as cursor:
-            cursor.execute(query, (tuple(keys),))
-            rows = cursor.fetchall()
-            return [dict(zip(columns, row)) for row in rows]
+        Args:
+            conn: Database connection
+            records: List of records to check
+            batch_size: Number of records per query (default: 1000)
+
+        Returns:
+            List of current database records
+        """
+        current_records = []
+
+        if not records:
+            return current_records
+
+        # Extract natural keys from records
+        natural_keys = [
+            tuple(rec.get(col) for col in self.natural_key) for rec in records
+        ]
+
+        # Process in batches to avoid stack depth issues
+        total_batches = (len(natural_keys) + batch_size - 1) // batch_size
+        logger.info(
+            f"Fetching current state for {len(natural_keys)} records "
+            f"in {total_batches} batches of {batch_size}"
+        )
+
+        for i in range(0, len(natural_keys), batch_size):
+            batch_keys = natural_keys[i : i + batch_size]
+
+            # Build parameterized query for this batch
+            if len(self.natural_key) == 1:
+                # Single column: WHERE col IN (%s, %s, ...)
+                placeholders = ",".join(["%s"] * len(batch_keys))
+                query = f"""
+                    SELECT * FROM {self.table_name}
+                    WHERE {self.natural_key[0]} IN ({placeholders})
+                """
+                params = [key[0] for key in batch_keys]
+            else:
+                # Multiple columns: WHERE (col1, col2) IN ((%s,%s), (%s,%s), ...)
+                placeholders = ",".join(
+                    ["(" + ",".join(["%s"] * len(self.natural_key)) + ")"]
+                    * len(batch_keys)
+                )
+                query = f"""
+                    SELECT * FROM {self.table_name}
+                    WHERE ({",".join(self.natural_key)}) IN ({placeholders})
+                """
+                params = [val for key in batch_keys for val in key]
+
+            try:
+                from psycopg2.extras import RealDictCursor
+
+                with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                    cursor.execute(query, params)
+                    rows = cursor.fetchall()
+
+                    # Convert to list of dicts
+                    current_records.extend([dict(row) for row in rows])
+
+                logger.debug(
+                    f"Batch {i // batch_size + 1}/{total_batches}: "
+                    f"fetched {len(rows)} existing records"
+                )
+
+            except Exception as e:
+                logger.error(
+                    f"Error fetching batch {i // batch_size + 1}/{total_batches}: {e}"
+                )
+                raise
+
+        logger.info(
+            f"Fetched {len(current_records)} existing records from {self.table_name}"
+        )
+        return current_records
 
     def _detect_changes(
         self, incoming: Dict[str, Any], current: Dict[str, Any]
@@ -686,6 +746,7 @@ class UpsertLoadStrategy(LoadStrategy):
                     cursor,
                     upsert_query,
                     [tuple(r[col] for col in columns) for r in filtered_records],
+                    page_size=1000,
                 )
                 rows_loaded = cursor.rowcount
 
