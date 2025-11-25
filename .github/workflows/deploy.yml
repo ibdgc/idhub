@@ -67,7 +67,7 @@ jobs:
           JWT_SECRET=${{ secrets.JWT_SECRET }}
 
           # ============================================================================
-          # IDHub Database Configuration
+          # IDhub Database Configuration
           # ============================================================================
           DB_HOST=${{ secrets.DB_HOST }}
           DB_NAME=${{ secrets.DB_NAME }}

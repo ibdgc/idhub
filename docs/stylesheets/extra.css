@@ -1,0 +1,51 @@
+/* Custom styling for IDhub documentation */
+
+/* Improve code block styling */
+.highlight {
+  border-radius: 0.2rem;
+}
+
+/* Better table styling */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1em 0;
+}
+
+table th {
+  background-color: var(--md-primary-fg-color);
+  color: var(--md-primary-bg-color);
+  font-weight: 600;
+}
+
+/* Admonition customization */
+.admonition {
+  border-left: 0.2rem solid;
+  border-radius: 0.2rem;
+  margin: 1.5625em 0;
+  padding: 0 0.6rem;
+}
+
+/* Improve mermaid diagram visibility */
+.mermaid {
+  text-align: center;
+  margin: 1em 0;
+}
+
+/* Better spacing for navigation */
+.md-nav__item {
+  padding: 0.2rem 0;
+}
+
+/* Highlight important notes */
+.admonition.warning {
+  border-left-color: #ff9800;
+}
+
+.admonition.danger {
+  border-left-color: #f44336;
+}
+
+.admonition.tip {
+  border-left-color: #00bcd4;
+}

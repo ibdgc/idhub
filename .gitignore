@@ -34,3 +34,7 @@ __pycache__/
 
 # Temporary scripts
 analyze_*.py
+
+# MkDocs
+site/
+.cache/
