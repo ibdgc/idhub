@@ -529,7 +529,7 @@ graph LR
     J --> H
 ```
 
-[Detailed deployment documentation →](../operations/deployment.md)
+[Detailed deployment documentation →](../guides/deployment.md)
 
 ## Scalability Considerations
 
@@ -701,7 +701,7 @@ class ValidatorFactory:
 - [Data Flow Details](data-flow.md)
 - [Database Schema](database-schema.md)
 - [Security Model](security.md)
-- [Update Strategy](update-strategy.md)
+- [Update Strategy](../update-strategy.md)
 
 ## References
 

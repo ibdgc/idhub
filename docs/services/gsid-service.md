@@ -903,8 +903,7 @@ REINDEX TABLE local_subject_ids;
 
 - [API Reference](../api/gsid-api.md)
 - [Database Schema](../architecture/database-schema.md)
-- [Deployment Guide](../operations/deployment.md)
-- [Security Model](../architecture/security.md)
+- [Deployment Guide](../guides/deployment.md)
 
 ## Support
 

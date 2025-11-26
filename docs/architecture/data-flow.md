@@ -928,7 +928,7 @@ async def verify_load(batch_id: str) -> dict:
 - [Table Loader Service](../services/table-loader.md)
 - [GSID Service](../services/gsid-service.md)
 - [Database Schema](database-schema.md)
-- [API Reference](../api/README.md)
+- [API Reference](../api/gsid-api.md)
 
 ## Support
 

@@ -665,7 +665,7 @@ GET /api/quality/checks?table=blood&severity=error
 
 ## Contributing
 
-See [CONTRIBUTING.md](../CONTRIBUTING.md) for guidelines on:
+See Contributing section below for guidelines on:
 
 - Reporting bugs
 - Suggesting features

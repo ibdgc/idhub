@@ -1,4 +1,48 @@
-# IBDGC Integrated Data Hub
+# IDHub Documentation
+
+Welcome to the IDHub platform documentation.
+
+## Quick Links
+
+- [Architecture Overview](architecture/overview.md)
+- [Deployment Guide](guides/deployment.md)
+- [Configuration Guide](guides/configuration.md)
+- [API Reference](api/gsid-api.md)
+
+## Core Services
+
+- [GSID Service](services/gsid-service.md) - Global Subject ID generation
+- [REDCap Pipeline](services/redcap-pipeline.md) - Automated data extraction
+- [Fragment Validator](services/fragment-validator.md) - Data validation
+- [Table Loader](services/table-loader.md) - Database loading
+
+## Getting Started
+
+1. Review the [Architecture Overview](architecture/overview.md)
+2. Follow the [Deployment Guide](guides/deployment.md)
+3. Configure your environment using the [Configuration Guide](guides/configuration.md)
+4. Understand the [Data Flow](architecture/data-flow.md)
+
+## Data Management
+
+Learn about our [Update Strategy](update-strategy.md) for handling data updates and conflicts.
+
+## Operations
+
+- [Monitoring](operations/monitoring.md)
+- [Maintenance](operations/maintenance.md)
+- [Troubleshooting](operations/troubleshooting.md)
+
+## Development
+
+- [Development Setup](guides/development.md)
+- [GitHub Workflows](guides/workflows.md)
+
+## Reference
+
+- [Environment Variables](reference/environment-variables.md)
+- [Configuration Files](reference/configuration-files.md)
+- [Changelog](reference/changelog.md)
 
 <div class="grid cards" markdown>
 
@@ -817,16 +861,16 @@ def find_existing_records_batch(self, table_name, natural_keys):
 
 ## Related Documentation
 
-- [Data Flow](data-flow.md) - Overall data pipeline
-- [Table Loader Service](../services/table-loader.md) - Implementation details
-- [Fragment Validator](../services/fragment-validator.md) - Validation before loading
-- [Table Configurations](../reference/table-configs.md) - Configuration reference
+- [Data Flow](architecture/data-flow.md) - Overall data pipeline
+- [Table Loader Service](services/table-loader.md) - Implementation details
+- [Fragment Validator](services/fragment-validator.md) - Validation before loading
+- [Table Configurations](reference/table-configs.md) - Configuration reference
 
 ## Next Steps
 
-- [Configure table update strategies](../reference/table-configs.md)
-- [Set up monitoring](../operations/monitoring.md)
-- [Review troubleshooting guide](../operations/troubleshooting.md)
+- [Configure table update strategies](reference/table-configs.md)
+- [Set up monitoring](operations/monitoring.md)
+- [Review troubleshooting guide](operations/troubleshooting.md)
 
 ````
 
