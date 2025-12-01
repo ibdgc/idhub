@@ -4,8 +4,9 @@ import os
 import sys
 
 import boto3
-from core.config import settings
 from dotenv import load_dotenv
+
+from core.config import settings
 from services import (
     FragmentValidator,
     GSIDClient,
@@ -80,8 +81,8 @@ def main():
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=20,
-        help="Batch size for parallel GSID resolution (default: 20)",
+        default=5,
+        help="Batch size for parallel GSID resolution (default: 5)",
     )
     parser.add_argument(
         "--env",

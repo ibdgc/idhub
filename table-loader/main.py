@@ -20,7 +20,7 @@ def main():
     parser.add_argument("--batch-id", required=True, help="Batch ID to load")
     parser.add_argument(
         "--environment",
-        choices=["qa", "production"],
+        choices=["qa", "prod"],
         default="qa",
         help="Target environment",
     )
