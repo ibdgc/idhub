@@ -72,6 +72,26 @@ class DatabaseManager:
                 return cursor.fetchall()
             return None
 
+    def get_table_columns(self, table_name: str) -> list[str]:
+        """
+        Get column names for a specific table from the information schema.
+
+        Args:
+            table_name: The name of the table.
+
+        Returns:
+            A list of column names for the table.
+        """
+        query = """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = %s;
+        """
+        with self.get_cursor() as cursor:
+            cursor.execute(query, (table_name,))
+            return [row["column_name"] for row in cursor.fetchall()]
+
 
 # Global database manager instance
 db_manager = DatabaseManager()

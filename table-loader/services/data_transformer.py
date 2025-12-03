@@ -4,6 +4,7 @@ from datetime import date, datetime
 from typing import Any, Dict, List, Set, Union
 
 import pandas as pd
+from core.database import db_manager
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,19 @@ class DataTransformer:
         if exclude_fields:
             self.exclude_fields.update(exclude_fields)
 
+        # Fetch actual schema columns to protect against loading non-existent fields
+        try:
+            self.schema_columns = set(db_manager.get_table_columns(table_name))
+            logger.info(
+                f"Fetched {len(self.schema_columns)} schema columns for table '{table_name}'"
+            )
+        except Exception as e:
+            logger.error(
+                f"Could not fetch schema for table '{table_name}': {e}. "
+                "Proceeding without schema validation."
+            )
+            self.schema_columns = None
+
         logger.info(f"Excluding fields: {sorted(self.exclude_fields)}")
 
     def transform_records(
@@ -76,8 +90,18 @@ class DataTransformer:
         # Get all columns from DataFrame
         all_columns = set(df.columns)
 
-        # Determine which fields to keep (all columns except excluded ones)
+        # Determine which fields to keep
         fields_to_keep = all_columns - self.exclude_fields
+
+        # If we have the schema, only keep fields that exist in the database table
+        if self.schema_columns:
+            original_fields = fields_to_keep.copy()
+            fields_to_keep = fields_to_keep.intersection(self.schema_columns)
+            removed_fields = original_fields - fields_to_keep
+            if removed_fields:
+                logger.warning(
+                    f"Ignoring columns not found in '{self.table_name}' schema: {sorted(removed_fields)}"
+                )
 
         logger.info(f"Fields to load for {self.table_name}: {sorted(fields_to_keep)}")
 
