@@ -22,13 +22,11 @@ class TableLoader:
     # Tables that use UPSERT strategy (with conflict columns)
     UPSERT_TABLES = {
         "lcl": ["global_subject_id", "knumber"],
-        "blood": ["global_subject_id", "sample_id"],
-        "dna": ["global_subject_id", "sample_id"],
-        "rna": ["global_subject_id", "sample_id"],
-        "serum": ["global_subject_id", "sample_id"],
-        "plasma": ["global_subject_id", "sample_id"],
-        "stool": ["global_subject_id", "sample_id"],
-        "tissue": ["global_subject_id", "sample_id"],
+        "specimen": ["global_subject_id", "sample_id"],
+        "genotype": ["global_subject_id", "sample_id"],
+        "olink": ["global_subject_id", "sample_id"],
+        "enteroid": ["global_subject_id", "sample_id"],
+        "sequence": ["global_subject_id", "sample_id"],
         "local_subject_ids": ["center_id", "local_subject_id", "identifier_type"],
     }
 

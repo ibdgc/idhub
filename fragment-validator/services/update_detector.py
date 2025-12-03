@@ -15,13 +15,11 @@ class UpdateDetector:
     # Natural keys for each table (used to match records)
     TABLE_NATURAL_KEYS = {
         "lcl": ["global_subject_id", "niddk_no"],
-        "blood": ["global_subject_id", "sample_id"],
-        "dna": ["global_subject_id", "sample_id"],
-        "rna": ["global_subject_id", "sample_id"],
-        "serum": ["global_subject_id", "sample_id"],
-        "plasma": ["global_subject_id", "sample_id"],
-        "stool": ["global_subject_id", "sample_id"],
-        "tissue": ["global_subject_id", "sample_id"],
+        "olink": ["global_subject_id", "sample_id"],
+        "specimen": ["global_subject_id", "sample_id"],
+        "enteroid": ["global_subject_id", "sample_id"],
+        "sequence": ["global_subject_id", "sample_id"],
+        "genotype": ["global_subject_id", "sample_id"],
     }
 
     # Fields to ignore when comparing for changes

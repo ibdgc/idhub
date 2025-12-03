@@ -1,15 +1,20 @@
 {
-  "blood": {
+  "olink": {
     "natural_key": ["global_subject_id", "sample_id"],
     "immutable_fields": ["created_at", "created_by"],
     "update_strategy": "upsert"
   },
-  "dna": {
+  "sequence": {
     "natural_key": ["global_subject_id", "sample_id"],
     "immutable_fields": ["created_at", "created_by"],
     "update_strategy": "upsert"
   },
-  "rna": {
+  "genotype": {
+    "natural_key": ["global_subject_id", "sample_id"],
+    "immutable_fields": ["created_at", "created_by"],
+    "update_strategy": "upsert"
+  },
+  "enteroid": {
     "natural_key": ["global_subject_id", "sample_id"],
     "immutable_fields": ["created_at", "created_by"],
     "update_strategy": "upsert"

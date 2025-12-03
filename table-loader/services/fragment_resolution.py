@@ -246,13 +246,11 @@ class FragmentResolutionService:
                 if table_name
                 in [
                     "lcl",
-                    "blood",
-                    "dna",
-                    "rna",
-                    "serum",
-                    "plasma",
-                    "stool",
-                    "tissue",
+                    "enteroid",
+                    "specimen",
+                    "genotype",
+                    "sequence",
+                    "olink",
                     "local_subject_ids",
                 ]
                 else "standard_insert"

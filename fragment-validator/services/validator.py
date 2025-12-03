@@ -215,13 +215,11 @@ class FragmentValidator:
         # Define which fields should be excluded from database load per table
         TABLE_EXCLUDE_FIELDS = {
             "lcl": ["consortium_id", "center_id"],
-            "blood": ["consortium_id", "center_id"],
-            "dna": ["consortium_id", "center_id"],
-            "rna": ["consortium_id", "center_id"],
-            "serum": ["consortium_id", "center_id"],
-            "plasma": ["consortium_id", "center_id"],
-            "stool": ["consortium_id", "center_id"],
-            "tissue": ["consortium_id", "center_id"],
+            "olink": ["subject_id", "center_id"],
+            "enteroid": ["subject_id", "center_id"],
+            "sequence": ["subject_id", "center_id"],
+            "genotype": ["subject_id", "center_id"],
+            "specimen": ["subject_id", "center_id"],
             "local_subject_ids": [],
         }
 
