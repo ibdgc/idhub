@@ -63,13 +63,9 @@ def resolve_subject_with_multiple_ids(
                     l.center_id as identifier_center_id
                 FROM local_subject_ids l
                 JOIN subjects s ON l.global_subject_id = s.global_subject_id
-                WHERE l.local_subject_id = %s
-                  AND l.identifier_type = %s
+                WHERE lower(l.local_subject_id) = lower(%s)
                 """,
-                (
-                    identifier["local_subject_id"],
-                    identifier["identifier_type"],
-                ),
+                (identifier["local_subject_id"],),
             )
 
             results = cur.fetchall()
