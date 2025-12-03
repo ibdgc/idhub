@@ -72,25 +72,25 @@ class DatabaseManager:
                 return cursor.fetchall()
             return None
 
-    def get_table_columns(self, table_name: str) -> list[str]:
+    def get_table_schema(self, table_name: str) -> dict[str, str]:
         """
-        Get column names for a specific table from the information schema.
+        Get column names and data types for a specific table.
 
         Args:
             table_name: The name of the table.
 
         Returns:
-            A list of column names for the table.
+            A dictionary mapping column names to their data types.
         """
         query = """
-            SELECT column_name
+            SELECT column_name, data_type
             FROM information_schema.columns
             WHERE table_schema = 'public'
               AND table_name = %s;
         """
         with self.get_cursor() as cursor:
             cursor.execute(query, (table_name,))
-            return [row["column_name"] for row in cursor.fetchall()]
+            return {row["column_name"]: row["data_type"] for row in cursor.fetchall()}
 
 
 # Global database manager instance

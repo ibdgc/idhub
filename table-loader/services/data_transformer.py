@@ -1,7 +1,7 @@
 # table-loader/services/data_transformer.py
 import logging
 from datetime import date, datetime
-from typing import Any, Dict, List, Set, Union
+from typing import Any, Dict, List, Optional, Set, Union
 
 import pandas as pd
 from core.database import db_manager
@@ -47,17 +47,20 @@ class DataTransformer:
         if exclude_fields:
             self.exclude_fields.update(exclude_fields)
 
-        # Fetch actual schema columns to protect against loading non-existent fields
+        # Fetch actual schema to protect against loading non-existent fields
+        # and to inform type conversion
         try:
-            self.schema_columns = set(db_manager.get_table_columns(table_name))
+            self.schema = db_manager.get_table_schema(table_name)
+            self.schema_columns = set(self.schema.keys())
             logger.info(
                 f"Fetched {len(self.schema_columns)} schema columns for table '{table_name}'"
             )
         except Exception as e:
             logger.error(
                 f"Could not fetch schema for table '{table_name}': {e}. "
-                "Proceeding without schema validation."
+                "Proceeding without schema-aware transformations."
             )
+            self.schema = {}
             self.schema_columns = None
 
         logger.info(f"Excluding fields: {sorted(self.exclude_fields)}")
@@ -145,59 +148,70 @@ class DataTransformer:
     def _transform_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
         """Transform a single record with type conversions"""
         transformed = {}
-
         for key, value in record.items():
-            # Handle null values
-            if pd.isna(value) or value == "" or value == "NULL" or value == "NA":
-                transformed[key] = None
-                continue
-
-            # Type conversions based on value patterns
-            transformed[key] = self._convert_value(value)
-
+            db_type = self.schema.get(key)
+            transformed[key] = self._convert_value(value, db_type)
         return transformed
 
-    def _convert_value(self, value: Any) -> Any:
-        """Convert value to appropriate Python type"""
-        if value is None or pd.isna(value):
+    def _convert_value(self, value: Any, db_type: Optional[str]) -> Any:
+        """
+        Convert value to appropriate Python type based on DB schema.
+        """
+        if value is None or pd.isna(value) or str(value).strip().upper() in ("NULL", "NA", "N/A", ""):
             return None
 
         # Already correct type
         if isinstance(value, (int, float, bool, date, datetime)):
             return value
 
-        # String conversions
-        if isinstance(value, str):
-            value = value.strip()
+        # Convert to string for consistent processing
+        str_value = str(value).strip()
 
-            # Empty string -> None
-            if not value or value.upper() in ("NULL", "NA", "N/A"):
-                return None
-
-            # Boolean
-            if value.lower() in ("true", "t", "yes", "y", "1"):
-                return True
-            if value.lower() in ("false", "f", "no", "n", "0"):
-                return False
-
-            # Try numeric
+        # Perform conversion based on target database type
+        if db_type:
+            if 'int' in db_type:
+                try:
+                    return int(float(str_value))
+                except (ValueError, TypeError):
+                    logger.warning(f"Could not convert '{value}' to int for column with type {db_type}")
+                    return None
+            elif db_type in ('decimal', 'numeric', 'real', 'double precision'):
+                try:
+                    return float(str_value)
+                except (ValueError, TypeError):
+                    logger.warning(f"Could not convert '{value}' to float for column with type {db_type}")
+                    return None
+            elif db_type == 'boolean':
+                return str_value.lower() in ('true', 't', 'yes', 'y', '1')
+            elif db_type == 'date':
+                try:
+                    return datetime.strptime(str_value, "%Y-%m-%d").date()
+                except (ValueError, TypeError):
+                     logger.warning(f"Could not convert '{value}' to date for column with type {db_type}")
+                     return None
+            elif 'timestamp' in db_type:
+                try:
+                    return datetime.fromisoformat(str_value.replace("Z", "+00:00"))
+                except (ValueError, TypeError):
+                    logger.warning(f"Could not convert '{value}' to timestamp for column with type {db_type}")
+                    return None
+            # For text, varchar, etc., just return the stripped string
+            elif db_type in ('text', 'character varying'):
+                return str_value
+        
+        # Fallback for when schema is not available (old behavior, but safer)
+        # We avoid converting to int unless we are sure it's not an ID.
+        # This is not perfect, but safer than aggressive int conversion.
+        if str_value.lower() in ('true', 't', 'yes', 'y', '1'):
+            return True
+        if str_value.lower() in ('false', 'f', 'no', 'n', '0'):
+            return False
+        
+        # Try float
+        if '.' in str_value:
             try:
-                if "." in value:
-                    return float(value)
-                return int(value)
-            except ValueError:
+                return float(str_value)
+            except (ValueError, TypeError):
                 pass
 
-            # Try date/datetime
-            try:
-                # ISO format datetime
-                if "T" in value or " " in value:
-                    return datetime.fromisoformat(value.replace("Z", "+00:00"))
-                # ISO format date
-                if "-" in value and len(value) == 10:
-                    return datetime.strptime(value, "%Y-%m-%d").date()
-            except (ValueError, AttributeError):
-                pass
-
-        # Return as-is
-        return value
+        return str_value
