@@ -23,6 +23,7 @@ class SubjectIDResolver:
         default_center_id: int = 0,
         created_by: str = "fragment_validator",
         batch_size: int = 20,
+        subject_id_type_field: Optional[str] = None,
     ) -> Dict:
         """
         Resolve subject IDs for entire dataset with parallel processing.
@@ -48,21 +49,29 @@ class SubjectIDResolver:
 
             # Collect all non-null candidate IDs for this row
             identifiers = []
+            
+            # Determine the identifier type from the data row if the field is provided
+            id_type_from_data = None
+            if subject_id_type_field and subject_id_type_field in row and pd.notna(row[subject_id_type_field]):
+                id_type_from_data = str(row[subject_id_type_field]).strip()
+
             for field in candidate_fields:
                 if field in data.columns:
                     value = row[field]
                     if pd.notna(value) and str(value).strip():
+                        # Use the type from the data if available, otherwise default to the column name
+                        effective_identifier_type = id_type_from_data if id_type_from_data else field
                         identifiers.append(
                             {
                                 "local_subject_id": str(value).strip(),
-                                "identifier_type": field,
+                                "identifier_type": effective_identifier_type,
                             }
                         )
 
             if not identifiers:
                 logger.warning(f"Row {idx}: No valid subject IDs found in candidates")
                 continue
-
+            
             # Create registration request
             request = {
                 "center_id": center_id,

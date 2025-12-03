@@ -88,6 +88,8 @@ class FragmentValidator:
 
             # Step 4: Resolve subject IDs to GSIDs
             logger.info("Resolving subject IDs to GSIDs...")
+            subject_id_type_field = mapping_config.get("subject_id_type_field")
+
             resolution_result = self.subject_id_resolver.resolve_batch(
                 mapped_data,
                 candidate_fields=subject_id_candidates,
@@ -95,6 +97,7 @@ class FragmentValidator:
                 default_center_id=default_center_id,
                 created_by=source_name,
                 batch_size=batch_size,
+                subject_id_type_field=subject_id_type_field,
             )
 
             # Add GSIDs to mapped data

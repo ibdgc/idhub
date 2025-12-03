@@ -2,10 +2,12 @@
   "field_mapping": {
     "sample_id": "collaborator_sample_id",
     "sample_type": "sample_type",
-    "batch": "batch"
+    "batch": "batch",
+    "identifier_type": "identifier_type"
   },
   "subject_id_candidates": ["subject_id"],
+  "subject_id_type_field": "identifier_type",
   "center_id_field": "center_id",
   "default_center_id": 1,
-  "exclude_from_load": ["subject_id", "center_id"]
+  "exclude_from_load": ["subject_id", "center_id", "identifier_type"]
 }

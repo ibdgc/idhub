@@ -1,10 +1,12 @@
 {
   "field_mapping": {
     "knumber": "knumber",
-    "niddk_no": "niddk_no"
+    "niddk_no": "niddk_no",
+    "identifier_type": "identifier_type"
   },
   "subject_id_candidates": ["consortium_id"],
+  "subject_id_type_field": "identifier_type",
   "center_id_field": null,
   "default_center_id": 1,
-  "exclude_from_load": ["consortium_id", "center_id"]
+  "exclude_from_load": ["consortium_id", "center_id", "identifier_type"]
 }
