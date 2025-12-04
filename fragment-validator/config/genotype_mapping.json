@@ -1,0 +1,13 @@
+{
+  "field_mapping": {
+    "genotype_id": "id",
+    "genotyping_project": "project",
+    "identifier_type": "identifier_type",
+    "genotyping_barcode": "barcode"
+  },
+  "subject_id_candidates": ["consortium_id"],
+  "subject_id_type_field": "identifier_type",
+  "center_id_field": null,
+  "default_center_id": 1,
+  "exclude_from_load": ["consortium_id", "center_id", "identifier_type"]
+}

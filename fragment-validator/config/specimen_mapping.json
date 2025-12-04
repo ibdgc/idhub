@@ -1,0 +1,17 @@
+{
+  "field_mapping": {
+    "sample_id": "sample_id",
+    "sample_type": "sample_type",
+    "year_collected": "year_collected",
+    "redcap_event": "redcap_event",
+    "region_location": "region_location",
+    "sample_available": "sample_available",
+    "project": "project",
+    "identifier_type": "identifier_type"
+  },
+  "subject_id_candidates": ["subject_id"],
+  "subject_id_type_field": "identifier_type",
+  "center_id_field": "center_id",
+  "default_center_id": 1,
+  "exclude_from_load": ["subject_id", "center_id", "identifier_type"]
+}
