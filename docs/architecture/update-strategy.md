@@ -6,11 +6,11 @@ The Universal Update Strategy is a core feature of IDhub that enables intelligen
 
 The update strategy provides:
 
-- **Natural Key Matching**: Identify existing records using business keys instead of database IDs
-- **Intelligent Upserts**: Insert new records or update existing ones based on natural keys
-- **Immutable Field Protection**: Prevent modification of audit fields and other protected columns
-- **Conflict Resolution**: Handle duplicate records and data conflicts gracefully
-- **Audit Trail Preservation**: Maintain complete history of data changes
+-   **Natural Key Matching**: Identify existing records using business keys instead of database IDs
+-   **Intelligent Upserts**: Insert new records or update existing ones based on natural keys
+-   **Immutable Field Protection**: Prevent modification of audit fields and other protected columns
+-   **Conflict Resolution**: Handle duplicate records and data conflicts gracefully
+-   **Audit Trail Preservation**: Maintain complete history of data changes
 
 ## Architecture
 
@@ -158,10 +158,10 @@ else:
 
 **Use Cases**:
 
-- LCL data that may be corrected or enriched
-- DNA/RNA sample information that evolves
-- Subject information updates
-- Most transactional data
+-   LCL data that may be corrected or enriched
+-   DNA/RNA sample information that evolves
+-   Subject information updates
+-   Most transactional data
 
 ### Insert Only
 
@@ -175,9 +175,9 @@ Only insert new records, reject updates to existing records.
 
 **Use Cases**:
 
-- Immutable audit logs
-- Historical snapshots
-- Event data
+-   Immutable audit logs
+-   Historical snapshots
+-   Event data
 
 ### Update Only
 
@@ -191,9 +191,9 @@ Only update existing records, reject new inserts.
 
 **Use Cases**:
 
-- Enrichment of existing data
-- Status updates
-- Corrections to known records
+-   Enrichment of existing data
+-   Status updates
+-   Corrections to known records
 
 ## Immutable Fields
 
@@ -234,10 +234,10 @@ def validate_immutable_fields(existing_record, new_data, immutable_fields):
 
 When an immutable field violation is detected:
 
-1. **Reject the update**
-2. **Log the error** with details
-3. **Mark fragment as failed** in validation queue
-4. **Notify operators** via monitoring
+1.  **Reject the update**
+2.  **Log the error** with details
+3.  **Mark fragment as failed** in validation queue
+4.  **Notify operators** via monitoring
 
 ## Implementation
 
@@ -329,9 +329,9 @@ def load_record(self, table_name, record_data):
 
 **Result**: ✅ Update succeeds
 
-- Natural key matches existing record (GSID + NIDDK number)
-- No immutable fields changed
-- Passage number updated from 5 to 8
+-   Natural key matches existing record (GSID + NIDDK number)
+-   No immutable fields changed
+-   Passage number updated from 5 to 8
 
 ### Example 2: Immutable Field Violation
 
@@ -380,9 +380,9 @@ ImmutableFieldError: Cannot modify immutable field 'created_at':
 
 **Result**: ✅ Insert succeeds
 
-- Natural key not found in database
-- New LCL line record created
-- Audit fields auto-populated
+-   Natural key not found in database
+-   New LCL line record created
+-   Audit fields auto-populated
 
 ### Example 4: DNA Sample with Multiple Fields Updated
 
@@ -414,9 +414,9 @@ ImmutableFieldError: Cannot modify immutable field 'created_at':
 
 **Result**: ✅ Update succeeds
 
-- Natural key matches (GSID + sample_id)
-- Multiple mutable fields updated
-- Immutable fields preserved
+-   Natural key matches (GSID + sample_id)
+-   Multiple mutable fields updated
+-   Immutable fields preserved
 
 ## Monitoring & Logging
 
@@ -474,39 +474,39 @@ INFO: Inserted new lcl record [GSID: 01HQABC456, NIDDK: 67890]
 
 ✅ **Good Natural Keys**
 
-- Stable business identifiers (NIDDK numbers, K numbers)
-- Guaranteed unique within scope
-- Always present in source data
-- Combination of GSID + domain-specific ID
+-   Stable business identifiers (NIDDK numbers, K numbers)
+-   Guaranteed unique within scope
+-   Always present in source data
+-   Combination of GSID + domain-specific ID
 
 ❌ **Poor Natural Keys**
 
-- Auto-incrementing IDs from source systems
-- Mutable fields (names, dates, status)
-- Optional fields
-- Fields that might be corrected later
+-   Auto-incrementing IDs from source systems
+-   Mutable fields (names, dates, status)
+-   Optional fields
+-   Fields that might be corrected later
 
 ### 2. Define Immutable Fields Carefully
 
 **Always Immutable**
 
-- `created_at`, `created_by`
-- `gsid` (global subject ID)
-- `source_system`, `source_id`
+-   `created_at`, `created_by`
+-   `gsid` (global subject ID)
+-   `source_system`, `source_id`
 
 **Sometimes Immutable**
 
-- `batch_id` (if tracking original batch)
-- `niddk_no` (permanent identifier)
-- `knumber` (permanent identifier)
+-   `batch_id` (if tracking original batch)
+-   `niddk_no` (permanent identifier)
+-   `knumber` (permanent identifier)
 
 **Rarely Immutable**
 
-- Clinical measurements
-- Status fields (Active, Frozen, etc.)
-- Passage numbers
-- Quality metrics
-- Descriptive text
+-   Clinical measurements
+-   Status fields (Active, Frozen, etc.)
+-   Passage numbers
+-   Quality metrics
+-   Descriptive text
 
 ### 3. Handle Conflicts Gracefully
 
@@ -655,10 +655,10 @@ WHERE global_subject_id = '01HQXYZ123'
 
 **Solution**:
 
-1. Review source data extraction logic
-2. Ensure immutable fields are excluded from updates
-3. Check field mappings in `config/lcl_mapping.json`
-4. If legitimate change needed, requires manual database update
+1.  Review source data extraction logic
+2.  Ensure immutable fields are excluded from updates
+3.  Check field mappings in `config/lcl_mapping.json`
+4.  If legitimate change needed, requires manual database update
 
 ### Issue: Missing Natural Key Fields
 
@@ -705,312 +705,14 @@ def find_existing_records_batch(self, table_name, natural_keys):
 
 ## Related Documentation
 
-- [Data Flow](data-flow.md) - Overall data pipeline
-- [Table Loader Service](../services/table-loader.md) - Implementation details
-- [Fragment Validator](../services/fragment-validator.md) - Validation before loading
-- [Table Configurations](../reference/table-configs.md) - Configuration reference
-- [LCL Field Mappings](../reference/field-mappings.md#lcl-mappings) - LCL-specific mappings
+-   [Data Flow](data-flow.md) - Overall data pipeline
+-   [Table Loader Service](../services/table-loader.md) - Implementation details
+-   [Fragment Validator](../services/fragment-validator.md) - Validation before loading
+-   [Table Configurations](../reference/table-configs.md) - Configuration reference
+-   [LCL Field Mappings](../reference/field-mappings.md#lcl-mappings) - LCL-specific mappings
 
 ## Next Steps
 
-- [Configure table update strategies](../reference/table-configs.md)
-- [Set up LCL field mappings](../reference/field-mappings.md#lcl-mappings)
-- [Set up monitoring](../operations/monitoring.md)
-- [Review troubleshooting guide](../operations/troubleshooting.md)
-
-````
-
-Now let me also update the main index page to remove blood references:
-
-```markdown:docs/index.md
-# IBDGC Integrated Data Hub
-
-<div class="grid cards" markdown>
-
--   :material-database: **Centralized Data Management**
-
-    ---
-
-    Unified platform for biobank and clinical data integration with global subject ID management
-
--   :material-shield-check: **Data Validation**
-
-    ---
-
-    Comprehensive validation pipeline ensuring data quality before database loading
-
--   :material-sync: **Multi-Source Integration**
-
-    ---
-
-    Seamless integration with REDCap, LabKey, and manual data uploads
-
--   :material-history: **Complete Audit Trail**
-
-    ---
-
-    Full lineage tracking from source to database with immutable audit logs
-
-</div>
-
-## What is IDhub?
-
-The IBDGC Integrated Data Hub (IDhub) is a comprehensive data management system designed to:
-
-- **Centralize** biobank and clinical data from multiple sources
-- **Validate** data quality and consistency before loading
-- **Manage** global subject identifiers (GSIDs) across the consortium
-- **Track** complete data lineage and audit trails
-- **Automate** data pipelines with GitHub Actions workflows
-
-## System Architecture
-
-```mermaid
-graph TB
-    subgraph "Data Sources"
-        A[REDCap Projects]
-        B[LabKey]
-        C[Manual Uploads]
-    end
-
-    subgraph "Ingestion Layer"
-        D[REDCap Pipeline]
-        E[Fragment Validator]
-    end
-
-    subgraph "Staging"
-        F[S3 Curated Fragments]
-        G[Validation Queue]
-    end
-
-    subgraph "Loading Layer"
-        H[Table Loader]
-        I[Universal Update Strategy]
-    end
-
-    subgraph "Data Layer"
-        J[(PostgreSQL)]
-        K[GSID Service]
-    end
-
-    subgraph "Access Layer"
-        L[NocoDB UI]
-        M[API]
-    end
-
-    A --> D
-    B --> E
-    C --> E
-    D --> F
-    E --> F
-    F --> G
-    G --> H
-    H --> I
-    I --> J
-    K <--> J
-    J --> L
-    J --> M
-
-    style I fill:#4CAF50
-    style K fill:#2196F3
-````
-
-## Key Features
-
-### :material-identifier: Global Subject ID Management
-
-Centralized GSID generation and resolution service ensuring consistent subject identification across all data sources.
-
-[Learn more →](services/gsid-service.md){ .md-button }
-
-### :material-pipeline: Automated Data Pipelines
-
-Extract data from REDCap projects, validate, and load into the database with full automation via GitHub Actions.
-
-[Learn more →](guides/data-ingestion.md){ .md-button }
-
-### :material-check-decagram: Universal Update Strategy
-
-Intelligent upsert logic using natural keys, handling updates while preserving immutable fields and audit trails.
-
-[Learn more →](architecture/update-strategy.md){ .md-button .md-button--primary }
-
-### :material-file-document-check: Data Validation
-
-Comprehensive validation including schema checks, GSID resolution, and business rule validation before database loading.
-
-[Learn more →](services/fragment-validator.md){ .md-button }
-
-## Quick Start
-
-=== "Docker Compose"
-
-    ```bash
-    # Clone repository
-    git clone https://github.com/ibdgc/idhub.git
-    cd idhub
-
-    # Configure environment
-    cp .env.example .env
-    # Edit .env with your settings
-
-    # Start services
-    docker-compose up -d
-
-    # Check status
-    docker-compose ps
-    ```
-
-=== "Local Development"
-
-    ```bash
-    # Prerequisites: Python 3.11+, PostgreSQL 15+
-
-    # Set up virtual environment
-    python -m venv venv
-    source venv/bin/activate  # or `venv\Scripts\activate` on Windows
-
-    # Install dependencies
-    pip install -r requirements.txt
-
-    # Configure environment
-    cp .env.example .env
-
-    # Run migrations
-    python scripts/migrate.py
-
-    # Start services
-    python gsid-service/main.py &
-    python redcap-pipeline/main.py --project gap
-    ```
-
-[Full installation guide →](getting-started/installation.md){ .md-button }
-
-## System Components
-
-| Component              | Purpose                                     | Documentation                          |
-| ---------------------- | ------------------------------------------- | -------------------------------------- |
-| **GSID Service**       | Global subject ID generation and resolution | [Docs](services/gsid-service.md)       |
-| **REDCap Pipeline**    | Extract and transform REDCap data           | [Docs](services/redcap-pipeline.md)    |
-| **Fragment Validator** | Validate data fragments before loading      | [Docs](services/fragment-validator.md) |
-| **Table Loader**       | Load validated data into database           | [Docs](services/table-loader.md)       |
-| **Nginx Proxy**        | Reverse proxy with SSL termination          | [Docs](services/nginx.md)              |
-
-## Data Types Managed
-
-IDhub manages various biobank and clinical data types:
-
-- **LCL Lines**: Lymphoblastoid cell lines with passage tracking
-- **DNA Samples**: Extracted DNA with quality metrics
-- **RNA Samples**: RNA samples with integrity scores
-- **Specimens**: General specimen tracking
-- **Subjects**: Patient/participant information
-- **Local Subject IDs**: Cross-reference between local and global IDs
-
-## Data Flow Overview
-
-```mermaid
-sequenceDiagram
-    participant RC as REDCap
-    participant RP as REDCap Pipeline
-    participant S3 as S3 Staging
-    participant FV as Fragment Validator
-    participant VQ as Validation Queue
-    participant TL as Table Loader
-    participant DB as PostgreSQL
-    participant GS as GSID Service
-
-    RC->>RP: Extract records
-    RP->>RP: Transform & map fields
-    RP->>S3: Upload fragments
-    S3->>FV: Process fragments
-    FV->>GS: Resolve GSIDs
-    GS-->>FV: Return GSIDs
-    FV->>VQ: Queue validated data
-    VQ->>TL: Load batch
-    TL->>TL: Apply update strategy
-    TL->>DB: Upsert records
-    TL->>VQ: Mark as loaded
-```
-
-[Detailed data flow →](architecture/data-flow.md){ .md-button }
-
-## Documentation Sections
-
-<div class="grid cards" markdown>
-
-- :material-rocket-launch: **Getting Started**
-
-  ***
-
-  Installation, configuration, and quick start guides
-
-  [:octicons-arrow-right-24: Get started](getting-started/quick-start.md)
-
-- :material-sitemap: **Architecture**
-
-  ***
-
-  System design, data flow, and update strategy
-
-  [:octicons-arrow-right-24: Learn architecture](architecture/overview.md)
-
-- :material-cog: **Services**
-
-  ***
-
-  Detailed documentation for each service component
-
-  [:octicons-arrow-right-24: Explore services](services/index.md)
-
-- :material-book-open-variant: **User Guides**
-
-  ***
-
-  Step-by-step guides for common workflows
-
-  [:octicons-arrow-right-24: Read guides](guides/data-ingestion.md)
-
-- :material-code-braces: **Developer Guide**
-
-  ***
-
-  Development setup, testing, and contributing
-
-  [:octicons-arrow-right-24: Start developing](developer/setup.md)
-
-- :material-api: **API Reference**
-
-  ***
-
-  API endpoints, authentication, and examples
-
-  [:octicons-arrow-right-24: View API docs](api/gsid-api.md)
-
-- :material-server: **Operations**
-
-  ***
-
-  Deployment, monitoring, and troubleshooting
-
-  [:octicons-arrow-right-24: Operations guide](operations/deployment.md)
-
-- :material-file-document: **Reference**
-
-  ***
-
-  Configuration files, environment variables, CLI commands
-
-  [:octicons-arrow-right-24: Reference docs](reference/environment-variables.md)
-
-</div>
-
-## Support & Contributing
-
-- **Issues**: [GitHub Issues](https://github.com/ibdgc/idhub/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/ibdgc/idhub/discussions)
-- **Contributing**: [Contribution Guide](developer/contributing.md)
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
+-   [Configure table update strategies](../reference/table-configs.md)
+-   [Set up monitoring](../operations/monitoring.md)
+-   [Review troubleshooting guide](../operations/troubleshooting.md)

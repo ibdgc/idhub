@@ -50,12 +50,12 @@ graph TB
 
 ## Features
 
-- **Multi-Project Support**: Extract from multiple REDCap projects
-- **Incremental Extraction**: Only fetch new/updated records
-- **Field Mapping**: Transform source fields to target schema
-- **Batch Processing**: Process records in configurable batches
-- **Error Handling**: Robust error handling and retry logic
-- **Audit Trail**: Complete logging of extraction and transformation
+-   **Multi-Project Support**: Extract from multiple REDCap projects
+-   **Incremental Extraction**: Only fetch new/updated records
+-   **Field Mapping**: Transform source fields to target schema
+-   **Batch Processing**: Process records in configurable batches
+-   **Error Handling**: Robust error handling and retry logic
+-   **Audit Trail**: Complete logging of extraction and transformation
 
 ## Configuration
 
@@ -1037,5 +1037,4 @@ field_names = [field['field_name'] for field in metadata]
 for source_field in mapping_config['field_mapping'].values():
     if source_field not in field_names:
         logger.error(f"Field not in
-
 ```

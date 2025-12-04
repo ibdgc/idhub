@@ -6,15 +6,15 @@ This guide covers monitoring, logging, alerting, and observability practices for
 
 ## Table of Contents
 
-- [Monitoring Architecture](#monitoring-architecture)
-- [Application Monitoring](#application-monitoring)
-- [Database Monitoring](#database-monitoring)
-- [Infrastructure Monitoring](#infrastructure-monitoring)
-- [Log Management](#log-management)
-- [Alerting](#alerting)
-- [Dashboards](#dashboards)
-- [Performance Metrics](#performance-metrics)
-- [Health Checks](#health-checks)
+-   [Monitoring Architecture](#monitoring-architecture)
+-   [Application Monitoring](#application-monitoring)
+-   [Database Monitoring](#database-monitoring)
+-   [Infrastructure Monitoring](#infrastructure-monitoring)
+-   [Log Management](#log-management)
+-   [Alerting](#alerting)
+-   [Dashboards](#dashboards)
+-   [Performance Metrics](#performance-metrics)
+-   [Health Checks](#health-checks)
 
 ---
 
@@ -44,7 +44,7 @@ This guide covers monitoring, logging, alerting, and observability practices for
 │  ┌──────▼───────┐  ┌──────▼───────┐  ┌──────▼───────┐      │
 │  │   Grafana    │  │ AlertManager │  │    Loki      │      │
 │  │(Dashboards)  │  │   (Alerts)   │  │    (Logs)    │      │
-│  └──────────────┘  └──────┬───────┘  └──────────────┘      │
+│  └───────┘  └──────┬───────┘  └───────┘      │
 │                            │                                  │
 │                    ┌───────▼────────┐                        │
 │                    │  Notification  │                        │
@@ -78,8 +78,8 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
   external_labels:
-    cluster: 'idhub-production'
-    environment: 'production'
+    cluster: "idhub-production"
+    environment: "production"
 
 # Alerting configuration
 alerting:
@@ -90,7 +90,7 @@ alerting:
 
 # Load rules
 rule_files:
-  - 'alerts/*.yml'
+  - "alerts/*.yml"
 
 # Scrape configurations
 scrape_configs:
@@ -508,7 +508,7 @@ pg_slow_queries:
     SELECT
       COUNT(*) as slow_query_count
     FROM pg_stat_statements
-    WHERE mean_exec_time > 1000  -- queries slower than 1 second
+    WHERE mean_exec_time > 1000  # queries slower than 1 second
   metrics:
     - slow_query_count:
         usage: "GAUGE"
@@ -987,5 +987,4 @@ chunk_store_config:
 table_manager:
   retention_deletes_enabled: true
   retention_period: 744h
-
 ```

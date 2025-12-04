@@ -109,24 +109,24 @@ sequenceDiagram
 
 **Steps**:
 
-1. **Trigger**: Scheduled (cron) or manual execution
-2. **Authentication**: Load API token from environment
-3. **Incremental Check**: Query last successful run timestamp
-4. **Extract**: Call REDCap API with filters
-   ```python
-   params = {
-       'token': api_token,
-       'content': 'record',
-       'format': 'json',
-       'type': 'flat',
-       'dateRangeBegin': last_run_date
-   }
-   ```
-5. **Transform**: Apply field mappings for each table
-6. **Fragment Generation**: Create JSON fragments
-7. **S3 Upload**: Upload to staging bucket
-8. **Queue**: Insert into validation_queue
-9. **Metadata**: Update extraction metadata
+1.  **Trigger**: Scheduled (cron) or manual execution
+2.  **Authentication**: Load API token from environment
+3.  **Incremental Check**: Query last successful run timestamp
+4.  **Extract**: Call REDCap API with filters
+    ```python
+    params = {
+        'token': api_token,
+        'content': 'record',
+        'format': 'json',
+        'type': 'flat',
+        'dateRangeBegin': last_run_date
+    }
+    ```
+5.  **Transform**: Apply field mappings for each table
+6.  **Fragment Generation**: Create JSON fragments
+7.  **S3 Upload**: Upload to staging bucket
+8.  **Queue**: Insert into validation_queue
+9.  **Metadata**: Update extraction metadata
 
 **Example Fragment**:
 
@@ -203,22 +203,22 @@ sequenceDiagram
 
 **Steps**:
 
-1. **Input**: CSV/Excel file with source data
-2. **Configuration**: Load table-specific mapping config
-3. **Parsing**: Read and parse input file
-4. **Row Processing**:
-   - Apply field mappings
-   - Validate data types
-   - Check required fields
-   - Validate constraints
-5. **Subject ID Resolution**:
-   - Extract subject ID candidates
-   - Call GSID service to resolve
-   - Generate new GSID if needed
-6. **Fragment Generation**: Create validated JSON fragment
-7. **S3 Upload**: Upload to curated fragments bucket
-8. **Queue**: Insert into validation_queue
-9. **Status Update**: Update source system (if applicable)
+1.  **Input**: CSV/Excel file with source data
+2.  **Configuration**: Load table-specific mapping config
+3.  **Parsing**: Read and parse input file
+4.  **Row Processing**:
+    -   Apply field mappings
+    -   Validate data types
+    -   Check required fields
+    -   Validate constraints
+5.  **Subject ID Resolution**:
+    -   Extract subject ID candidates
+    -   Call GSID service to resolve
+    -   Generate new GSID if needed
+6.  **Fragment Generation**: Create validated JSON fragment
+7.  **S3 Upload**: Upload to curated fragments bucket
+8.  **Queue**: Insert into validation_queue
+9.  **Status Update**: Update source system (if applicable)
 
 **Validation Rules**:
 
@@ -414,19 +414,19 @@ sequenceDiagram
 
 **Steps**:
 
-1. **Batch Selection**: Identify batch to load
-2. **Query Queue**: Get pending fragments for batch
-3. **Group by Table**: Process one table at a time
-4. **Fragment Processing**:
-   - Download from S3
-   - Parse JSON
-   - Extract natural key
-   - Check for existing record
-5. **Upsert Logic**:
-   - If exists: UPDATE (respecting immutable fields)
-   - If new: INSERT
-6. **Status Update**: Mark as loaded/failed
-7. **Summary**: Generate load statistics
+1.  **Batch Selection**: Identify batch to load
+2.  **Query Queue**: Get pending fragments for batch
+3.  **Group by Table**: Process one table at a time
+4.  **Fragment Processing**:
+    -   Download from S3
+    -   Parse JSON
+    -   Extract natural key
+    -   Check for existing record
+5.  **Upsert Logic**:
+    -   If exists: UPDATE (respecting immutable fields)
+    -   If new: INSERT
+6.  **Status Update**: Mark as loaded/failed
+7.  **Summary**: Generate load statistics
 
 **Upsert Logic**:
 
@@ -525,14 +525,14 @@ sequenceDiagram
 
 **Steps**:
 
-1. **Trigger**: Scheduled execution (e.g., hourly)
-2. **Authentication**: LabKey API credentials
-3. **Incremental Query**: Query records modified since last sync
-4. **Transform**: Apply field mappings
-5. **Fragment Generation**: Create JSON fragments
-6. **S3 Upload**: Upload to staging bucket
-7. **Queue**: Insert into validation_queue
-8. **Metadata**: Update sync timestamp
+1.  **Trigger**: Scheduled execution (e.g., hourly)
+2.  **Authentication**: LabKey API credentials
+3.  **Incremental Query**: Query records modified since last sync
+4.  **Transform**: Apply field mappings
+5.  **Fragment Generation**: Create JSON fragments
+6.  **S3 Upload**: Upload to staging bucket
+7.  **Queue**: Insert into validation_queue
+8.  **Metadata**: Update sync timestamp
 
 ---
 
@@ -923,16 +923,16 @@ async def verify_load(batch_id: str) -> dict:
 
 ## Related Documentation
 
-- [REDCap Pipeline Service](../services/redcap-pipeline.md)
-- [Fragment Validator Service](../services/fragment-validator.md)
-- [Table Loader Service](../services/table-loader.md)
-- [GSID Service](../services/gsid-service.md)
-- [Database Schema](database-schema.md)
-- [API Reference](../api/gsid-api.md)
+-   [REDCap Pipeline Service](../services/redcap-pipeline.md)
+-   [Fragment Validator Service](../services/fragment-validator.md)
+-   [Table Loader Service](../services/table-loader.md)
+-   [GSID Service](../services/gsid-service.md)
+-   [Database Schema](database-schema.md)
+-   [API Reference](../api/gsid-api.md)
 
 ## Support
 
 For questions or issues:
 
-- GitHub Issues: https://github.com/ibdgc/idhub/issues
-- Email: support@ibdgc.org
+-   GitHub Issues: https://github.com/ibdgc/idhub/issues
+-   Email: support@ibdgc.org

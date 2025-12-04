@@ -43,15 +43,15 @@ graph TB
 
 ## Features
 
-- **SSL/TLS Termination**: Automatic HTTPS with Let's Encrypt
-- **Reverse Proxy**: Route requests to backend services
-- **Rate Limiting**: Protect against abuse and DDoS
-- **Response Caching**: Improve performance for static content
-- **Load Balancing**: Distribute traffic across multiple backends
-- **Security Headers**: HSTS, CSP, X-Frame-Options, etc.
-- **Access Logging**: Detailed request logging
-- **Health Checks**: Monitor backend service health
-- **WebSocket Support**: For real-time features
+-   **SSL/TLS Termination**: Automatic HTTPS with Let's Encrypt
+-   **Reverse Proxy**: Route requests to backend services
+-   **Rate Limiting**: Protect against abuse and DDoS
+-   **Response Caching**: Improve performance for static content
+-   **Load Balancing**: Distribute traffic across multiple backends
+-   **Security Headers**: HSTS, CSP, X-Frame-Options, etc.
+-   **Access Logging**: Detailed request logging
+-   **Health Checks**: Monitor backend service health
+-   **WebSocket Support**: For real-time features
 
 ## Configuration
 
@@ -257,6 +257,8 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
 
         # Timeouts
         proxy_connect_timeout 30s;
@@ -268,7 +270,7 @@ server {
         proxy_cache_methods GET HEAD;
         proxy_cache_valid 200 5m;
         proxy_cache_valid 404 1m;
-        proxy_cache_key "$scheme$request_method$host$request_uri";
+        proxy_cache_key "$scheme$request_method$host$request_uri$http_authorization";
         proxy_cache_bypass $http_cache_control;
         add_header X-Cache-Status $upstream_cache_status;
     }
@@ -508,11 +510,7 @@ location = /429.html {
 <head>
     <title>Rate Limit Exceeded</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            text-align: center;
-            padding: 50px;
-        }
+        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
         h1 { color: #d32f2f; }
     </style>
 </head>
@@ -975,5 +973,6 @@ docker run -d \
   -v $(pwd)/nginx/nginx.conf:/etc/nginx/nginx.conf:ro \
   -v $(pwd)/certbot/conf:/etc/letsencrypt:ro \
   i
+```
 
 ```

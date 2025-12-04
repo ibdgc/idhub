@@ -45,11 +45,11 @@ graph TB
 
 ## Technology Stack
 
-- **Framework**: FastAPI 0.104+
-- **Language**: Python 3.11+
-- **Database**: PostgreSQL 15+ (asyncpg)
-- **Authentication**: API Key (Header-based)
-- **Deployment**: Docker, Uvicorn
+-   **Framework**: FastAPI 0.104+
+-   **Language**: Python 3.11+
+-   **Database**: PostgreSQL 15+ (asyncpg)
+-   **Authentication**: API Key (Header-based)
+-   **Deployment**: Docker, Uvicorn
 
 ## API Endpoints
 
@@ -79,6 +79,7 @@ curl https://api.idhub.ibdgc.org/api/gsid/health
 ```
 
 ---
+
 
 ### Generate GSID
 
@@ -118,9 +119,9 @@ curl https://api.idhub.ibdgc.org/api/gsid/health
 
 **Error Responses**:
 
-- `400 Bad Request`: Invalid input data
-- `401 Unauthorized`: Missing or invalid API key
-- `409 Conflict`: Local ID already exists
+-   `400 Bad Request`: Invalid input data
+-   `401 Unauthorized`: Missing or invalid API key
+-   `409 Conflict`: Local ID already exists
 
 **Example**:
 
@@ -156,6 +157,7 @@ if response.status_code == 201:
 ```
 
 ---
+
 
 ### Resolve GSID
 
@@ -211,6 +213,7 @@ curl -X POST https://api.idhub.ibdgc.org/api/gsid/resolve \
 ```
 
 ---
+
 
 ### Batch Resolve
 
@@ -284,6 +287,7 @@ for result in results:
 
 ---
 
+
 ### Fuzzy Match
 
 **Endpoint**: `POST /api/gsid/fuzzy-match`
@@ -333,7 +337,7 @@ for result in results:
 
 **Parameters**:
 
-- `threshold`: Minimum confidence score (0.0-1.0, default: 0.8)
+-   `threshold`: Minimum confidence score (0.0-1.0, default: 0.8)
 
 **Example**:
 
@@ -350,6 +354,7 @@ curl -X POST https://api.idhub.ibdgc.org/api/gsid/fuzzy-match \
 ```
 
 ---
+
 
 ### Get Subject by GSID
 
@@ -402,6 +407,7 @@ curl https://api.idhub.ibdgc.org/api/gsid/subjects/01HQXYZ123ABCDEF456789 \
 
 ---
 
+
 ## GSID Format
 
 ### Structure
@@ -418,11 +424,11 @@ GSIDs are based on truncated ULIDs (Universally Unique Lexicographically Sortabl
 
 **Characteristics**:
 
-- **Length**: 26 characters
-- **Character set**: Crockford's Base32 (0-9, A-Z excluding I, L, O, U)
-- **Sortable**: Lexicographically sortable by creation time
-- **Unique**: 128-bit uniqueness (same as UUID)
-- **URL-safe**: No special characters
+-   **Length**: 26 characters
+-   **Character set**: Crockford\'s Base32 (0-9, A-HJKMNP-TV-Z)
+-   **Sortable**: Lexicographically sortable by creation time
+-   **Unique**: 128-bit uniqueness (same as UUID)
+-   **URL-safe**: No special characters
 
 ### Generation Algorithm
 
@@ -456,7 +462,7 @@ def validate_gsid(gsid: str) -> bool:
     if len(gsid) != 26:
         return False
 
-    # Check character set (Crockford's Base32)
+    # Check character set (Crockford\'s Base32)
     pattern = r'^[0-9A-HJKMNP-TV-Z]{26}$'
     return bool(re.match(pattern, gsid))
 
@@ -516,6 +522,7 @@ FUZZY_MATCH_THRESHOLD=0.8
 # core/database.py
 import asyncpg
 from typing import Optional
+import os
 
 class Database:
     def __init__(self):
@@ -552,6 +559,7 @@ The GSID Service uses header-based API key authentication:
 # core/auth.py
 from fastapi import Security, HTTPException, status
 from fastapi.security import APIKeyHeader
+import os
 
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key")
 
@@ -580,13 +588,21 @@ async def verify_api_key(api_key: str = Security(API_KEY_HEADER)):
 from fastapi import Depends
 from core.auth import verify_api_key
 
-@router.post("/generate")
-async def generate_gsid(
-    request: GenerateRequest,
-    api_key: str = Depends(verify_api_key)
-):
-    # Endpoint logic
-    pass
+# Assuming router is defined elsewhere
+# from fastapi import APIRouter
+# router = APIRouter()
+
+# Placeholder for GenerateRequest if it exists
+# class GenerateRequest:
+#     pass
+
+# @router.post("/generate")
+# async def generate_gsid(
+#     request: GenerateRequest,
+#     api_key: str = Depends(verify_api_key)
+# ):
+#     # Endpoint logic
+#     pass
 ```
 
 ### Client Authentication
@@ -670,10 +686,10 @@ except requests.exceptions.RequestException as e:
 
 ### Optimization Tips
 
-1. **Use Batch Operations**: Resolve multiple IDs in a single request
-2. **Connection Pooling**: Reuse HTTP connections
-3. **Caching**: Cache frequently accessed GSIDs
-4. **Async Requests**: Use async HTTP clients for concurrent requests
+1.  **Use Batch Operations**: Resolve multiple IDs in a single request
+2.  **Connection Pooling**: Reuse HTTP connections
+3.  **Caching**: Cache frequently accessed GSIDs
+4.  **Async Requests**: Use async HTTP clients for concurrent requests
 
 ### Batch Processing Example
 
@@ -717,11 +733,11 @@ curl https://api.idhub.ibdgc.org/api/gsid/health/db
 
 The service exposes the following metrics:
 
-- **Request count**: Total API requests
-- **Request duration**: Response time percentiles
-- **Error rate**: Failed requests per endpoint
-- **Database connections**: Active/idle connections
-- **GSID generation rate**: GSIDs created per minute
+-   **Request count**: Total API requests
+-   **Request duration**: Response time percentiles
+-   **Error rate**: Failed requests per endpoint
+-   **Database connections**: Active/idle connections
+-   **GSID generation rate**: GSIDs created per minute
 
 ### Logging
 
@@ -901,224 +917,13 @@ REINDEX TABLE local_subject_ids;
 
 ## Related Documentation
 
-- [API Reference](../api/gsid-api.md)
-- [Database Schema](../architecture/database-schema.md)
-- [Deployment Guide](../guides/deployment.md)
+-   [API Reference](../api/gsid-api.md)
+-   [Database Schema](../architecture/database-schema.md)
+-   [Deployment Guide](../../for-developers/deployment-guide.md)
 
 ## Support
 
 For issues or questions:
 
-- GitHub Issues: https://github.com/ibdgc/idhub/issues
-- Email: support@ibdgc.org
-
-````
-
-Now let's create the REDCap Pipeline documentation:
-
-```markdown:docs/services/redcap-pipeline.md
-# REDCap Pipeline Documentation
-
-## Overview
-
-The REDCap Pipeline is an automated data extraction and transformation service that pulls data from multiple REDCap projects, transforms it according to configurable field mappings, and stages it in S3 for validation and loading.
-
-## Architecture
-
-```mermaid
-graph TB
-    subgraph "REDCap Pipeline"
-        SCHED[Scheduler/Trigger]
-        CONFIG[Configuration Loader]
-
-        subgraph "Extraction"
-            API[REDCap API Client]
-            INCR[Incremental Tracker]
-        end
-
-        subgraph "Transformation"
-            MAP[Field Mapper]
-            TRANS[Data Transformer]
-            VAL[Basic Validator]
-        end
-
-        subgraph "Loading"
-            FRAG[Fragment Generator]
-            S3[S3 Uploader]
-            META[Metadata Tracker]
-        end
-    end
-
-    RC[REDCap Projects] -->|API| API
-    API --> INCR
-    INCR --> MAP
-    MAP --> TRANS
-    TRANS --> VAL
-    VAL --> FRAG
-    FRAG --> S3
-    S3 --> META
-
-    CONFIG -.->|Field Mappings| MAP
-    CONFIG -.->|Project Config| API
-
-    S3 -->|Upload| S3BUCKET[(S3 Bucket)]
-
-    style RC fill:#FF9800
-    style S3BUCKET fill:#2196F3
-````
-
-## Features
-
-- **Multi-Project Support**: Extract from multiple REDCap projects
-- **Incremental Extraction**: Only fetch new/updated records
-- **Field Mapping**: Transform source fields to target schema
-- **Batch Processing**: Process records in configurable batches
-- **Error Handling**: Robust error handling and retry logic
-- **Audit Trail**: Complete logging of extraction and transformation
-
-## Configuration
-
-### Project Configuration
-
-Projects are defined in `config/projects.json`:
-
-```json
-{
-  "projects": {
-    "gap": {
-      "name": "GAP",
-      "redcap_project_id": "16894",
-      "api_token_env": "REDCAP_API_TOKEN_GAP",
-      "field_mappings": "gap_field_mappings.json",
-      "schedule": "continuous",
-      "batch_size": 50,
-      "enabled": true,
-      "description": "Main biobank project",
-      "tables": ["lcl", "dna", "rna"]
-    },
-    "uc_demarc": {
-      "name": "UC DEMARC",
-      "redcap_project_id": "12345",
-      "api_token_env": "REDCAP_API_TOKEN_UC_DEMARC",
-      "field_mappings": "uc_demarc_field_mappings.json",
-      "schedule": "daily",
-      "batch_size": 100,
-      "enabled": true,
-      "description": "UC DEMARC study data",
-      "tables": ["specimen", "dna"]
-    }
-  }
-}
-```
-
-**Configuration Fields**:
-
-| Field               | Type    | Required | Description                                     |
-| ------------------- | ------- | -------- | ----------------------------------------------- |
-| `name`              | string  | Yes      | Human-readable project name                     |
-| `redcap_project_id` | string  | Yes      | REDCap project ID                               |
-| `api_token_env`     | string  | Yes      | Environment variable name for API token         |
-| `field_mappings`    | string  | Yes      | Field mapping configuration file                |
-| `schedule`          | string  | No       | Extraction schedule (continuous, daily, weekly) |
-| `batch_size`        | integer | No       | Records per batch (default: 50)                 |
-| `enabled`           | boolean | No       | Enable/disable project (default: true)          |
-| `tables`            | array   | Yes      | Target tables for this project                  |
-
-### Field Mapping Configuration
-
-Field mappings define how source fields map to target schema:
-
-```json:config/gap_field_mappings.json
-{
-  "lcl": {
-    "field_mapping": {
-      "knumber": "k_number",
-      "niddk_no": "niddk_number",
-      "passage_number": "passage_num",
-      "cell_line_status": "status",
-      "freeze_date": "date_frozen",
-      "storage_location": "location",
-      "notes": "comments"
-    },
-    "subject_id_candidates": ["consortium_id", "subject_id"],
-    "center_id_field": "center",
-    "default_center_id": 1,
-    "exclude_from_load": ["record_id", "redcap_event_name"],
-    "transformations": {
-      "freeze_date": "date",
-      "passage_number": "integer"
-    }
-  },
-  "dna": {
-    "field_mapping": {
-      "sample_id": "dna_sample_id",
-      "sample_type": "dna_type",
-      "concentration_ng_ul": "dna_concentration",
-      "volume_ul": "dna_volume",
-      "quality_score": "dna_260_280",
-      "extraction_date": "dna_extraction_date",
-      "extraction_method": "dna_method",
-      "storage_location": "dna_location"
-    },
-    "subject_id_candidates": ["consortium_id"],
-    "center_id_field": "center",
-    "default_center_id": 1,
-    "exclude_from_load": ["record_id"],
-    "transformations": {
-      "extraction_date": "date",
-      "concentration_ng_ul": "float",
-      "volume_ul": "float",
-      "quality_score": "float"
-    }
-  }
-}
-```
-
-**Mapping Fields**:
-
-| Field                   | Type    | Description                             |
-| ----------------------- | ------- | --------------------------------------- |
-| `field_mapping`         | object  | Source → Target field mappings          |
-| `subject_id_candidates` | array   | Fields to try for subject ID resolution |
-| `center_id_field`       | string  | Field containing center ID              |
-| `default_center_id`     | integer | Default center ID if not in data        |
-| `exclude_from_load`     | array   | Fields to exclude from output           |
-| `transformations`       | object  | Field type transformations              |
-
-## Usage
-
-### Command Line
-
-```bash
-# Run pipeline for all enabled projects
-python main.py
-
-# Run for specific project
-python main.py --project gap
-
-# Run with custom batch size
-python main.py --project gap --batch-size 100
-
-# Dry run (no S3 upload)
-python main.py --project gap --dry-run
-
-# Specify date range
-python main.py --project gap --start-date 2024-01-01 --end-date 2024-01-31
-```
-
-### Programmatic Usage
-
-```python
-from services.pipeline import REDCapPipeline
-from core.config import settings
-
-# Initialize pipeline
-pipeline = REDCapPipeline(
-    project_config={
-        "name": "GAP",
-        "redcap_project_id": "16894",
-        "api_token": "your_token",
-        "field_mappings": "gap_field_mappings.json"
-    }
-
-```
+-   GitHub Issues: https://github.com/ibdgc/idhub/issues
+-   Email: support@ibdgc.org

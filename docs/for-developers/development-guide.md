@@ -6,15 +6,15 @@ This guide covers setting up a local development environment for the IDhub platf
 
 ## Table of Contents
 
-- [Prerequisites](#prerequisites)
-- [Local Environment Setup](#local-environment-setup)
-- [Service Development](#service-development)
-- [Database Development](#database-development)
-- [Testing](#testing)
-- [Code Quality](#code-quality)
-- [Git Workflow](#git-workflow)
-- [Debugging](#debugging)
-- [Contributing](#contributing)
+-   [Prerequisites](#prerequisites)
+-   [Local Environment Setup](#local-environment-setup)
+-   [Service Development](#service-development)
+-   [Database Development](#database-development)
+-   [Testing](#testing)
+-   [Code Quality](#code-quality)
+-   [Git Workflow](#git-workflow)
+-   [Debugging](#debugging)
+-   [Contributing](#contributing)
 
 ---
 
@@ -208,7 +208,7 @@ LOG_LEVEL=DEBUG
 ### Docker Development Environment
 
 ```yaml:docker-compose.dev.yml
-version: '3.8'
+version: "3.8"
 
 services:
   # PostgreSQL
@@ -336,7 +336,7 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8000,
         reload=True,
-        reload_dirs=[".", "../core"],
+        reload_dirs=".", "../core"],
         log_level="debug",
     )
 ```
@@ -1253,5 +1253,7 @@ def setup_logging(service_name: str, log_level: str = "DEBUG"):
     logging.getLogger("botocore").setLevel(logging.WARNING)
 
     logger = logging.
+
+```
 
 ```

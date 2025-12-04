@@ -4,10 +4,10 @@
 
 The IDhub database is designed to support biobank data management with a focus on:
 
-- **Subject-centric design**: All data linked to subjects via GSID
-- **Natural key support**: Business identifiers for upsert operations
-- **Audit trail**: Complete tracking of data creation and modification
-- **Referential integrity**: Foreign key constraints ensure data consistency
+-   **Subject-centric design**: All data linked to subjects via GSID
+-   **Natural key support**: Business identifiers for upsert operations
+-   **Audit trail**: Complete tracking of data creation and modification
+-   **Referential integrity**: Foreign key constraints ensure data consistency
 
 ## Entity Relationship Diagram
 
@@ -276,7 +276,7 @@ CREATE INDEX idx_lcl_batch ON lcl(batch_id);
 
 **Valid Values**:
 
-- `cell_line_status`: Active, Frozen, Depleted, Contaminated, Failed
+-   `cell_line_status`: Active, Frozen, Depleted, Contaminated, Failed
 
 **Example Record**:
 
@@ -343,8 +343,8 @@ CREATE INDEX idx_dna_batch ON dna(batch_id);
 
 **Valid Values**:
 
-- `sample_type`: Genomic, Whole Blood, Buffy Coat, Saliva
-- `quality_score`: 260/280 ratio (typically 1.7-2.0)
+-   `sample_type`: Genomic, Whole Blood, Buffy Coat, Saliva
+-   `quality_score`: 260/280 ratio (typically 1.7-2.0)
 
 **Example Record**:
 
@@ -410,8 +410,8 @@ CREATE INDEX idx_rna_batch ON rna(batch_id);
 
 **Valid Values**:
 
-- `sample_type`: Total RNA, mRNA, Whole Blood
-- `rin_score`: RNA Integrity Number (0-10, higher is better)
+-   `sample_type`: Total RNA, mRNA, Whole Blood
+-   `rin_score`: RNA Integrity Number (0-10, higher is better)
 
 **Example Record**:
 
@@ -473,8 +473,8 @@ CREATE INDEX idx_specimen_batch ON specimen(batch_id);
 
 **Valid Values**:
 
-- `sample_type`: Serum, Plasma, Tissue, Stool, Urine
-- `storage_condition`: -80C, -20C, 4C, Room Temperature
+-   `sample_type`: Serum, Plasma, Tissue, Stool, Urine
+-   `storage_condition`: -80C, -20C, 4C, Room Temperature
 
 **Example Record**:
 

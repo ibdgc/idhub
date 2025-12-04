@@ -6,17 +6,17 @@ This guide covers deploying the IDhub platform across different environments (de
 
 ## Table of Contents
 
-- [Prerequisites](#prerequisites)
-- [Environment Setup](#environment-setup)
-- [Docker Deployment](#docker-deployment)
-- [Manual Deployment](#manual-deployment)
-- [Database Setup](#database-setup)
-- [SSL/TLS Configuration](#ssltls-configuration)
-- [Service Configuration](#service-configuration)
-- [Health Checks](#health-checks)
-- [Monitoring](#monitoring)
-- [Backup and Recovery](#backup-and-recovery)
-- [Troubleshooting](#troubleshooting)
+-   [Prerequisites](#prerequisites)
+-   [Environment Setup](#environment-setup)
+-   [Docker Deployment](#docker-deployment)
+-   [Manual Deployment](#manual-deployment)
+-   [Database Setup](#database-setup)
+-   [SSL/TLS Configuration](#ssltls-configuration)
+-   [Service Configuration](#service-configuration)
+-   [Health Checks](#health-checks)
+-   [Monitoring](#monitoring)
+-   [Backup and Recovery](#backup-and-recovery)
+-   [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -26,17 +26,17 @@ This guide covers deploying the IDhub platform across different environments (de
 
 **Minimum**:
 
-- CPU: 4 cores
-- RAM: 8 GB
-- Disk: 100 GB SSD
-- OS: Ubuntu 20.04 LTS or later
+-   CPU: 4 cores
+-   RAM: 8 GB
+-   Disk: 100 GB SSD
+-   OS: Ubuntu 20.04 LTS or later
 
 **Recommended (Production)**:
 
-- CPU: 8+ cores
-- RAM: 16+ GB
-- Disk: 500 GB SSD
-- OS: Ubuntu 22.04 LTS
+-   CPU: 8+ cores
+-   RAM: 16+ GB
+-   Disk: 500 GB SSD
+-   OS: Ubuntu 22.04 LTS
 
 ### Software Requirements
 
@@ -355,7 +355,7 @@ services:
     volumes:
       - ./ssl:/etc/letsencrypt
       - ./nginx/certbot:/var/www/certbot
-    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    entrypoint: "/bin/sh -c \'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;\'"
     networks:
       - idhub_network
 
@@ -637,7 +637,77 @@ if __name__ == "__main__":
 python scripts/seed_data.py
 ```
 
-### Backup Configuration
+### Database Migration Script
+
+```python:scripts/seed_data.py
+#!/usr/bin/env python3
+"""Seed initial data for IDhub"""
+
+import os
+import sys
+from pathlib import Path
+
+# Add parent directory to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from core.database import Base
+from models.center import Center
+from models.api_key import APIKey
+import secrets
+
+# Database connection
+DATABASE_URL = os.getenv("DATABASE_URL")
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(bind=engine)
+
+def seed_centers():
+    """Seed initial centers"""
+    session = SessionLocal()
+
+    centers = [
+        {"center_id": 1, "name": "Cedars-Sinai Medical Center", "code": "CSMC"},
+        {"center_id": 2, "name": "University of Chicago", "code": "UCHICAGO"},
+        {"center_id": 3, "name": "University of Pittsburgh", "code": "PITT"},
+        {"center_id": 4, "name": "Emory University", "code": "EMORY"},
+    ]
+
+    for center_data in centers:
+        center = Center(**center_data)
+        session.merge(center)
+
+    session.commit()
+    session.close()
+    print(f"✓ Seeded {len(centers)} centers")
+
+def create_admin_api_key():
+    """Create initial admin API key"""
+    session = SessionLocal()
+
+    api_key = "gsid_live_" + secrets.token_hex(32)
+
+    key = APIKey(
+        key_name="admin-initial",
+        api_key=api_key,
+        description="Initial admin API key",
+        created_by="system",
+        is_active=True
+    )
+
+    session.add(key)
+    session.commit()
+    session.close()
+
+    print(f"✓ Created admin API key: {api_key}")
+    print("  IMPORTANT: Save this key securely!")
+
+if __name__ == "__main__":
+    print("Seeding database...")
+    seed_centers()
+    create_admin_api_key()
+    print("✓ Database seeding complete")
+```
 
 ```bash:scripts/backup_database.sh
 #!/bin/bash
@@ -704,7 +774,7 @@ crontab -e
 sudo apt install -y certbot python3-certbot-nginx
 
 # Obtain certificates
-sudo certbot --nginx \
+sudo certbot certonly --nginx \
   -d idhub.ibdgc.org \
   -d api.idhub.ibdgc.org \
   --email admin@ibdgc.org \
@@ -816,7 +886,7 @@ set -e
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+NC='\033[0m # No Color
 
 # Configuration
 GSID_URL="https://api.idhub.ibdgc.org/health"
@@ -1120,5 +1190,4 @@ docker stats
 
 # Restart services
 docker-compose -f docker
-
 ```
