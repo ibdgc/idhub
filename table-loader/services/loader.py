@@ -23,7 +23,7 @@ class TableLoader:
     UPSERT_TABLES = {
         "lcl": ["global_subject_id", "knumber"],
         "specimen": ["global_subject_id", "sample_id"],
-        "genotype": ["global_subject_id", "sample_id"],
+        "genotype": ["global_subject_id", "genotype_id"],
         "olink": ["global_subject_id", "sample_id"],
         "enteroid": ["global_subject_id", "sample_id"],
         "sequence": ["global_subject_id", "sample_id"],
