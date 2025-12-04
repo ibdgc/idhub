@@ -1,6 +1,6 @@
 # For Data Curators
 
-This section provides guides and documentation for data curators who are responsible for preparing, validating, and loading data into IDHub.
+This section provides guides and documentation for data curators who are responsible for preparing, validating, and loading data into IDhub.
 
 Here you will find:
 

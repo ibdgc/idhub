@@ -917,9 +917,9 @@ REINDEX TABLE local_subject_ids;
 
 ## Related Documentation
 
--   [API Reference](../api/gsid-api.md)
+-   [API Reference](../api/gsid-service.md)
 -   [Database Schema](../architecture/database-schema.md)
--   [Deployment Guide](../../for-developers/deployment-guide.md)
+-   [Deployment Guide](../deployment-guide.md)
 
 ## Support
 

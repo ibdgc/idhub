@@ -1,24 +1,24 @@
 ---
 # mkdocs.yml
-site_name: IDHub Documentation
+site_name: IDhub Documentation
 site_url: https://ibdgc.github.io/idhub/
 repo_url: https://github.com/ibdgc/idhub
 repo_name: ibdgc/idhub
-edit_uri: ''
+edit_uri: ""
 theme:
   name: material
-  logo: assets/images/logo.svg
+  logo: assets/images/initialism.png
   favicon: assets/images/favicon.ico
   palette:
-    - scheme: default
-      primary: blue
-      accent: blue
+    - scheme: slate
+      primary: indigo
+      accent: indigo
       toggle:
         icon: material/weather-night
         name: Switch to dark mode
-    - scheme: slate
-      primary: blue
-      accent: blue
+    - scheme: default
+      primary: indigo
+      accent: indigo
       toggle:
         icon: material/weather-sunny
         name: Switch to light mode
@@ -55,35 +55,35 @@ markdown_extensions:
 extra_css: [stylesheets/extra.css]
 nav:
   - Home: index.md
+  - For Users:
+      - for-users/index.md
+      - Exploring Data with NocoDB: for-users/exploring-with-nocodb.md
+      - Database Schema Overview: for-users/database-schema-overview.md
+      - Example Queries: for-users/example-queries.md
   - For Data Curators:
       - for-data-curators/index.md
       - Ingestion Overview: for-data-curators/ingestion-overview.md
       - Manual Ingestion Guide: for-data-curators/manual-ingestion-guide.md
       - Automated REDCap Pipeline: for-data-curators/automated-redcap-pipeline.md
       - Troubleshooting Ingestion: for-data-curators/troubleshooting-ingestion.md
-  - For Users:
-      - for-users/index.md
-      - Exploring Data with NocoDB: for-users/exploring-with-nocodb.md
-      - Database Schema Overview: for-users/database-schema-overview.md
-      - Example Queries: for-users/example-queries.md
   - For Developers:
-      - for-developers/index.md
-      - Architecture:
-          - System Overview: architecture/overview.md
-          - Data Flow: architecture/data-flow.md
-          - Database Schema: architecture/database-schema.md
-          - Update Strategy: architecture/update-strategy.md
-      - API Reference:
-          - Authentication: api/authentication.md
-          - GSID Service API: api/gsid-api.md
-      - Services:
-          - services/index.md
-          - GSID Service: services/gsid-service.md
-          - REDCap Pipeline: services/redcap-pipeline.md
-          - Fragment Validator: services/fragment-validator.md
-          - Table Loader: services/table-loader.md
-          - Nginx Proxy: services/nginx.md
-      - Guides:
+      - Introduction: for-developers/index.md
+      - Getting Started:
           - Development Guide: for-developers/development-guide.md
           - Deployment Guide: for-developers/deployment-guide.md
-          - Workflows: for-developers/workflows-guide.md
+          - Workflows Guide: for-developers/workflows-guide.md
+          - Security Guide: for-developers/security-guide.md
+      - System Architecture:
+          - Overview: for-developers/architecture/overview.md
+          - Data Flow: for-developers/architecture/data-flow.md
+          - Database Schema: for-developers/architecture/database-schema.md
+          - Update Strategy: for-developers/architecture/update-strategy.md
+      - Services:
+          - Overview: for-developers/services/index.md
+          - GSID Service: for-developers/services/gsid-service.md
+          - REDCap Pipeline: for-developers/services/redcap-pipeline.md
+          - Fragment Validator: for-developers/services/fragment-validator.md
+          - Table Loader: for-developers/services/table-loader.md
+          - Nginx Proxy: for-developers/services/nginx.md
+      - API Reference:
+          - GSID Service: for-developers/api/gsid-service.md

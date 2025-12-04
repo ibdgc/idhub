@@ -1,6 +1,6 @@
 # Database Schema Overview
 
-The IDHub database is where all the validated and curated data is stored. Understanding the basic structure of the database will help you find the information you need. This guide provides a simplified overview of the most important tables and how they connect.
+The IDhub database is where all the validated and curated data is stored. Understanding the basic structure of the database will help you find the information you need. This guide provides a simplified overview of the most important tables and how they connect.
 
 ## The Subject-Centric Model
 
@@ -8,27 +8,22 @@ The entire database is designed around a **subject-centric model**. This means t
 
 ```mermaid
 graph TD
-    subgraph "Core Tables"
+    subgraph "Core Subject Data"
         A[subjects]
-    end
-
-    subgraph "Identifier Tables"
         B[local_subject_ids]
     end
 
-    subgraph "Sample Data Tables"
-        C[dna]
-        D[rna]
-        E[lcl]
-        F[specimen]
-        G[...]
+    subgraph "Sample & Assay Data"
+        C[genotype]
+        D[sequence]
+        E[specimen]
+        F[...]
     end
 
-    A -- GSID --> B
-    A -- GSID --> C
-    A -- GSID --> D
-    A -- GSID --> E
-    A -- GSID --> F
+    A -- "has GSID" --> B
+    A -- "links to" --> C
+    A -- "links to" --> D
+    A -- "links to" --> E
 
     style A fill:#4CAF50,stroke:#333,stroke-width:2px
 ```
@@ -43,7 +38,7 @@ Here are the most important tables and what they contain.
 
 This is the most important table in the database. It is the central registry for every individual.
 
-*   **Purpose**: To store the master list of all subjects in IDHub.
+*   **Purpose**: To store the master list of all subjects in IDhub.
 *   **Key Columns**:
     *   `global_subject_id` (GSID): The unique, permanent identifier for a subject across all projects and centers. **This is the primary key you will use to link data together.**
     *   `center_id`: The ID of the center that first registered the subject.
@@ -63,19 +58,19 @@ A single subject might have many different identifiers across different studies 
 
 > **How to use this table**: If you have a local ID and need to find the subject's GSID, you can search this table for the `local_subject_id` to find the corresponding `global_subject_id`.
 
-### 3. Sample Tables (`dna`, `rna`, `lcl`, `specimen`, etc.)
+### 3. Sample & Assay Tables (`genotype`, `sequence`, `lcl`, `specimen`, etc.)
 
-These tables contain information about the specific biological samples collected from subjects. Each table is dedicated to a specific sample type.
+These tables contain information about the specific biological samples collected from subjects and the assays performed on them. Each table is dedicated to a specific data type.
 
-*   **Purpose**: To store inventory, metadata, and quality metrics for different types of samples.
+*   **Purpose**: To store inventory, metadata, and results for different data types.
 *   **Common Key Columns**:
-    *   `global_subject_id`: The GSID of the subject from whom the sample was taken. This links the sample back to the `subjects` table.
-    *   `sample_id`: The unique identifier for that specific sample (e.g., `GM210-3361`, `RNA-001-2024`). In some tables, this might be named differently (e.g., `genotype_id`, `knumber`).
+    *   `global_subject_id`: The GSID of the subject from whom the sample was taken. This links the data back to the `subjects` table.
+    *   A unique identifier for the specific data entry (e.g., `genotype_id`, `sample_id`).
 
-#### Example: `dna` Table
+#### Example: `genotype` Table
 
-*   **Contains**: Information about DNA samples.
-*   **Example Columns**: `sample_id`, `concentration_ng_ul`, `volume_ul`, `quality_score`, `extraction_date`.
+*   **Contains**: Information about a subject's genotype array data.
+*   **Example Columns**: `genotype_id`, `genotyping_project`, `genotyping_barcode`.
 
 #### Example: `lcl` Table
 
@@ -88,13 +83,13 @@ These tables contain information about the specific biological samples collected
 
 Understanding the relationships between these tables is key to making sense of the data.
 
-### Finding All Samples for a Subject
+### Finding All Data for a Subject
 
-You can find all the different types of samples for a single subject by using their `global_subject_id`.
+You can find all the different types of data for a single subject by using their `global_subject_id`.
 
 1.  Start with a `global_subject_id` from the `subjects` table.
-2.  Use that GSID to search in the `dna` table to find all their DNA samples.
-3.  Use that same GSID to search in the `rna` table to find all their RNA samples.
-4.  ...and so on for all other sample tables.
+2.  Use that GSID to search in the `genotype` table to find all their genotype records.
+3.  Use that same GSID to search in the `sequence` table to find all their sequencing records.
+4.  ...and so on for all other data tables.
 
 This subject-centric design ensures that all data related to an individual can be easily aggregated and analyzed, even if it comes from different sources at different times.

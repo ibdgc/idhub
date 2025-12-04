@@ -344,7 +344,8 @@ s3://idhub-curated-fragments/
 │   │   │   │   ├── fragment_001.json
 │   │   │   │   ├── fragment_002.json
 │   │   │   │   └── ...
-│   │   │   ├── dna/
+│   │   │   ├── genotype/
+│   │   │   ├── sequence/
 │   │   │   └── metadata.json
 │   │   └── batch_20240116_100000/
 │   └── uc_demarc/
@@ -367,8 +368,8 @@ s3://idhub-curated-fragments/
 erDiagram
     subjects ||--o{ local_subject_ids : has
     subjects ||--o{ lcl : has
-    subjects ||--o{ dna : has
-    subjects ||--o{ rna : has
+    subjects ||--o{ genotype : "has"
+    subjects ||--o{ sequence : "has"
     subjects ||--o{ specimen : has
 
     subjects {
@@ -399,24 +400,23 @@ erDiagram
         timestamp created_at
     }
 
-    dna {
+    genotype {
         uuid id PK
         uuid subject_id FK
         string global_subject_id
-        string sample_id
-        float concentration_ng_ul
-        float volume_ul
-        float quality_score
+        string genotype_id
+        string genotyping_project
+        string genotyping_barcode
         timestamp created_at
     }
 
-    rna {
+    sequence {
         uuid id PK
         uuid subject_id FK
         string global_subject_id
         string sample_id
-        float concentration_ng_ul
-        float rin_score
+        string sample_type
+        string vcf_sample_id
         timestamp created_at
     }
 
@@ -472,7 +472,7 @@ graph TB
     -   Encrypted in transit (HTTPS)
     -   Audit logging
 
-[Detailed security documentation →](../for-developers/security-guide.md)
+[Detailed security documentation →](../security-guide.md)
 
 ## Deployment Architecture
 
@@ -529,7 +529,7 @@ graph LR
     J --> H
 ```
 
-[Detailed deployment documentation →](../for-developers/deployment-guide.md)
+[Detailed deployment documentation →](../deployment-guide.md)
 
 ## Scalability Considerations
 
@@ -537,8 +537,8 @@ graph LR
 
 -   **Subjects**: ~50,000
 -   **LCL Lines**: ~30,000
--   **DNA Samples**: ~40,000
--   **RNA Samples**: ~20,000
+-   **Genotypes**: ~40,000
+-   **Sequences**: ~20,000
 -   **Daily Ingestion**: ~1,000 records
 
 ### Scaling Strategies
@@ -592,7 +592,7 @@ graph TB
 -   Validation queue depth
 -   API response times
 
-[Detailed monitoring documentation →](../for-developers/operations-monitoring.md)
+[Detailed monitoring documentation →](../operations-monitoring.md)
 
 ## Technology Stack
 
@@ -621,5 +621,5 @@ graph TB
 
 -   [Data Flow Details](data-flow.md)
 -   [Database Schema](database-schema.md)
--   [Security Model](../for-developers/security-guide.md)
+-   [Security Model](../security-guide.md)
 -   [Update Strategy](update-strategy.md)

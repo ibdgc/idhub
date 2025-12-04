@@ -468,9 +468,9 @@ python main.py \
 # Use LocalStack for S3
 export AWS_ENDPOINT_URL=http://localhost:4566
 python main.py \
-  --table-name blood \
-  --input-file tests/fixtures/blood_sample.csv \
-  --mapping-config config/blood_mapping.json \
+  --table-name specimen \
+  --input-file tests/fixtures/specimen_sample.csv \
+  --mapping-config config/specimen_mapping.json \
   --source "LocalStack Test"
 ```
 
@@ -865,13 +865,13 @@ def sample_redcap_data():
         {
             "record_id": "1",
             "consortium_id": "SUBJ001",
-            "sample_id": "BLOOD001",
-            "sample_type": "whole_blood",
+            "sample_id": "SPEC001",
+            "sample_type": "tissue",
         },
         {
             "record_id": "2",
             "consortium_id": "SUBJ002",
-            "sample_id": "BLOOD002",
+            "sample_id": "SPEC002",
             "sample_type": "plasma",
         },
     ]

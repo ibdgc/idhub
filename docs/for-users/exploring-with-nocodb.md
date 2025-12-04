@@ -1,6 +1,6 @@
 # Exploring Data with NocoDB
 
-IDHub uses a tool called **NocoDB** to provide a user-friendly, web-based interface for viewing the data in the database. Think of it as a "spreadsheet view" of the live database.
+IDhub uses a tool called **NocoDB** to provide a user-friendly, web-based interface for viewing the data in the database. Think of it as a "spreadsheet view" of the live database.
 
 This guide will walk you through the basics of navigating and exploring the data in NocoDB.
 
@@ -9,7 +9,7 @@ This guide will walk you through the basics of navigating and exploring the data
 
 ## Accessing NocoDB
 
-You will be provided with a URL and login credentials to access the IDHub NocoDB instance. After logging in, you will see a list of "Projects" or "Bases," which correspond to different datasets within IDHub.
+You will be provided with a URL and login credentials to access the IDhub NocoDB instance. After logging in, you will see a list of "Projects" or "Bases," which correspond to different datasets within IDhub.
 
 ---
 
@@ -25,7 +25,7 @@ On the left-hand sidebar, you will see a list of all the tables in the database.
 
 *   `subjects`: The central table containing the list of all subjects and their Global Subject IDs (GSIDs).
 *   `local_subject_ids`: A table that maps the local IDs from different centers to their corresponding GSID. This is useful for finding a subject's GSID if you only have their local ID.
-*   `lcl`, `dna`, `rna`, `specimen`, etc.: These are the sample tables, each containing data about a specific type of biological sample.
+*   `lcl`, `genotype`, `sequence`, `olink`, `specimen`, etc.: These are the sample and assay tables, each containing data about a specific type of biological sample or experimental result.
 
 Click on any table name to open it in the main view.
 
@@ -34,10 +34,10 @@ Click on any table name to open it in the main view.
 When you select a table, the data is displayed in a grid (spreadsheet) view.
 
 *   **Columns**: Each column represents a field in the database table (e.g., `global_subject_id`, `sample_type`, `date_collected`).
-*   **Rows**: Each row represents a single record (e.g., one subject, one DNA sample).
+*   **Rows**: Each row represents a single record (e.g., one subject, one genotype record).
 
 ![NocoDB Grid View](https://www.nocodb.com/images/v2/smart-spreadsheet/spreadsheet-redefined-light.png)
-*(Image courtesy of NocoDB. The IDHub interface may look slightly different.)*
+*(Image courtesy of NocoDB. The IDhub interface may look slightly different.)*
 
 ---
 
@@ -60,16 +60,16 @@ Filtering allows you to show only the rows that meet certain criteria. This is o
 *   Click the **"Filter"** button, usually located at the top of the grid view.
 *   Click **"Add Filter"**.
 *   Build your filter condition by choosing:
-    1.  The **column** you want to filter on (e.g., `sample_type`).
+    1.  The **column** you want to filter on (e.g., `genotyping_project`).
     2.  The **operator** (e.g., `is`, `is not`, `contains`, `is empty`).
-    3.  The **value** to compare against (e.g., `whole_blood`).
+    3.  The **value** to compare against (e.g., `ProjectX`).
 
-**Example: Find all DNA samples from a specific project.**
+**Example: Find all genotype records from a specific project.**
 
-1.  Open the `dna` table.
+1.  Open the `genotype` table.
 2.  Click **Filter -> Add Filter**.
-3.  Set the condition to: `project` `is` `GAP-2`.
-4.  The grid will update to show only the DNA samples belonging to the "GAP-2" project.
+3.  Set the condition to: `genotyping_project` `is` `ProjectX`.
+4.  The grid will update to show only the genotype records belonging to "ProjectX".
 
 You can add multiple filter conditions to create more complex queries. For example, you could add a second condition: `AND` `quality_score` `is greater than` `8.5`.
 

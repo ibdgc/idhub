@@ -50,12 +50,12 @@ Each table defines its update strategy in `config/table_configs.json`:
     "immutable_fields": ["created_at"],
     "update_strategy": "upsert"
   },
-  "dna": {
-    "natural_key": ["global_subject_id", "sample_id"],
+  "genotype": {
+    "natural_key": ["global_subject_id", "genotype_id"],
     "immutable_fields": ["created_at", "created_by"],
     "update_strategy": "upsert"
   },
-  "rna": {
+  "sequence": {
     "natural_key": ["global_subject_id", "sample_id"],
     "immutable_fields": ["created_at", "created_by"],
     "update_strategy": "upsert"
@@ -92,15 +92,15 @@ Natural keys are business identifiers that uniquely identify records without rel
 
 An LCL (lymphoblastoid cell line) is uniquely identified by the subject's GSID and their NIDDK number.
 
-**DNA Samples**
+**Genotype Data**
 
 ```json
 {
-  "natural_key": ["global_subject_id", "sample_id"]
+  "natural_key": ["global_subject_id", "genotype_id"]
 }
 ```
 
-A DNA sample is uniquely identified by the subject and sample ID.
+A genotype record is uniquely identified by the subject and genotype ID.
 
 **Subjects**
 
@@ -159,7 +159,7 @@ else:
 **Use Cases**:
 
 -   LCL data that may be corrected or enriched
--   DNA/RNA sample information that evolves
+-   Genotype/sequence data that may be enriched
 -   Subject information updates
 -   Most transactional data
 
@@ -384,38 +384,37 @@ ImmutableFieldError: Cannot modify immutable field 'created_at':
 -   New LCL line record created
 -   Audit fields auto-populated
 
-### Example 4: DNA Sample with Multiple Fields Updated
+### Example 4: Genotype Data with New Annotation
 
 **Existing Record**
 
 ```json
 {
   "global_subject_id": "01HQXYZ123",
-  "sample_id": "DNA-001",
-  "concentration_ng_ul": 50.0,
-  "volume_ul": 100.0,
-  "quality_score": 1.8,
+  "genotype_id": "GENO-001",
+  "genotyping_project": "ProjectA",
+  "genotyping_barcode": "BC123",
   "created_at": "2024-01-10T09:00:00Z"
 }
 ```
 
-**Update Request** (concentration and quality updated after re-measurement)
+**Update Request** (A new analysis batch is added)
 
 ```json
 {
   "global_subject_id": "01HQXYZ123",
-  "sample_id": "DNA-001",
-  "concentration_ng_ul": 52.5,
-  "volume_ul": 100.0,
-  "quality_score": 1.9,
+  "genotype_id": "GENO-001",
+  "genotyping_project": "ProjectA",
+  "genotyping_barcode": "BC123",
+  "batch": "AnalysisBatch_2024_Q1",
   "updated_at": "2024-01-20T11:00:00Z"
 }
 ```
 
 **Result**: ✅ Update succeeds
 
--   Natural key matches (GSID + sample_id)
--   Multiple mutable fields updated
+-   Natural key matches (GSID + genotype_id)
+-   A mutable field (`batch`) is added/updated.
 -   Immutable fields preserved
 
 ## Monitoring & Logging
@@ -576,28 +575,26 @@ A lab maintains LCL lines and periodically updates passage numbers as cells are 
 # Result: passage_number updated, all other fields preserved
 ```
 
-### Scenario 2: DNA Sample Re-quantification
+### Scenario 2: Sequence Data Annotation Update
 
-A DNA sample is re-measured with better equipment, providing updated concentration values.
+A sequence sample is run through a new analysis pipeline, and the `vcf_sample_id` is updated.
 
 ```python
 # Original measurement
 {
   "global_subject_id": "01HQXYZ123",
-  "sample_id": "DNA-001",
-  "concentration_ng_ul": 50.0,
-  "quality_score": 1.8
+  "sample_id": "SEQ-001",
+  "vcf_sample_id": "OLD_VCF_ID_1"
 }
 
-# After re-quantification
+# After re-analysis
 {
   "global_subject_id": "01HQXYZ123",
-  "sample_id": "DNA-001",
-  "concentration_ng_ul": 52.5,
-  "quality_score": 1.9
+  "sample_id": "SEQ-001",
+  "vcf_sample_id": "NEW_VCF_ID_2"
 }
 
-# Result: Measurements updated, preserving audit trail
+# Result: vcf_sample_id updated, preserving audit trail
 ```
 
 ### Scenario 3: Subject Information Enrichment

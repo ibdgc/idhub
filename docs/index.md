@@ -1,6 +1,6 @@
-# Welcome to IDHub
+# Welcome to IDhub
 
-IDHub is the IBDGC's centralized platform for managing, curating, and sharing biobank and clinical data. It provides a consistent, reliable, and auditable system for data integration.
+IDhub is the IBDGC's centralized platform for managing, curating, and sharing biobank and clinical data. It provides a consistent, reliable, and auditable system for data integration.
 
 <div class="grid cards" markdown>
 
@@ -8,7 +8,7 @@ IDHub is the IBDGC's centralized platform for managing, curating, and sharing bi
 
     ---
 
-    New to IDHub? Learn how to browse and query the data.
+    New to IDhub? Learn how to browse and query the data.
 
     [:octicons-arrow-right-24: Explore the Data](for-users/exploring-with-nocodb.md)
 
@@ -16,7 +16,7 @@ IDHub is the IBDGC's centralized platform for managing, curating, and sharing bi
 
     ---
 
-    Learn how to prepare, validate, and ingest data into IDHub.
+    Learn how to prepare, validate, and ingest data into IDhub.
 
     [:octicons-arrow-right-24: Go to Ingestion Guides](for-data-curators/ingestion-overview.md)
 
@@ -30,9 +30,9 @@ IDHub is the IBDGC's centralized platform for managing, curating, and sharing bi
 
 </div>
 
-## What is IDHub?
+## What is IDhub?
 
-The IBDGC Integrated Data Hub (IDHub) is a comprehensive data management system designed to:
+The IBDGC Integrated Data Hub (IDhub) is a comprehensive data management system designed to:
 
 -   :material-database-check: **Centralize** biobank and clinical data from multiple sources.
 -   :material-shield-check: **Validate** data quality and consistency before loading.
@@ -42,14 +42,14 @@ The IBDGC Integrated Data Hub (IDHub) is a comprehensive data management system 
 
 ## System Architecture Overview
 
-IDHub uses a microservices architecture to create a staged data pipeline, ensuring that data is validated and processed correctly at each step before being loaded into the central database.
+IDhub uses a microservices architecture to create a staged data pipeline, ensuring that data is validated and processed correctly at each step before being loaded into the central database.
 
 ```mermaid
 graph TD
     A[Data Sources] --> B[Ingestion Services];
     B --> C[Staging & Validation];
     C --> D[Loading Services];
-    D --> E[IDHub Database];
+    D --> E[IDhub Database];
     E --> F[Data Access Layer];
 
     style E fill:#4CAF50,stroke:#333,stroke-width:2px
@@ -60,4 +60,4 @@ graph TD
 -   **Loading**: Validated data is loaded into the database using an intelligent "upsert" strategy.
 -   **Data Access**: Users and applications can access data through the NocoDB web interface or the GSID REST API.
 
-[Learn more about the architecture →](architecture/overview.md)
+[Learn more about the architecture →](for-developers/architecture/overview.md)

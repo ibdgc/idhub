@@ -1,6 +1,6 @@
 # Troubleshooting Data Ingestion
 
-When you submit data for ingestion into IDHub, either through an automated pipeline or a manual file upload, you may encounter errors. This guide helps you understand and resolve common data-related issues.
+When you submit data for ingestion into IDhub, either through an automated pipeline or a manual file upload, you may encounter errors. This guide helps you understand and resolve common data-related issues.
 
 Most errors are caught during the **Validation Stage**. When an error is found, the record is rejected and an error report is generated. Your main task will be to use this report to find the issue in your source data, correct it, and resubmit.
 
@@ -59,7 +59,7 @@ Most errors are caught during the **Validation Stage**. When an error is found, 
 
 *   **Symptom**: The error report says "Duplicate natural key" or "A record with this 'sample_id' already exists".
 *   **Meaning**: You are trying to load a record that is supposed to be unique, but another record with the same unique identifier already exists in the database or even within the same file you are submitting.
-*   **Example**: You submit a file of `dna` samples, and two different rows have the same `sample_id`. Or, you submit a `sample_id` that was already loaded in a previous batch.
+*   **Example**: You submit a file of `genotype` records, and two different rows have the same `genotype_id`. Or, you submit a `genotype_id` that was already loaded in a previous batch.
 *   **Solution**:
     1.  Investigate the duplicate. Is it a genuine error (e.g., a typo, a copy-paste mistake)? Or are you trying to *update* an existing record?
     2.  If it's a mistake, correct the identifier in your source file to be unique.
@@ -75,4 +75,4 @@ If you receive an error report, follow these steps:
 2.  **Locate the Problem Row**: Use the record number or the data in the error report to find the exact row in your source file.
 3.  **Correct the Data at the Source**: **Do not** edit the error report file. Always make corrections in your original CSV or Excel file. This ensures your source of truth is accurate for the future.
 4.  **Resubmit**: Once you have corrected the errors, resubmit the entire file for validation again. The system will re-process it.
-5.  **Ask for Help**: If you don't understand an error message or believe the error is incorrect, contact the IDHub system administrators. Provide them with the batch ID and the error message you received.
+5.  **Ask for Help**: If you don't understand an error message or believe the error is incorrect, contact the IDhub system administrators. Provide them with the batch ID and the error message you received.

@@ -1,6 +1,6 @@
 # For External Users
 
-This section is for external users and researchers who want to understand and explore the data available in IDHub.
+This section is for external users and researchers who want to understand and explore the data available in IDhub.
 
 Here you will find:
 

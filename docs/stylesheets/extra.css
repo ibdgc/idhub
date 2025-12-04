@@ -29,7 +29,9 @@ table th {
 /* Improve mermaid diagram visibility */
 .mermaid {
   text-align: center;
-  margin: 1em 0;
+  margin: 2em 0; /* Increased margin to give more space */
+  transform: scale(1.15); /* Scale up the diagram */
+  min-width: 600px; /* Ensure it doesn't get too small */
 }
 
 /* Better spacing for navigation */

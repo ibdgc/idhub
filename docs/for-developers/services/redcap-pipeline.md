@@ -75,7 +75,7 @@ Projects are defined in `config/projects.json`:
       "batch_size": 50,
       "enabled": true,
       "description": "Main biobank project",
-      "tables": ["lcl", "dna", "rna"]
+      "tables": ["lcl", "genotype", "sequence"]
     },
     "uc_demarc": {
       "name": "UC DEMARC",
@@ -86,7 +86,7 @@ Projects are defined in `config/projects.json`:
       "batch_size": 100,
       "enabled": true,
       "description": "UC DEMARC study data",
-      "tables": ["specimen", "dna"]
+      "tables": ["specimen", "genotype"]
     }
   }
 }
@@ -130,26 +130,18 @@ Field mappings define how source fields map to target schema:
       "passage_number": "integer"
     }
   },
-  "dna": {
+  "genotype": {
     "field_mapping": {
-      "sample_id": "dna_sample_id",
-      "sample_type": "dna_type",
-      "concentration_ng_ul": "dna_concentration",
-      "volume_ul": "dna_volume",
-      "quality_score": "dna_260_280",
-      "extraction_date": "dna_extraction_date",
-      "extraction_method": "dna_method",
-      "storage_location": "dna_location"
+      "genotype_id": "genotyping_sample_id",
+      "genotyping_project": "project_name",
+      "genotyping_barcode": "barcode",
+      "batch": "genotyping_batch"
     },
     "subject_id_candidates": ["consortium_id"],
     "center_id_field": "center",
     "default_center_id": 1,
     "exclude_from_load": ["record_id"],
     "transformations": {
-      "extraction_date": "date",
-      "concentration_ng_ul": "float",
-      "volume_ul": "float",
-      "quality_score": "float"
     }
   }
 }

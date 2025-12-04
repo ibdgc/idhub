@@ -49,33 +49,33 @@ WHERE
 
 ---
 
-### 3. Count Samples of Each Type for a Specific Subject
+### 3. Count Data Types for a Specific Subject
 
-This query counts how many DNA, RNA, and LCL samples are available for a given subject.
+This query counts how many records of different data types (`genotype`, `sequence`, etc.) are available for a given subject.
 
 ```sql
 SELECT
-  'dna' AS sample_type,
+  'genotype' AS data_type,
   COUNT(*) AS count
 FROM
-  dna
+  genotype
 WHERE
   global_subject_id = 'GSID-1KKG7NR2Z4XB2A2J'
 
 UNION ALL
 
 SELECT
-  'rna' AS sample_type,
+  'sequence' AS data_type,
   COUNT(*) AS count
 FROM
-  rna
+  sequence
 WHERE
   global_subject_id = 'GSID-1KKG7NR2Z4XB2A2J'
 
 UNION ALL
 
 SELECT
-  'lcl' AS sample_type,
+  'lcl' AS data_type,
   COUNT(*) AS count
 FROM
   lcl
@@ -85,26 +85,24 @@ WHERE
 
 ---
 
-### 4. Find High-Quality DNA Samples
+### 4. Find All Sequencing Data for a Subject
 
-This query finds DNA samples that meet certain quality criteria, such as a high concentration and a good purity score (A260/280 ratio).
+This query retrieves all sequencing records associated with a specific subject.
 
 ```sql
 SELECT
   global_subject_id,
   sample_id,
-  concentration_ng_ul,
-  quality_score -- Or the correct name for the purity ratio column
+  sample_type,
+  batch,
+  vcf_sample_id
 FROM
-  dna
+  sequence
 WHERE
-  concentration_ng_ul > 50
-  AND quality_score BETWEEN 1.8 AND 2.0
+  global_subject_id = 'GSID-1KKG7NR2Z4XB2A2J'
 ORDER BY
-  concentration_ng_ul DESC
-LIMIT 100;
+  created_at DESC;
 ```
-*Note: Column names like `quality_score` might vary. Check the table schema in NocoDB for the exact name.*
 
 ---
 

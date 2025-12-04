@@ -1,6 +1,6 @@
 # Manual Data Ingestion Guide
 
-This guide provides a step-by-step process for curators to manually prepare, validate, and load data into IDHub. This workflow is used for data that does not come from an automated source like the REDCap pipeline.
+This guide provides a step-by-step process for curators to manually prepare, validate, and load data into IDhub. This workflow is used for data that does not come from an automated source like the REDCap pipeline.
 
 The process involves two main services, which you can trigger via the GitHub Actions interface:
 
@@ -9,7 +9,7 @@ The process involves two main services, which you can trigger via the GitHub Act
 
 ## Step 1: Prepare Your Data File
 
-Before you can ingest data, you must prepare your file according to IDHub's requirements.
+Before you can ingest data, you must prepare your file according to IDhub's requirements.
 
 *   **Format**: Use CSV (preferred) or Excel (`.xlsx`).
 *   **Header**: The first row of your file **must** be a header row with clear column names.
@@ -46,13 +46,13 @@ Once your file is ready, you will use the **Fragment Validator** to check your d
 
 ### Using the GitHub Actions Interface (Recommended)
 
-1.  **Go to the `Actions` tab** in the IDHub GitHub repository.
+1.  **Go to the `Actions` tab** in the IDhub GitHub repository.
 2.  Find the **"Fragment Ingestion"** workflow in the list on the left.
 3.  Click the **"Run workflow"** button. This will show a form with several options.
 4.  **Fill out the form**:
     *   **`environment`**: Choose `qa` for testing or `production` for live data.
     *   **`input_file_path`**: Provide the full path to your data file in the system (an administrator will likely do this for you or tell you where to upload it).
-    *   **`table_name`**: Specify the target database table (e.g., `dna`, `lcl`).
+    *   **`table_name`**: Specify the target database table (e.g., `genotype`, `lcl`).
     *   **`source_name`**: A short name for the source of this data (e.g., `Cedars_Manual_LCL_2024-01-15`).
 5.  **Run the workflow**. The Action will run the Fragment Validator on your file. If it succeeds, it will create a **Batch ID** (e.g., `batch_20240115_143022`). **Copy this Batch ID**, as you will need it for the next step.
 
@@ -82,7 +82,7 @@ After the Fragment Validator runs successfully and generates a **Batch ID**, you
 
 ### Using the GitHub Actions Interface (Recommended)
 
-1.  Go to the **`Actions`** tab in the IDHub GitHub repository.
+1.  Go to the **`Actions`** tab in the IDhub GitHub repository.
 2.  Find the **"Table Loader"** workflow in the list on the left.
 3.  Click the **"Run workflow"** button.
 4.  **Fill out the form**:

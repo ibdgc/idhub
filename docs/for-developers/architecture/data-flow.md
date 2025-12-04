@@ -902,7 +902,7 @@ async def verify_load(batch_id: str) -> dict:
     """, batch_id)
 
     # Verify database records
-    for table_name in ['lcl', 'dna', 'rna']:
+    for table_name in ['lcl', 'genotype', 'sequence']:
         count = await db.fetchval(f"""
             SELECT COUNT(*)
             FROM {table_name}
