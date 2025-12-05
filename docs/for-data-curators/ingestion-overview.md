@@ -24,8 +24,8 @@ This is the first step where data from different sources is converted into a sta
 
 **Data Sources:**
 
-*   **REDCap Projects**: Data is **automatically** extracted by the REDCap Pipeline service.
-*   **Manual Uploads**: You or other curators provide data as CSV or Excel files, which are then converted into fragments.
+- **REDCap Projects**: Data is **automatically** extracted by the REDCap Pipeline service.
+- **Manual Uploads**: You or other curators provide data as CSV which are then converted into fragments.
 
 At the end of this stage, all data exists as standardized fragments in a staging area, ready for validation.
 
@@ -38,18 +38,20 @@ This is the most critical step for data curators. The **Fragment Validator** ser
 The key validation steps include:
 
 1.  **Schema Check**:
-    *   Are all required fields present? (e.g., a `genotype` record must have a `genotype_id`).
-    *   Are the data types correct? (e.g., is the `passage_number` a number?).
+
+    - Are all required fields present? (e.g., a `genotype` record must have a `genotype_id`).
+    - Are the data types correct? (e.g., is the `passage_number` a number?).
 
 2.  **Subject ID Resolution**:
-    *   The validator checks the subject identifier (e.g., `consortium_id`, `local_subject_id`) in your data.
-    *   It communicates with the **GSID Service** to find the corresponding Global Subject ID (GSID).
-    *   If the subject doesn't exist in IDhub, a **new GSID is created** for them automatically.
-    *   The correct GSID is attached to the data fragment.
+
+    - The validator checks the subject identifier (e.g., `consortium_id`, `local_subject_id`) in your data.
+    - It communicates with the **GSID Service** to find the corresponding Global Subject ID (GSID).
+    - If the subject doesn't exist in IDhub, a **new GSID is created** for them automatically.
+    - The correct GSID is attached to the data fragment.
 
 3.  **Business Rule Checks**:
-    *   Does the data make sense? (e.g., the `genotyping_project` is a known project).
-    *   Does the data conflict with existing records? (e.g., attempting to load a `sample_id` that already exists for a different subject).
+    - Does the data make sense? (e.g., the `genotyping_project` is a known project).
+    - Does the data conflict with existing records? (e.g., attempting to load a `sample_id` that already exists for a different subject).
 
 Fragments that pass all checks are placed in a **Validation Queue**, ready for the final stage. Fragments that fail are logged with detailed error reports for you to review and correct.
 
@@ -59,8 +61,8 @@ Fragments that pass all checks are placed in a **Validation Queue**, ready for t
 
 The **Table Loader** service takes the validated fragments from the queue and loads them into the main IDhub database.
 
-*   **Batch Processing**: Data is loaded in batches for efficiency and safety.
-*   **Intelligent Updates**: The loader knows whether to insert a new record or update an existing one based on its unique "natural key". For example, if a `genotype` record with the same `genotype_id` already exists, the loader will update it instead of creating a duplicate.
-*   **Transactional Safety**: If any part of a batch fails, the entire batch is rolled back to prevent partially loaded or inconsistent data.
+- **Batch Processing**: Data is loaded in batches for efficiency and safety.
+- **Intelligent Updates**: The loader knows whether to insert a new record or update an existing one based on its unique "natural key". For example, if a `genotype` record with the same `genotype_id` already exists, the loader will update it instead of creating a duplicate.
+- **Transactional Safety**: If any part of a batch fails, the entire batch is rolled back to prevent partially loaded or inconsistent data.
 
 Once this stage is complete, the data is officially in IDhub and accessible through the NocoDB interface and other tools.

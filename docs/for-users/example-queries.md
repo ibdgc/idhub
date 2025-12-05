@@ -4,6 +4,11 @@ For users who are comfortable with SQL, you can often run queries directly throu
 
 Here are some common and useful queries to help you get started.
 
+!!! tip "Prefer a Graphical Interface?"
+    If you are not comfortable writing SQL, IDhub provides an interactive **Swagger UI** that lets you explore and query the data using a friendly web form. It is a great way to see what data is available and build queries without code.
+    
+    [Learn how to access and use the Swagger UI in our guide.](./finding-help-and-documentation.md#3-idhub-api-browser-swagger-ui)
+
 !!! warning
     These queries are for **read-only** (`SELECT`) operations. You do not have permission to modify data (`INSERT`, `UPDATE`, `DELETE`). Please exercise caution and ensure your queries are efficient to avoid impacting system performance.
 

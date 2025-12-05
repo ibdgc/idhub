@@ -5,11 +5,13 @@ IDhub uses a tool called **NocoDB** to provide a user-friendly, web-based interf
 This guide will walk you through the basics of navigating and exploring the data in NocoDB.
 
 !!! note
-    The NocoDB interface is for **viewing and querying** data. You cannot use it to edit or delete records. All data modifications must go through the official [ingestion process](../for-data-curators/ingestion-overview.md).
+    The NocoDB interface is for **viewing and querying** data. You should not use it to edit or delete records. All data modifications must go through the [ingestion process](../for-data-curators/ingestion-overview.md).
 
 ## Accessing NocoDB
 
 You will be provided with a URL and login credentials to access the IDhub NocoDB instance. After logging in, you will see a list of "Projects" or "Bases," which correspond to different datasets within IDhub.
+
+- [idhub.ibdgc.org](https://idhub.ibdgc.org)
 
 ---
 
@@ -35,9 +37,6 @@ When you select a table, the data is displayed in a grid (spreadsheet) view.
 
 *   **Columns**: Each column represents a field in the database table (e.g., `global_subject_id`, `sample_type`, `date_collected`).
 *   **Rows**: Each row represents a single record (e.g., one subject, one genotype record).
-
-![NocoDB Grid View](https://www.nocodb.com/images/v2/smart-spreadsheet/spreadsheet-redefined-light.png)
-*(Image courtesy of NocoDB. The IDhub interface may look slightly different.)*
 
 ---
 
@@ -82,20 +81,26 @@ For a quick lookup, use the **Search** bar, typically located at the top right o
 
 ---
 
-## Advanced Usage
+## Advanced Exploration and Further Help
+
+Beyond sorting and filtering, NocoDB and IDhub provide more powerful tools for exploring data and getting help.
 
 ### Hiding and Reordering Columns
 
 If a table has too many columns, you can simplify your view.
 
 *   Click the **"Fields"** or **"Columns"** button at the top of the grid.
-*   A list of all columns will appear. You can **drag and drop** to reorder them.
-*   Click the **eye icon** next to a column name to hide or show it.
+*   A list of all columns will appear. You can **drag and drop** to reorder them or click the **eye icon** to hide or show them. This only changes your personal view.
 
-This does not change the underlying data, only your personal view of it.
+### Finding Documentation and Using the API
 
-### Querying with the API
+IDhub provides several built-in ways to find documentation or explore the data through a graphical API browser, which is a great alternative for users not comfortable with SQL.
 
-For programmatic access, NocoDB provides a REST API that allows you to fetch data. You can often find the API endpoint and required filters directly within the NocoDB UI, which helps in constructing automated queries.
+We have created a dedicated guide that covers these features in detail:
 
-Please refer to the official NocoDB documentation or contact a system administrator for more details on using the API.
+> **[-> Read the Finding Help and Documentation Guide](./finding-help-and-documentation.md)**
+
+This guide explains:
+*   How to use NocoDB's global search (`Cmd+J`).
+*   How to access NocoDB's official user guides.
+*   How to use the **Swagger UI**, an interactive API browser for exploring IDhub data without writing any code.

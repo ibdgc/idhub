@@ -13,7 +13,7 @@ sequenceDiagram
     participant RC as REDCap API
     participant S3 as IDhub Staging Area
 
-    GH->>RP: 1. Trigger pipeline (e.g., every 6 hours)
+    GH->>RP: 1. Trigger pipeline (overnight)
     RP->>RC: 2. Request new/updated records since last run
     RC-->>RP: 3. Send records
     loop For each record
@@ -25,9 +25,9 @@ sequenceDiagram
 1.  **Scheduled Trigger**: The pipeline is automatically triggered by a scheduler (GitHub Actions). The production environment runs daily, while the QA environment runs more frequently.
 2.  **Extract Data**: The pipeline connects to each configured REDCap project via its API and asks for records that have been created or modified since the last successful run. This is an **incremental** process, so it only pulls in new changes.
 3.  **Transform Data**: This is a key step. The pipeline uses a set of **field mapping configuration files** to translate the data from REDCap's format to IDhub's standard format. For example, it might:
-    *   Rename a field from `collection_date` in REDCap to `date_collected` for IDhub.
-    *   Convert a multiple-choice value (e.g., `1`) to its text equivalent (e.g., `Whole Blood`).
-    *   Identify which field should be used as the subject identifier (e.g., `consortium_id`).
+    - Rename a field from `collection_date` in REDCap to `date_collected` for IDhub.
+    - Convert a multiple-choice value (e.g., `1`) to its text equivalent (e.g., `Whole Blood`).
+    - Identify which field should be used as the subject identifier (e.g., `consortium_id`).
 4.  **Stage Fragments**: Each transformed record is saved as a standardized data "fragment" and uploaded to a secure staging area in IDhub.
 
 From this point, the fragments enter the standard [Validation and Loading](./ingestion-overview.md#stage-2-validation---ensuring-data-quality) process.
@@ -40,10 +40,10 @@ While software maintainers manage the core configuration, it's useful for data c
 
 A central file (`projects.json`) tells the pipeline which REDCap projects to connect to. Each project has its own settings, including:
 
-*   **Project ID**: The ID of the project in REDCap.
-*   **API Token**: The credentials needed to access the project's data.
-*   **Field Mappings File**: Which mapping file to use for transforming the data from this specific project.
-*   **Enabled Flag**: Whether the project should be included in the automated runs.
+- **Project ID**: The ID of the project in REDCap.
+- **API Token**: The credentials needed to access the project's data.
+- **Field Mappings File**: Which mapping file to use for transforming the data from this specific project.
+- **Enabled Flag**: Whether the project should be included in the automated runs.
 
 ### Field Mappings
 
@@ -51,9 +51,9 @@ This is the most important configuration from a data curator's perspective. Each
 
 These files define rules such as:
 
-*   `"target_field": "source_field"`: Maps a REDCap field to an IDhub field.
-*   `subject_id_candidates`: A list of fields to try, in order, to identify the subject.
-*   `transformations`: Rules for converting data, like changing date formats or mapping codes to values.
+- `"target_field": "source_field"`: Maps a REDCap field to an IDhub field.
+- `subject_id_candidates`: A list of fields to try, in order, to identify the subject.
+- `transformations`: Rules for converting data, like changing date formats or mapping codes to values.
 
 If you notice that data from a REDCap project is not appearing correctly in IDhub, it is often an issue with these mapping files.
 
