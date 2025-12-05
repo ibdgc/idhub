@@ -67,12 +67,17 @@ class FragmentValidator:
             # Step 2: Apply field mapping
             logger.info("Applying field mapping...")
             field_mapping = mapping_config.get("field_mapping", {})
+            static_fields = mapping_config.get("static_fields")
             subject_id_candidates = mapping_config.get("subject_id_candidates", [])
             center_id_field = mapping_config.get("center_id_field")
             default_center_id = mapping_config.get("default_center_id", 0)
 
             mapped_data = FieldMapper.apply_mapping(
-                raw_data, field_mapping, subject_id_candidates, center_id_field
+                raw_data,
+                field_mapping,
+                subject_id_candidates,
+                center_id_field,
+                static_fields,
             )
             logger.info(f"Mapped to {len(mapped_data.columns)} columns")
 

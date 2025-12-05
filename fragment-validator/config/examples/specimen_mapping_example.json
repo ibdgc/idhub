@@ -9,9 +9,11 @@
     "project": "project",
     "identifier_type": "identifier_type"
   },
-  "subject_id_candidates": ["subject_id"],
+  "subject_id_candidates": {
+    "subject_id": "consortium_id"
+  },
   "subject_id_type_field": "identifier_type",
-  "center_id_field": "center_id",
+  "center_id_field": "center_name",
   "default_center_id": 1,
   "exclude_from_load": ["subject_id", "center_id", "identifier_type"]
 }

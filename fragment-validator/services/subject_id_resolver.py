@@ -63,15 +63,26 @@ class SubjectIDResolver:
             if subject_id_type_field and subject_id_type_field in row and pd.notna(row[subject_id_type_field]):
                 id_type_from_data = str(row[subject_id_type_field]).strip()
 
-            for field in candidate_fields:
-                if field in data.columns:
-                    value = row[field]
-                    if pd.notna(value) and str(value).strip():
+            # Handle both new (dict) and old (list) formats for subject_id_candidates
+            if isinstance(candidate_fields, dict):
+                # New format: {"col_name": "id_type", ...}
+                for field, id_type in candidate_fields.items():
+                    if field in data.columns and pd.notna(row[field]) and str(row[field]).strip():
+                        identifiers.append(
+                            {
+                                "local_subject_id": str(row[field]).strip(),
+                                "identifier_type": id_type,
+                            }
+                        )
+            elif isinstance(candidate_fields, list):
+                # Old format: ["col_name_1", "col_name_2", ...]
+                for field in candidate_fields:
+                    if field in data.columns and pd.notna(row[field]) and str(row[field]).strip():
                         # Use the type from the data if available, otherwise default to the column name
                         effective_identifier_type = id_type_from_data if id_type_from_data else field
                         identifiers.append(
                             {
-                                "local_subject_id": str(value).strip(),
+                                "local_subject_id": str(row[field]).strip(),
                                 "identifier_type": effective_identifier_type,
                             }
                         )
