@@ -1,5 +1,6 @@
 # fragment-validator/services/__init__.py
 from .conflict_detector import ConflictDetector
+from .center_resolver import CenterResolver
 from .field_mapper import FieldMapper
 from .gsid_client import GSIDClient
 from .nocodb_client import NocoDBClient
@@ -18,4 +19,5 @@ __all__ = [
     "FieldMapper",
     "SubjectIDResolver",
     "ConflictDetector",
+    "CenterResolver",
 ]

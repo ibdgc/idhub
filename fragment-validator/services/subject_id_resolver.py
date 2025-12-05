@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
+from .center_resolver import CenterResolver
 from .gsid_client import GSIDClient
 
 logger = logging.getLogger(__name__)
@@ -12,8 +13,9 @@ logger = logging.getLogger(__name__)
 class SubjectIDResolver:
     """Resolves subject IDs to GSIDs using GSID service"""
 
-    def __init__(self, gsid_client: GSIDClient):
+    def __init__(self, gsid_client: GSIDClient, center_resolver: CenterResolver):
         self.gsid_client = gsid_client
+        self.center_resolver = center_resolver
 
     def resolve_batch(
         self,
@@ -41,10 +43,16 @@ class SubjectIDResolver:
         row_to_request_map = []
 
         for idx, row in data.iterrows():
-            # Determine center_id
-            if center_id_field and center_id_field in data.columns:
-                center_id = int(row[center_id_field])
+            # Determine center_id by resolving the name
+            if center_id_field and center_id_field in data.columns and pd.notna(row[center_id_field]):
+                center_name = str(row[center_id_field])
+                try:
+                    center_id = self.center_resolver.resolve_center(center_name)
+                except ValueError as e:
+                    logger.warning(f"Row {idx}: Could not resolve center '{center_name}'. Skipping row. Error: {e}")
+                    continue
             else:
+                # Fallback to default ID if no center field provided/value is null
                 center_id = default_center_id
 
             # Collect all non-null candidate IDs for this row

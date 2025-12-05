@@ -1,14 +1,16 @@
 import io
 import json
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pandas as pd
 import pytest
 from services import (
+    CenterResolver,
     FragmentValidator,
     GSIDClient,
     NocoDBClient,
     S3Client,
+    SubjectIDResolver,
 )
 
 
@@ -189,27 +191,26 @@ def mock_gsid_client():
         """Mock batch registration - matches actual API structure"""
         results = []
         for req in requests_list:
-            local_subject_id = req["local_subject_id"]
+            # Simulate a simple GSID generation based on the first identifier
+            first_identifier = req["identifiers"][0]["local_subject_id"]
             center_id = req.get("center_id", 0)
 
             # Simulate existing GSID for known IDs
-            if "IBDGC" in local_subject_id:
+            if "IBDGC" in first_identifier:
                 results.append(
                     {
-                        "gsid": f"GSID-{local_subject_id}",
-                        "local_subject_id": local_subject_id,
-                        "center_id": center_id,
-                        "action": "existing",
+                        "gsid": f"GSID-{first_identifier}",
+                        "action": "link_existing",
+                        "identifiers_linked": len(req["identifiers"]),
                     }
                 )
             else:
                 # Mint new GSID
                 results.append(
                     {
-                        "gsid": f"GSID-NEW-{local_subject_id}",
-                        "local_subject_id": local_subject_id,
-                        "center_id": center_id,
+                        "gsid": f"GSID-NEW-{first_identifier}",
                         "action": "create_new",
+                        "identifiers_linked": len(req["identifiers"]),
                     }
                 )
         return results
@@ -218,136 +219,37 @@ def mock_gsid_client():
     return mock
 
 
-@pytest.fixture
-def validator(mock_s3_client, mock_nocodb_client, mock_gsid_client):
-    """FragmentValidator instance with mocked dependencies"""
-    s3_client = S3Client("test-bucket")
-
-    # Mock the upload_dataframe method that doesn't exist yet
-    s3_client.upload_dataframe = Mock()
-
-    return FragmentValidator(s3_client, mock_nocodb_client, mock_gsid_client)
-
-
-# ============================================================================
-# MAPPING CONFIG FIXTURES
-# ============================================================================
-@pytest.fixture
-def blood_mapping_config():
-    """Blood table mapping configuration"""
-    return {
-        "field_mapping": {
-            "sample_id": "sample_id",
-            "sample_type": "sample_type",
-            "date_collected": "date_collected",
-        },
-        "subject_id_candidates": ["consortium_id"],
-        "center_id_field": None,
-        "default_center_id": 0,
-    }
-
-
-@pytest.fixture
-def lcl_mapping_config():
-    """LCL table mapping configuration"""
-    return {
-        "field_mapping": {"knumber": "knumber", "niddk_no": "niddk_no"},
-        "subject_id_candidates": ["consortium_id"],
-        "center_id_field": None,
-        "default_center_id": 0,
-    }
-
-
-@pytest.fixture
-def dna_mapping_config():
-    """DNA table mapping configuration"""
-    return {
-        "field_mapping": {
-            "sample_id": "sample_id",
-            "concentration": "concentration",
-        },
-        "subject_id_candidates": ["consortium_id"],
-        "center_id_field": "center_id",
-        "default_center_id": 0,
-    }
-
-
-# ============================================================================
-# SAMPLE DATA FIXTURES
-# ============================================================================
-@pytest.fixture
-def sample_blood_data():
-    """Sample blood table data"""
-    return pd.DataFrame(
-        {
-            "consortium_id": ["IBDGC001", "IBDGC002", "IBDGC003"],
-            "sample_id": ["SMP001", "SMP002", "SMP003"],
-            "sample_type": ["Blood", "Plasma", "Serum"],
-            "date_collected": ["2024-01-01", "2024-01-02", "2024-01-03"],
-        }
-    )
-
-
-@pytest.fixture
-def sample_lcl_data():
-    """Sample LCL table data"""
-    return pd.DataFrame(
-        {
-            "consortium_id": ["IBDGC001", "IBDGC002"],
-            "knumber": ["K001", "K002"],
-            "niddk_no": ["NIDDK001", "NIDDK002"],
-        }
-    )
-
-
-@pytest.fixture
-def sample_dna_data():
-    """Sample DNA table data"""
-    return pd.DataFrame(
-        {
-            "consortium_id": ["IBDGC001", "IBDGC002"],
-            "sample_id": ["DNA001", "DNA002"],
-            "concentration": [50.5, 75.3],
-            "center_id": [1, 2],
-        }
-    )
-
-
-@pytest.fixture
-def temp_csv_file(tmp_path, sample_blood_data):
-    """Temporary CSV file with sample data"""
-    csv_file = tmp_path / "test_data.csv"
-    sample_blood_data.to_csv(csv_file, index=False)
-    return csv_file
-
-
-@pytest.fixture
-def temp_mapping_config(tmp_path, blood_mapping_config):
-    """Temporary mapping config JSON file"""
-    config_file = tmp_path / "mapping_config.json"
-    with open(config_file, "w") as f:
-        json.dump(blood_mapping_config, f)
-    return config_file
-
-
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def mock_db_connection():
-    """Mock database connection for UpdateDetector tests"""
-    from unittest.mock import MagicMock, patch
-
-    with patch("psycopg2.connect") as mock_connect:
+    """Mock database connection for CenterResolver"""
+    with patch("services.center_resolver.db_connection") as mock_db_conn_context:
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
-
-        # Setup cursor behavior
-        mock_cursor.fetchall.return_value = []
-        mock_cursor.description = [
-            ("global_subject_id",),
-            ("sample_id",),
-            ("volume_ml",),
+        # Simulate loading centers into the cache
+        mock_cursor.fetchall.return_value = [
+            {"center_id": 1, "name": "MSSM"},
+            {"center_id": 2, "name": "Cedars-Sinai"},
         ]
-
+        mock_cursor.__enter__.return_value = mock_cursor
         mock_conn.cursor.return_value = mock_cursor
-        mock_connect.return_value = mock_conn
+        mock_db_conn_context.return_value = mock_conn
+        yield mock_db_conn_context
 
-        yield mock_conn
+
+@pytest.fixture
+def center_resolver(mock_db_connection):
+    """Create a CenterResolver instance with a mocked DB connection."""
+    return CenterResolver()
+
+
+@pytest.fixture
+def validator(
+    mock_s3_client, mock_nocodb_client, mock_gsid_client, center_resolver
+):
+    """FragmentValidator instance with mocked dependencies"""
+    s3_client = S3Client("test-bucket")
+    s3_client.upload_dataframe = Mock()
+
+    subject_id_resolver = SubjectIDResolver(mock_gsid_client, center_resolver)
+
+    return FragmentValidator(s3_client, mock_nocodb_client, subject_id_resolver)

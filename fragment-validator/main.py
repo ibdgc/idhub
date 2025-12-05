@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 from core.config import settings
 from services import (
+    CenterResolver,
     FragmentValidator,
     GSIDClient,
     NocoDBClient,
@@ -118,9 +119,12 @@ def main():
         gsid_client = GSIDClient(
             service_url=env_config["GSID_SERVICE_URL"], api_key=gsid_api_key
         )
-        subject_id_resolver = SubjectIDResolver(gsid_client)
+        
+        # Initialize resolvers
+        center_resolver = CenterResolver(nocodb_client)
+        subject_id_resolver = SubjectIDResolver(gsid_client, center_resolver)
 
-        # Initialize validator with DB config
+        # Initialize validator
         validator = FragmentValidator(
             s3_client=s3_client,
             nocodb_client=nocodb_client,
