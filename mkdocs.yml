@@ -4,14 +4,14 @@ site_name: IDhub Documentation
 site_url: https://ibdgc.github.io/idhub/
 repo_url: https://github.com/ibdgc/idhub
 repo_name: ibdgc/idhub
-edit_uri: ''
+edit_uri: ""
 theme:
   name: material
   logo: assets/images/initialism.png
   favicon: assets/images/favicon.ico
   palette:
     - scheme: slate
-      primary: indigo
+      primary: black
       accent: indigo
       toggle:
         icon: material/weather-night
@@ -64,16 +64,16 @@ nav:
       - Example Queries: for-users/example-queries.md
   - For Data Curators:
       - Overview:
-        - Introduction: for-data-curators/index.md
-        - Ingestion Summary: for-data-curators/ingestion-summary.md
-        - REDCap Pipeline: for-data-curators/redcap-pipeline.md
+          - Introduction: for-data-curators/index.md
+          - Ingestion Summary: for-data-curators/ingestion-summary.md
+          - REDCap Pipeline: for-data-curators/redcap-pipeline.md
       - Maintenance:
-        - Fragment Ingestion Guide: for-data-curators/fragment-ingestion-guide.md
-        - Troubleshooting: for-data-curators/troubleshooting.md
+          - Fragment Ingestion Guide: for-data-curators/fragment-ingestion-guide.md
+          - Troubleshooting: for-data-curators/troubleshooting.md
       - Reference:
-        - Creating Mapping Files: for-data-curators/creating-mapping-files.md
-        - Mapping Templates: for-data-curators/mapping-templates/lcl-template.md
-        - Audit & Resolution Tables: for-data-curators/audit-resolution-tables.md
+          - Creating Mapping Files: for-data-curators/creating-mapping-files.md
+          - Mapping Templates: for-data-curators/mapping-templates/lcl-template.md
+          - Audit & Resolution Tables: for-data-curators/audit-resolution-tables.md
       - Exploring Data:
           - Exploring with NocoDB: for-users/exploring-with-nocodb.md
           - Finding Help: for-users/finding-help-and-documentation.md
