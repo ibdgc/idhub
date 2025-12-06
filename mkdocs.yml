@@ -63,19 +63,20 @@ nav:
       - Database Schema Overview: for-users/database-schema-overview.md
       - Example Queries: for-users/example-queries.md
   - For Data Curators:
-      - for-data-curators/index.md
-      - Ingestion Overview: for-data-curators/ingestion-overview.md
-      - Manual Ingestion Guide: for-data-curators/manual-ingestion-guide.md
-      - Creating a Mapping File: for-data-curators/creating-mapping-files.md
-      - Automated REDCap Pipeline: for-data-curators/automated-redcap-pipeline.md
-      - Troubleshooting Ingestion: for-data-curators/troubleshooting-ingestion.md
-      - Example Data Templates:
-          - LCL Template: for-data-curators/example-data-templates/lcl-template.md
-          - Specimen Template: for-data-curators/example-data-templates/specimen-template.md
-          - Genotype Template: for-data-curators/example-data-templates/genotype-template.md
-          - Sequence Template: for-data-curators/example-data-templates/sequence-template.md
-          - Enteroid Template: for-data-curators/example-data-templates/enteroid-template.md
-          - Olink Template: for-data-curators/example-data-templates/olink-template.md
+      - Overview:
+        - Introduction: for-data-curators/index.md
+        - Ingestion Summary: for-data-curators/ingestion-summary.md
+        - REDCap Pipeline: for-data-curators/redcap-pipeline.md
+      - Maintenance:
+        - Fragment Ingestion Guide: for-data-curators/fragment-ingestion-guide.md
+        - Troubleshooting: for-data-curators/troubleshooting.md
+      - Reference:
+        - Creating Mapping Files: for-data-curators/creating-mapping-files.md
+        - Mapping Templates: for-data-curators/mapping-templates/lcl-template.md
+        - Audit & Resolution Tables: for-data-curators/audit-resolution-tables.md
+      - Exploring Data:
+          - Exploring with NocoDB: for-users/exploring-with-nocodb.md
+          - Finding Help: for-users/finding-help-and-documentation.md
   - For Developers:
       - Introduction: for-developers/index.md
       - Getting Started:

@@ -5,7 +5,7 @@ IDhub uses a tool called **NocoDB** to provide a user-friendly, web-based interf
 This guide will walk you through the basics of navigating and exploring the data in NocoDB.
 
 !!! note
-    The NocoDB interface is for **viewing and querying** data. You should not use it to edit or delete records. All data modifications must go through the [ingestion process](../for-data-curators/ingestion-overview.md).
+    The NocoDB interface is for **viewing and querying** data. You should not use it to edit or delete records. All data modifications must go through the [ingestion process](../for-data-curators/ingestion-summary.md).
 
 ## Accessing NocoDB
 

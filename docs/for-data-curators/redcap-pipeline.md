@@ -30,7 +30,7 @@ sequenceDiagram
     - Identify which field should be used as the subject identifier (e.g., `consortium_id`).
 4.  **Stage Fragments**: Each transformed record is saved as a standardized data "fragment" and uploaded to a secure staging area in IDhub.
 
-From this point, the fragments enter the standard [Validation and Loading](./ingestion-overview.md#stage-2-validation---ensuring-data-quality) process.
+From this point, the fragments enter the standard [Validation and Loading](./ingestion-summary.md#stage-2-validation---ensuring-data-quality) process.
 
 ## Configuration
 
@@ -63,4 +63,4 @@ For the most part, the REDCap pipeline is a "hands-off" system for data curators
 
 1.  **Ensure Data Quality in REDCap**: The pipeline can only extract what is in REDCap. Correcting data at the source is always the best approach.
 2.  **Communicate Changes**: If you or your team are planning to change the data dictionary of a connected REDCap project (e.g., renaming fields, adding new fields), you **must** notify the IDhub software maintainers. The pipeline's field mapping configurations will need to be updated to match, otherwise the pipeline will fail or data will be missed.
-3.  **Review Validation Errors**: If records extracted by the pipeline fail the [Validation Stage](./ingestion-overview.md#stage-2-validation---ensuring-data-quality), the errors will be logged. You may be asked to review these errors and correct the data in REDCap.
+3.  **Review Validation Errors**: If records extracted by the pipeline fail the [Validation Stage](./ingestion-summary.md#stage-2-validation---ensuring-data-quality), the errors will be logged. You may be asked to review these errors and correct the data in REDCap.

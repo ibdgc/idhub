@@ -17,6 +17,9 @@ Most errors are caught during the **Validation Stage**. When an error is found, 
     2.  Ensure that at least one of the designated subject ID columns (like `consortium_id`) is present and contains a value.
     3.  Verify that the ID is correctly formatted and does not contain typos or extra characters. Correct the ID in your source data file.
 
+!!! tip "Advanced Subject ID Troubleshooting"
+    For complex identity resolution issues, you can directly query the `identity_resolutions` table or the `v_multi_gsid_conflicts` view to see exactly how the GSID service made its decision. Learn more in the [Guide to Audit & Resolution Tables](./audit-resolution-tables.md).
+
 ---
 
 #### 2. Missing Required Fields
@@ -76,3 +79,13 @@ If you receive an error report, follow these steps:
 3.  **Correct the Data at the Source**: **Do not** edit the error report file. Always make corrections in your original CSV or Excel file. This ensures your source of truth is accurate for the future.
 4.  **Resubmit**: Once you have corrected the errors, resubmit the entire file for validation again. The system will re-process it.
 5.  **Ask for Help**: If you don't understand an error message or believe the error is incorrect, contact the IDhub system administrators. Provide them with the batch ID and the error message you received.
+
+---
+
+## Advanced Troubleshooting with Audit Tables
+
+For particularly complex issues, or to understand the full history of a record, you can directly query the system's audit and resolution tables. These tables provide a transparent, detailed log of all data processing, validation, and loading activities.
+
+We have created a detailed guide to help you understand and use these powerful tools.
+
+> **[-> Read the Guide to Audit & Resolution Tables](./audit-resolution-tables.md)**

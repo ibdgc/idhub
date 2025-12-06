@@ -2,6 +2,61 @@
 
 This guide provides a step-by-step process for curators to manually prepare, validate, and load data into IDhub. This workflow is used for data that does not come from an automated source like the REDCap pipeline.
 
+## Local Environment Setup
+
+Before you can run the validator script on your local machine, you need to set up your environment with the correct tools and credentials.
+
+### Step 1: Set Up the Conda Environment
+
+The project uses Conda to manage Python and its dependencies, ensuring everyone runs the same version of the tools.
+
+1.  **Install Conda**: If you don't have it, install [Miniconda](https://docs.conda.io/en/latest/miniconda.html) or Anaconda.
+2.  **Create the Environment**: From the root directory of the `idhub` project, run the following command. This will create a new environment named `idhub-dev` using the project's `environment.yml` file.
+    ```bash
+    conda env create -f environment.yml
+    ```
+3.  **Activate the Environment**: Before running any scripts, you must activate the environment each time you open a new terminal:
+    ```bash
+    conda activate idhub-dev
+    ```
+    Your terminal prompt should now show `(idhub-dev)` at the beginning.
+
+### Step 2: Create a Secure `.env` File
+
+The validator requires secret API keys to communicate with other IDhub services. These are managed in a `.env` file, which is a plain text file you create in the root of the `idhub` project directory.
+
+!!! warning "Do Not Commit This File"
+The `.env` file contains sensitive credentials and is listed in `.gitignore` to prevent it from ever being saved to the git repository. **Never** share this file or commit it.
+
+1.  **Create the file**: In the root of the `idhub` project, create a new file named `.env`.
+2.  **Add content**: Copy and paste the following template into your `.env` file.
+
+    ```
+    # .env file for local fragment validation
+
+    # NocoDB API Token (see instructions below)
+    NOCODB_TOKEN="your_nocodb_token_goes_here"
+
+    # GSID Service API Key (see instructions below)
+    GSID_API_KEY="your_gsid_api_key_goes_here"
+    ```
+
+### Step 3: Obtain and Use API Keys
+
+You will need two keys to run the validator. It is critical to use the correct key for the environment (`qa` or `production`) you are targeting.
+
+- `NOCODB_TOKEN`: This key allows the validator to connect to the NocoDB API.
+  - **How to get it**: You can generate this key yourself from the NocoDB web interface. Log in, click your user icon in the bottom-left corner, and go to the "API Tokens" section.
+  - **QA vs. Production**: You will need a **separate token for each environment**.
+    - For validating against QA, log into `qa.idhub.ibdgc.org` and generate a token there.
+    - For validating against Production, log into `idhub.ibdgc.org` and generate a token there.
+- `GSID_API_KEY`: This key allows the validator to communicate with the subject identity service.
+  - **How to get it**: This key is managed by the system administrators. Please contact them to obtain the key for the environment you need to work with.
+
+Once you have the keys, paste them into your `.env` file as the values for the corresponding variables. The script will automatically load them when you run it.
+
+---
+
 The process involves two main services, which you can trigger via the GitHub Actions interface:
 
 1.  **Fragment Validator**: Validates your data file and converts it into standardized "fragments".
@@ -15,11 +70,7 @@ Before you can ingest data, you must prepare your file according to IDhub's requ
 - **Header**: The first row of your file **must** be a header row with clear column names.
 - **Content**: Ensure your file contains all required fields for the table you are loading, especially a **subject identifier** (like `consortium_id`) and a unique identifier for the record (like `sample_id`). There can be multiple candidate subject IDs.
 
-### minimal required fields
-
-### rubric field constraints
-
-[See more on data preparation →](ingestion-overview.md)
+[See more on data preparation →](ingestion-summary.md)
 
 ## Step 2: Configure Table Mappings
 

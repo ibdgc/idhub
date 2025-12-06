@@ -2,13 +2,18 @@
 
 This section provides guides and documentation for data curators who are responsible for preparing, validating, and loading data into IDhub.
 
-Here you will find:
+Here you will find a set of guides to walk you through the process of getting data into IDhub. We recommend following them in order:
 
--   An overview of the data ingestion process.
--   A detailed, step-by-step guide for manual data ingestion.
--   A guide to creating the JSON mapping files used by the validator.
--   Information on how the automated REDCap pipeline works.
--   Troubleshooting tips for common data quality issues.
--   Guides for exploring data and finding help in the NocoDB interface.
+1.  **[Ingestion Overview](./ingestion-summary.md)**: A high-level overview of the entire data ingestion process.
+2.  **[Manual Ingestion Guide](./fragment-ingestion-guide.md)**: The main guide, which includes:
+    -   Setting up your local computer to run the validator.
+    -   Preparing your data file.
+    -   Running the validation and loading process.
+3.  **[Creating a Mapping File](./creating-mapping-files.md)**: A detailed walkthrough of how to create the JSON mapping file required by the validator.
+4.  **[Example Data Templates](./mapping-templates/lcl-template.md)**: A collection of annotated CSV and JSON examples for each sample type.
+5.  **[Troubleshooting Ingestion](./troubleshooting-ingestion.md)**: A guide to understanding and fixing common data quality errors.
+6.  **[Audit & Resolution Tables](./audit-resolution-tables.md)**: An advanced guide to using the audit tables for in-depth troubleshooting.
+7.  **[Automated REDCap Pipeline](./automated-redcap-pipeline.md)**: Information on how the automated pipeline from REDCap works.
+8.  **Exploring Data**:
     -   [Exploring Data with NocoDB](../for-users/exploring-with-nocodb.md)
     -   [Finding Help and Documentation](../for-users/finding-help-and-documentation.md)
