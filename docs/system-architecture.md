@@ -1,4 +1,4 @@
-# System Architecture Overview
+# System Overview
 
 IDhub uses a microservices architecture to create a staged data pipeline, ensuring that data is validated and processed correctly at each step before being loaded into the central database.
 

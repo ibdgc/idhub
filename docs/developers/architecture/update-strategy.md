@@ -700,13 +700,7 @@ def find_existing_records_batch(self, table_name, natural_keys):
     # Execute with tuple list
 ```
 
-## Related Documentation
 
--   [Data Flow](data-flow.md) - Overall data pipeline
--   [Table Loader Service](../services/table-loader.md) - Implementation details
--   [Fragment Validator](../services/fragment-validator.md) - Validation before loading
--   [Table Configurations](../reference/table-configs.md) - Configuration reference
--   [LCL Field Mappings](../reference/field-mappings.md#lcl-mappings) - LCL-specific mappings
 
 ## Next Steps
 

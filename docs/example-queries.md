@@ -142,5 +142,5 @@ LIMIT 500;
 
 *   **Start with `LIMIT`**: When exploring a table for the first time, always add `LIMIT 10` to the end of your query. This prevents you from accidentally trying to load millions of rows, which can be slow.
 *   **Use `WHERE` to filter**: Be as specific as possible with your `WHERE` clauses to narrow down the data you are looking for. This is much more efficient than retrieving a large dataset and filtering it on your own machine.
-*   **Use NocoDB's Filters First**: Before writing your own SQL, try to achieve your goal using NocoDB's built-in [Sort and Filter](../for-users/exploring-with-nocodb.md#2-filtering) features. They are powerful and safe to use.
+*   **Use NocoDB's Filters First**: Before writing your own SQL, try to achieve your goal using NocoDB's built-in [Sort and Filter](exploring-with-nocodb.md#2-filtering) features. They are powerful and safe to use.
 *   **Check Column Names**: SQL is precise. If your query fails, double-check that the column and table names are spelled correctly. You can see the exact names in NocoDB's grid view.

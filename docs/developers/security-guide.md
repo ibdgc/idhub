@@ -184,8 +184,8 @@ Continuous monitoring of system logs, security events, and performance metrics f
 
 ## 10. Related Documentation
 
--   [System Architecture](../architecture/overview.md)
--   [Deployment Guide](../deployment-guide.md)
--   [Nginx Reverse Proxy Documentation](../services/nginx.md)
--   [GSID Service Documentation](../services/gsid-service.md)
--   [Database Schema](../architecture/database-schema.md)
+-   [System Architecture](architecture/overview.md)
+-   [Deployment Guide](deployment-guide.md)
+-   [Nginx Reverse Proxy Documentation](services/nginx.md)
+-   [GSID Service Documentation](services/gsid-service.md)
+-   [Database Schema](architecture/database-schema.md)

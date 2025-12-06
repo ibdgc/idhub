@@ -54,48 +54,51 @@ markdown_extensions:
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
 extra_css: [stylesheets/extra.css]
 nav:
-  - Home: index.md
-      - Welcome: for-users/welcome.md
-      - What is a GSID?: for-users/what-is-a-gsid.md
-      - Finding Help and Documentation: for-users/finding-help-and-documentation.md
-      - System Architecture Overview: for-users/system-architecture.md
-      - Exploring Data with NocoDB: for-users/exploring-with-nocodb.md
-      - Database Schema Overview: for-users/database-schema-overview.md
-      - Example Queries: for-users/example-queries.md
-  - For Data Curators:
+  - User Guide:
+      - Welcome: index.md
+      - System Overview: system-architecture.md
+      - Exploring Data with NocoDB: exploring-with-nocodb.md
+      - Finding Help and Documentation: finding-help-and-documentation.md
+      - What is a GSID?: what-is-a-gsid.md
+      - Database Overview: database-schema-overview.md
+      - Example Queries: example-queries.md
+  - DCC Curators:
       - Overview:
-          - Introduction: for-data-curators/index.md
-          - Ingestion Summary: for-data-curators/ingestion-summary.md
-          - REDCap Pipeline: for-data-curators/redcap-pipeline.md
+          - Introduction: curators/index.md
+          - Ingestion Summary: curators/ingestion-summary.md
+          - REDCap Pipeline: curators/redcap-pipeline.md
       - Maintenance:
-          - Fragment Ingestion Guide: for-data-curators/fragment-ingestion-guide.md
-          - Troubleshooting: for-data-curators/troubleshooting.md
+          - Fragment Ingestion Guide: curators/fragment-ingestion-guide.md
+          - Troubleshooting: curators/troubleshooting.md
       - Reference:
-          - Creating Mapping Files: for-data-curators/creating-mapping-files.md
-          - Mapping Templates: for-data-curators/mapping-templates/lcl-template.md
-          - Audit & Resolution Tables: for-data-curators/audit-resolution-tables.md
-      - Exploring Data:
-          - Exploring with NocoDB: for-users/exploring-with-nocodb.md
-          - Finding Help: for-users/finding-help-and-documentation.md
-  - For Developers:
-      - Introduction: for-developers/index.md
+          - Audit & Resolution Tables: curators/audit-resolution-tables.md
+          - Creating Mapping Files: curators/creating-mapping-files.md
+          - Mapping Templates:
+              - LCL Template: curators/mapping-templates/lcl-template.md
+              - Enteroid Template: curators/mapping-templates/enteroid-template.md
+              - Genotype Template: curators/mapping-templates/genotype-template.md
+              - Olink Template: curators/mapping-templates/olink-template.md
+              - Sequence Template: curators/mapping-templates/sequence-template.md
+              - Specimen Template: curators/mapping-templates/specimen-template.md
+  - Developers:
+      - Introduction: developers/index.md
       - Getting Started:
-          - Development Guide: for-developers/development-guide.md
-          - Deployment Guide: for-developers/deployment-guide.md
-          - Workflows Guide: for-developers/workflows-guide.md
-          - Security Guide: for-developers/security-guide.md
+          - Development Guide: developers/development-guide.md
+          - Deployment Guide: developers/deployment-guide.md
+          - Workflows Guide: developers/workflows-guide.md
+          - Security Guide: developers/security-guide.md
       - System Architecture:
-          - Overview: for-developers/architecture/overview.md
-          - GSID Format: for-developers/architecture/gsid-format.md
-          - Data Flow: for-developers/architecture/data-flow.md
-          - Database Schema: for-developers/architecture/database-schema.md
-          - Update Strategy: for-developers/architecture/update-strategy.md
+          - Overview: developers/architecture/overview.md
+          - GSID Format: developers/architecture/gsid-format.md
+          - Data Flow: developers/architecture/data-flow.md
+          - Database Schema: developers/architecture/database-schema.md
+          - Update Strategy: developers/architecture/update-strategy.md
       - Services:
-          - Overview: for-developers/services/index.md
-          - GSID Service: for-developers/services/gsid-service.md
-          - REDCap Pipeline: for-developers/services/redcap-pipeline.md
-          - Fragment Validator: for-developers/services/fragment-validator.md
-          - Table Loader: for-developers/services/table-loader.md
-          - Nginx Proxy: for-developers/services/nginx.md
+          - Overview: developers/services/index.md
+          - GSID Service: developers/services/gsid-service.md
+          - REDCap Pipeline: developers/services/redcap-pipeline.md
+          - Fragment Validator: developers/services/fragment-validator.md
+          - Table Loader: developers/services/table-loader.md
+          - Nginx Proxy: developers/services/nginx.md
       - API Reference:
-          - GSID Service: for-developers/api/gsid-service.md
+          - GSID Service: developers/api/gsid-service.md

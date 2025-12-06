@@ -1,4 +1,4 @@
-# Database Schema Overview
+# Database Overview
 
 The IDhub database is where all the validated and curated data is stored. Understanding the basic structure of the database will help you find the information you need. This guide provides a simplified overview of the most important tables and how they connect.
 

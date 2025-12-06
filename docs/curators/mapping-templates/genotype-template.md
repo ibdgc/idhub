@@ -18,7 +18,7 @@ IDG-003-C,consortium_id,Emory,GENO-003,GSA-Array-v2,987654323
 Below is a description of each column in the template and its purpose.
 
 !!! note "Using Static Fields"
-    For fields that have the same value across all records in your file (e.g., a project name that's consistent for the entire batch), you can define them as `static_fields` directly in your [mapping configuration](./creating-mapping-files.md) instead of including them as columns in your CSV. This simplifies your input file.
+    For fields that have the same value across all records in your file (e.g., a project name that's consistent for the entire batch), you can define them as `static_fields` directly in your [mapping configuration](../creating-mapping-files.md) instead of including them as columns in your CSV. This simplifies your input file.
 
 #### Subject Identification
 

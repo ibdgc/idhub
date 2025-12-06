@@ -18,7 +18,7 @@ IDhub is the IBDGC's centralized platform for managing, curating, and sharing bi
 
   Learn how to prepare, validate, and ingest data into IDhub.
 
-  [:octicons-arrow-right-24: Go to Ingestion Guides](../for-data-curators/ingestion-summary.md)
+  [:octicons-arrow-right-24: Go to Ingestion Guides](curators/ingestion-summary.md)
 
 - :material-code-tags: **For Developers & Admins**
 
@@ -26,7 +26,7 @@ IDhub is the IBDGC's centralized platform for managing, curating, and sharing bi
 
   Find technical architecture, deployment, and API documentation.
 
-  [:octicons-arrow-right-24: See Technical Docs](../for-developers/development-guide.md)
+  [:octicons-arrow-right-24: See Technical Docs](developers/development-guide.md)
 
 </div>
 

@@ -50,7 +50,7 @@ The key validation steps include:
     - The correct GSID is attached to the data fragment.
 
     > [!tip]
-    > Learn more about the purpose and scope of GSIDs in the [What is a GSID?](../for-users/what-is-a-gsid.md) guide.
+    > Learn more about the purpose and scope of GSIDs in the [What is a GSID?](../what-is-a-gsid.md) guide.
 
 
 3.  **Business Rule Checks**:

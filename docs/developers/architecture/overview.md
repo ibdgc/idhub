@@ -592,7 +592,7 @@ graph TB
 -   Validation queue depth
 -   API response times
 
-[Detailed monitoring documentation →](../operations-monitoring.md)
+
 
 ## Technology Stack
 
