@@ -10,7 +10,7 @@ IDhub is the IBDGC's centralized platform for managing, curating, and sharing bi
 
   New to IDhub? Learn how to browse and query the data.
 
-  [:octicons-arrow-right-24: Explore the Data](for-users/exploring-with-nocodb.md)
+  [:octicons-arrow-right-24: Explore the Data](exploring-with-nocodb.md)
 
 - :material-upload: **For Data Curators**
 
@@ -18,7 +18,7 @@ IDhub is the IBDGC's centralized platform for managing, curating, and sharing bi
 
   Learn how to prepare, validate, and ingest data into IDhub.
 
-  [:octicons-arrow-right-24: Go to Ingestion Guides](for-data-curators/ingestion-summary.md)
+  [:octicons-arrow-right-24: Go to Ingestion Guides](../for-data-curators/ingestion-summary.md)
 
 - :material-code-tags: **For Developers & Admins**
 
@@ -26,7 +26,7 @@ IDhub is the IBDGC's centralized platform for managing, curating, and sharing bi
 
   Find technical architecture, deployment, and API documentation.
 
-  [:octicons-arrow-right-24: See Technical Docs](for-developers/development-guide.md)
+  [:octicons-arrow-right-24: See Technical Docs](../for-developers/development-guide.md)
 
 </div>
 
@@ -36,6 +36,6 @@ The IBDGC Integrated Data Hub (IDhub) is a comprehensive data management system 
 
 - :material-database-check: **Centralize** biobank and clinical data from multiple sources.
 - :material-shield-check: **Validate** data quality and consistency before loading.
-- :material-identifier: **Manage** global subject identifiers (GSIDs) across the consortium.
+- :material-identifier: **Manage** global subject identifiers (GSIDs) across the consortium. ([Learn what a GSID is.](what-is-a-gsid.md))
 - :material-history: **Track** complete data lineage and audit trails.
 - :material-robot: **Automate** data pipelines with robust, repeatable workflows.

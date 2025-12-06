@@ -108,7 +108,7 @@ curl https://api.idhub.ibdgc.org/api/gsid/health
 
 ```json
 {
-  "gsid": "01HQXYZ123ABCDEF456789",
+  "gsid": "GSID-4A1B2C3D4E5F6G7H",
   "subject_id": "550e8400-e29b-41d4-a716-446655440000",
   "local_subject_id": "GAP-001",
   "center_id": 1,
@@ -181,7 +181,7 @@ if response.status_code == 201:
 
 ```json
 {
-  "gsid": "01HQXYZ123ABCDEF456789",
+  "gsid": "GSID-4A1B2C3D4E5F6G7H",
   "subject_id": "550e8400-e29b-41d4-a716-446655440000",
   "local_subject_id": "GAP-001",
   "center_id": 1,
@@ -249,12 +249,12 @@ curl -X POST https://api.idhub.ibdgc.org/api/gsid/resolve \
   "results": [
     {
       "local_subject_id": "GAP-001",
-      "gsid": "01HQXYZ123ABCDEF456789",
+      "gsid": "GSID-4A1B2C3D4E5F6G7H",
       "found": true
     },
     {
       "local_subject_id": "GAP-002",
-      "gsid": "01HQXYZ456GHIJKL789012",
+      "gsid": "GSID-5B2C3D4E5F6G7H8J",
       "found": true
     }
   ],
@@ -313,7 +313,7 @@ for result in results:
 {
   "matches": [
     {
-      "gsid": "01HQXYZ123ABCDEF456789",
+      "gsid": "GSID-4A1B2C3D4E5F6G7H",
       "confidence": 0.95,
       "matched_fields": {
         "first_name": "John",
@@ -322,7 +322,7 @@ for result in results:
       }
     },
     {
-      "gsid": "01HQXYZ456GHIJKL789012",
+      "gsid": "GSID-5B2C3D4E5F6G7H8J",
       "confidence": 0.87,
       "matched_fields": {
         "first_name": "Jon",
@@ -368,7 +368,7 @@ curl -X POST https://api.idhub.ibdgc.org/api/gsid/fuzzy-match \
 
 ```json
 {
-  "gsid": "01HQXYZ123ABCDEF456789",
+  "gsid": "GSID-4A1B2C3D4E5F6G7H",
   "subject_id": "550e8400-e29b-41d4-a716-446655440000",
   "sex": "F",
   "diagnosis": "CD",
@@ -401,93 +401,19 @@ curl -X POST https://api.idhub.ibdgc.org/api/gsid/fuzzy-match \
 **Example**:
 
 ```bash
-curl https://api.idhub.ibdgc.org/api/gsid/subjects/01HQXYZ123ABCDEF456789 \
+curl https://api.idhub.ibdgc.org/api/gsid/subjects/GSID-4A1B2C3D4E5F6G7H \
   -H "X-API-Key: your-api-key"
 ```
 
 ---
 
-
 ## GSID Format
 
-### Structure
+The technical specification for the Global Subject ID, including its structure, generation, and validation, has been moved to a dedicated page.
 
-GSIDs are based on truncated ULIDs (Universally Unique Lexicographically Sortable Identifiers):
+[➡️ See the GSID Format Documentation](../architecture/gsid-format.md)
 
-```
-01HQXYZ123ABCDEF456789
-│ │      │
-│ │      └─ Random component (16 chars)
-│ └─ Timestamp component (10 chars)
-└─ Version prefix
-```
-
-**Characteristics**:
-
--   **Length**: 26 characters
--   **Character set**: Crockford\'s Base32 (0-9, A-HJKMNP-TV-Z)
--   **Sortable**: Lexicographically sortable by creation time
--   **Unique**: 128-bit uniqueness (same as UUID)
--   **URL-safe**: No special characters
-
-### Generation Algorithm
-
-```python
-import ulid
-from datetime import datetime
-
-def generate_gsid() -> str:
-    """Generate a new GSID"""
-    # Generate ULID
-    new_ulid = ulid.create()
-
-    # Convert to string (26 characters)
-    gsid = str(new_ulid)
-
-    return gsid
-
-# Example
-gsid = generate_gsid()
-# Output: 01HQXYZ123ABCDEF456789
-```
-
-### Validation
-
-```python
-import re
-
-def validate_gsid(gsid: str) -> bool:
-    """Validate GSID format"""
-    # Check length
-    if len(gsid) != 26:
-        return False
-
-    # Check character set (Crockford\'s Base32)
-    pattern = r'^[0-9A-HJKMNP-TV-Z]{26}$'
-    return bool(re.match(pattern, gsid))
-
-# Examples
-validate_gsid("01HQXYZ123ABCDEF456789")  # True
-validate_gsid("invalid")                 # False
-validate_gsid("01HQXYZ123ABCDEF45678")   # False (too short)
-```
-
-### Timestamp Extraction
-
-```python
-import ulid
-
-def extract_timestamp(gsid: str) -> datetime:
-    """Extract creation timestamp from GSID"""
-    ulid_obj = ulid.parse(gsid)
-    return ulid_obj.timestamp().datetime
-
-# Example
-gsid = "01HQXYZ123ABCDEF456789"
-created_at = extract_timestamp(gsid)
-print(f"Created at: {created_at}")
-# Output: Created at: 2024-01-15 10:00:00.123
-```
+---
 
 ## Configuration
 
@@ -751,7 +677,7 @@ The service exposes the following metrics:
   "method": "POST",
   "status_code": 201,
   "duration_ms": 15,
-  "gsid": "01HQXYZ123ABCDEF456789",
+  "gsid": "GSID-4A1B2C3D4E5F6G7H",
   "center_id": 1,
   "local_subject_id": "GAP-001"
 }

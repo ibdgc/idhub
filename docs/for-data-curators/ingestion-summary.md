@@ -49,6 +49,10 @@ The key validation steps include:
     - If the subject doesn't exist in IDhub, a **new GSID is created** for them automatically.
     - The correct GSID is attached to the data fragment.
 
+    > [!tip]
+    > Learn more about the purpose and scope of GSIDs in the [What is a GSID?](../for-users/what-is-a-gsid.md) guide.
+
+
 3.  **Business Rule Checks**:
     - Does the data make sense? (e.g., the `genotyping_project` is a known project).
     - Does the data conflict with existing records? (e.g., attempting to load a `sample_id` that already exists for a different subject).

@@ -127,7 +127,7 @@ graph TB
 
 **Key Features**:
 
--   GSID generation (ULID-based)
+-   GSID generation (Custom format)
 -   Local ID to GSID resolution
 -   Fuzzy matching for subject identification
 -   RESTful API with authentication

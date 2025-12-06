@@ -55,8 +55,8 @@ markdown_extensions:
 extra_css: [stylesheets/extra.css]
 nav:
   - Home: index.md
-  - For Users:
-      - for-users/index.md
+      - Welcome: for-users/welcome.md
+      - What is a GSID?: for-users/what-is-a-gsid.md
       - Finding Help and Documentation: for-users/finding-help-and-documentation.md
       - System Architecture Overview: for-users/system-architecture.md
       - Exploring Data with NocoDB: for-users/exploring-with-nocodb.md
@@ -86,6 +86,7 @@ nav:
           - Security Guide: for-developers/security-guide.md
       - System Architecture:
           - Overview: for-developers/architecture/overview.md
+          - GSID Format: for-developers/architecture/gsid-format.md
           - Data Flow: for-developers/architecture/data-flow.md
           - Database Schema: for-developers/architecture/database-schema.md
           - Update Strategy: for-developers/architecture/update-strategy.md

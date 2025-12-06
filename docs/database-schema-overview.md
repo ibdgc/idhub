@@ -6,6 +6,10 @@ The IDhub database is where all the validated and curated data is stored. Unders
 
 The entire database is designed around a **subject-centric model**. This means that almost every piece of data can be traced back to a unique individual, who is identified by a **Global Subject ID (GSID)**.
 
+> [!tip]
+> Learn more about the purpose and scope of GSIDs in the [What is a GSID?](./what-is-a-gsid.md) guide.
+
+
 ```mermaid
 graph TD
     subgraph "Core Subject Data"

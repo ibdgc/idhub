@@ -96,7 +96,7 @@ curl -X POST "https://api.idhub.ibdgc.org/api/gsid/generate" \
 **Example Response (`201 Created`)**:
 ```json
 {
-  "gsid": "01HQXYZ123ABCDEF456789",
+  "gsid": "GSID-4A1B2C3D4E5F6G7H",
   "subject_id": "550e8400-e29b-41d4-a716-446655440000",
   "local_subject_id": "GAP-001",
   "center_id": 1,
@@ -141,7 +141,7 @@ curl -X POST "https://api.idhub.ibdgc.org/api/gsid/resolve" \
 **Example Response (`200 OK`)**:
 ```json
 {
-  "gsid": "01HQXYZ123ABCDEF456789",
+  "gsid": "GSID-4A1B2C3D4E5F6G7H",
   "subject_id": "550e8400-e29b-41d4-a716-446655440000",
   "local_subject_id": "GAP-001",
   "center_id": 1,
@@ -198,12 +198,12 @@ requests.post(
   "results": [
     {
       "local_subject_id": "GAP-001",
-      "gsid": "01HQXYZ123ABCDEF456789",
+      "gsid": "GSID-4A1B2C3D4E5F6G7H",
       "found": true
     },
     {
       "local_subject_id": "GAP-002",
-      "gsid": "01HQXYZ456GHIJKL789012",
+      "gsid": "GSID-5B2C3D4E5F6G7H8J",
       "found": true
     },
     {
@@ -233,7 +233,7 @@ Retrieve a full subject record, including all known local identifiers, by their 
 
 **Example Request**:
 ```bash
-curl "https://api.idhub.ibdgc.org/api/gsid/subjects/01HQXYZ123ABCDEF456789" \
+curl "https://api.idhub.ibdgc.org/api/gsid/subjects/GSID-4A1B2C3D4E5F6G7H" \
   -H "X-API-Key: your-api-key"
 ```
 
@@ -244,7 +244,7 @@ curl "https://api.idhub.ibdgc.org/api/gsid/subjects/01HQXYZ123ABCDEF456789" \
 **Example Response (`200 OK`)**:
 ```json
 {
-  "gsid": "01HQXYZ123ABCDEF456789",
+  "gsid": "GSID-4A1B2C3D4E5F6G7H",
   "subject_id": "550e8400-e29b-41d4-a716-446655440000",
   "sex": "F",
   "diagnosis": "CD",
