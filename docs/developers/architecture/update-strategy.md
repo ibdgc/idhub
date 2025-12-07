@@ -702,8 +702,4 @@ def find_existing_records_batch(self, table_name, natural_keys):
 
 
 
-## Next Steps
 
--   [Configure table update strategies](../reference/table-configs.md)
--   [Set up monitoring](../operations/monitoring.md)
--   [Review troubleshooting guide](../operations/troubleshooting.md)

@@ -51,3 +51,8 @@ table th {
 .admonition.tip {
   border-left-color: #00bcd4;
 }
+
+/* Limit table of contents depth to H3 */
+.md-nav--secondary .md-nav__item .md-nav__item .md-nav__list {
+  display: none;
+}

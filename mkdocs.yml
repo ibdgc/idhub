@@ -71,15 +71,8 @@ nav:
           - Fragment Ingestion Guide: curators/fragment-ingestion-guide.md
           - Troubleshooting: curators/troubleshooting.md
       - Reference:
-          - Audit & Resolution Tables: curators/audit-resolution-tables.md
           - Creating Mapping Files: curators/creating-mapping-files.md
-          - Mapping Templates:
-              - LCL Template: curators/mapping-templates/lcl-template.md
-              - Enteroid Template: curators/mapping-templates/enteroid-template.md
-              - Genotype Template: curators/mapping-templates/genotype-template.md
-              - Olink Template: curators/mapping-templates/olink-template.md
-              - Sequence Template: curators/mapping-templates/sequence-template.md
-              - Specimen Template: curators/mapping-templates/specimen-template.md
+          - Audit & Resolution Tables: curators/audit-resolution-tables.md
   - Developers:
       - Introduction: developers/index.md
       - Getting Started:
