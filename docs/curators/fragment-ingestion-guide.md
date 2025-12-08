@@ -6,7 +6,7 @@ This guide provides a step-by-step process for curators to manually prepare, val
 
 Before you can run the validator script on your local machine, you need to set up your environment with the correct tools and credentials.
 
-### Step 1: Set Up the Conda Environment
+### Conda Environment Setup
 
 The project uses Conda to manage Python and its dependencies, ensuring everyone runs the same version of the tools.
 
@@ -21,27 +21,7 @@ The project uses Conda to manage Python and its dependencies, ensuring everyone 
     ```
     Your terminal prompt should now show `(idhub-dev)` at the beginning.
 
-### Step 2: Create a Secure `.env` File
-
-The validator requires secret API keys to communicate with other IDhub services. These are managed in a `.env` file, which is a plain text file you create in the root of the `idhub` project directory.
-
-!!! warning "Do Not Commit This File"
-The `.env` file contains sensitive credentials and is listed in `.gitignore` to prevent it from ever being saved to the git repository. **Never** share this file or commit it.
-
-1.  **Create the file**: In the root of the `idhub` project, create a new file named `.env`.
-2.  **Add content**: Copy and paste the following template into your `.env` file.
-
-    ```
-    # .env file for local fragment validation
-
-    # NocoDB API Token (see instructions below)
-    NOCODB_TOKEN="your_nocodb_token_goes_here"
-
-    # GSID Service API Key (see instructions below)
-    GSID_API_KEY="your_gsid_api_key_goes_here"
-    ```
-
-### Step 3: Obtain and Use API Keys
+### Obtain and Use API Keys
 
 You will need two keys to run the validator. It is critical to use the correct key for the environment (`qa` or `production`) you are targeting.
 
@@ -55,9 +35,34 @@ You will need two keys to run the validator. It is critical to use the correct k
 
 Once you have the keys, paste them into your `.env` file as the values for the corresponding variables. The script will automatically load them when you run it.
 
+### Create a Secure `.env` File
+
+The validator requires secret API keys to communicate with other IDhub services. These are managed in a `.env` file, which is a plain text file you create in the root of the `idhub` project directory.
+
+!!! warning "Do Not Commit This File"
+The `.env` file contains sensitive credentials and is listed in `.gitignore` to prevent it from ever being saved to the git repository. **Never** share this file or commit it.
+
+1.  **Create the file**: In the root of the `idhub` project, create a new file named `.env`.
+2.  **Restrict .env permissions:** The `.env` file contains highly sensitive keys, so it should only be accessible by your user.
+    ```
+    # change the permissions using chmod
+    chmod 600 .env
+    ```
+3.  **Add content**: Copy and paste the following template into your `.env` file.
+
+    ```
+    # .env file for local fragment validation
+
+    # NocoDB API Token (see instructions below)
+    NOCODB_TOKEN="your_nocodb_token_goes_here"
+
+    # GSID Service API Key (see instructions below)
+    GSID_API_KEY="your_gsid_api_key_goes_here"
+    ```
+
 ---
 
-The process involves two main services, which you can trigger via the GitHub Actions interface:
+The fragment ingestion process involves two main services, which you can trigger via the GitHub Actions interface:
 
 1.  **Fragment Validator**: Validates your data file and converts it into standardized "fragments".
 2.  **Table Loader**: Loads the validated fragments into the database.
@@ -121,7 +126,7 @@ python main.py \
 
 After the Fragment Validator runs successfully and generates a **Batch ID**, you can use the **Table Loader** to load this batch into the database.
 
-### Using the GitHub Actions Interface (Recommended)
+### Using GitHub Actions GUI (Recommended)
 
 1.  Go to the **`Actions`** tab in the IDhub GitHub repository.
 2.  Find the **"Fragment Ingestion Pipeline"** workflow in the list on the left.
@@ -132,7 +137,7 @@ After the Fragment Validator runs successfully and generates a **Batch ID**, you
     - **`dry_run`**: true / false
 5.  **Run the workflow**. Consider running with `dry_run` checked initially. Review the output log to ensure the changes are what you expect. If everything looks correct, run the workflow again with `dry_run` unchecked to perform the live load.
 
-### Using the CLI (For Developers/Advanced Users)
+### Using the CLI
 
 You can also run the Table Loader from the command line for local development.
 

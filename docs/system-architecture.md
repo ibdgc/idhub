@@ -8,7 +8,7 @@ graph TD
     B --> C[Staging & Validation];
     C --> D[Loading Services];
     D --> E[IDhub Database];
-    E --> F[Data Access Layer];
+    E --> F[NocoDB Web Interface];
 
     style E fill:#4CAF50,stroke:#333,stroke-width:2px
 ```

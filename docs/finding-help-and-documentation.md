@@ -43,13 +43,15 @@ For users who want to explore the data via an API but are not comfortable writin
 
 *   **How to access**:
     1.  Click the dropdown menu next to the base name (e.g., "IBDGC IDhub") in the upper-left corner.
-    2.  Select **"Swagger UI"** from the menu.
+    2.  Select **"Swagger: REST APIs"** from the menu.
+    3.  Select **"API v3"** from the submenu.
     3.  This will open a new tab with an interactive list of all available IDhub API endpoints.
 
 *   **What it does**:
     *   It provides a **graphical interface** for every table in the database.
-    *   You can click on an endpoint (e.g., `/api/v1/db/data/v1/IBDGC-IDhub/genotype`) to expand it.
+    *   You can click on an endpoint (e.g., `/api/v3/db/data/v1/IBDGC-IDhub/genotype`) to expand it.
     *   It shows you all the available parameters for filtering, sorting, and limiting your query.
     *   You can fill in these parameters in the web form and click **"Execute"** to see the live data returned from the database, directly in your browser.
+    *   Note that this does require the use of a NocoDB auth token the green **"Authorize"** button in the top right of the Swagger interface. An auth token can be generated under your user settings. Reference the NocoDB documentation for more guidance on generating a token.
 
 This is a powerful tool for exploring the data schema and testing queries without needing to connect to the database directly. It's a great stepping stone between the simple grid view and writing complex SQL.

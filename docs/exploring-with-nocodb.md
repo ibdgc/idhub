@@ -5,11 +5,11 @@ IDhub uses a tool called **NocoDB** to provide a user-friendly, web-based interf
 This guide will walk you through the basics of navigating and exploring the data in NocoDB.
 
 !!! note
-    The NocoDB interface is for **viewing and querying** data. You should not use it to edit or delete records. All data modifications must go through the [ingestion process](curators/ingestion-summary.md).
+    The NocoDB interface is for **viewing and querying** data. You should not use it to edit or delete records. All data modifications should go through the [ingestion process](curators/ingestion-summary.md) via the appropriate data source (e.g. REDCap).
 
 ## Accessing NocoDB
 
-You will be provided with a URL and login credentials to access the IDhub NocoDB instance. After logging in, you will see a list of "Projects" or "Bases," which correspond to different datasets within IDhub.
+You will be provided with login credentials to access the IDhub NocoDB instance. After logging in, you will see a list of "Projects" or "Bases," which correspond to different datasets within IDhub.
 
 - [idhub.ibdgc.org](https://idhub.ibdgc.org)
 
@@ -26,7 +26,7 @@ On the left-hand sidebar, you will see a list of all the tables in the database.
 **Key Tables of Interest:**
 
 *   `subjects`: The central table containing the list of all subjects and their Global Subject IDs (GSIDs).
-*   `local_subject_ids`: A table that maps the local IDs from different centers to their corresponding GSID. This is useful for finding a subject's GSID if you only have their local ID.
+*   `local_subject_ids`: A table that maps the local IDs from different centers to their corresponding GSID. This table also includes IBDGC Consortium IDs. A GSID is effectively a singular, representative mapping ID of all subject IDs linked to a real-world participant.
 *   `lcl`, `genotype`, `sequence`, `olink`, `specimen`, etc.: These are the sample and assay tables, each containing data about a specific type of biological sample or experimental result.
 
 Click on any table name to open it in the main view.
@@ -37,6 +37,8 @@ When you select a table, the data is displayed in a grid (spreadsheet) view.
 
 *   **Columns**: Each column represents a field in the database table (e.g., `global_subject_id`, `sample_type`, `date_collected`).
 *   **Rows**: Each row represents a single record (e.g., one subject, one genotype record).
+
+Custom grid views can be created to establish permanant, modified representations of the standar table within the database. This can be useful is different subsets of the information in a table are needed for different audiences.
 
 ---
 
@@ -101,6 +103,7 @@ We have created a dedicated guide that covers these features in detail:
 > **[-> Read the Finding Help and Documentation Guide](./finding-help-and-documentation.md)**
 
 This guide explains:
+
 *   How to use NocoDB's global search (`Cmd+J`).
 *   How to access NocoDB's official user guides.
 *   How to use the **Swagger UI**, an interactive API browser for exploring IDhub data without writing any code.

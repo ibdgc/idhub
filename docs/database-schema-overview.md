@@ -6,7 +6,6 @@ The IDhub database is where all the validated and curated data is stored. Unders
 
 The entire database is designed around a **subject-centric model**. This means that almost every piece of data can be traced back to a unique individual, who is identified by a **Global Subject ID (GSID)**.
 
-> [!tip]
 > Learn more about the purpose and scope of GSIDs in the [What is a GSID?](./what-is-a-gsid.md) guide.
 
 
@@ -45,20 +44,20 @@ This is the most important table in the database. It is the central registry for
 *   **Purpose**: To store the master list of all subjects in IDhub.
 *   **Key Columns**:
     *   `global_subject_id` (GSID): The unique, permanent identifier for a subject across all projects and centers. **This is the primary key you will use to link data together.**
-    *   `center_id`: The ID of the center that first registered the subject.
+    *   `center_id`: The ID of the center that registered the subject.
     *   `withdrawn`: A flag indicating if the subject has withdrawn consent.
-    *   `created_by`: The source system or process that created the subject record.
+    *   `created_by`: The source system or process that created the subject record in the IDhub.
 
 ### 2. `local_subject_ids`
 
-A single subject might have many different identifiers across different studies or clinical centers (e.g., a "consortium ID", a "MRN", a "site ID"). This table connects all of those local IDs back to a single GSID.
+A single subject might have many different identifiers across different studies or data management systems (e.g., a "consortium ID", a "local ID"). This table connects all of those local IDs back to a single GSID.
 
 *   **Purpose**: To link various local identifiers to the one true Global Subject ID.
 *   **Key Columns**:
     *   `global_subject_id`: The GSID the local ID belongs to.
     *   `local_subject_id`: The original identifier from the source system (e.g., `A000101-130001`).
-    *   `identifier_type`: The type of local ID (e.g., `consortium_id`, `mrn`).
-    *   `center_id`: The center that uses this local ID.
+    *   `identifier_type`: The type of local ID (e.g., `consortium_id`, `local_id`).
+    *   `center_id`: The center that this subject was recruited by.
 
 > **How to use this table**: If you have a local ID and need to find the subject's GSID, you can search this table for the `local_subject_id` to find the corresponding `global_subject_id`.
 
@@ -75,11 +74,6 @@ These tables contain information about the specific biological samples collected
 
 *   **Contains**: Information about a subject's genotype array data.
 *   **Example Columns**: `genotype_id`, `genotyping_project`, `genotyping_barcode`.
-
-#### Example: `lcl` Table
-
-*   **Contains**: Information about Lymphoblastoid Cell Lines.
-*   **Example Columns**: `knumber`, `niddk_no`, `passage_number`, `freeze_date`, `cell_line_status`.
 
 ---
 

@@ -1,10 +1,10 @@
 ---
 # mkdocs.yml
 site_name: IDhub Documentation
-site_url: https://ibdgc.github.io/idhub/
+site_url: https://docs.idhub.ibdgc.org
 repo_url: https://github.com/ibdgc/idhub
 repo_name: ibdgc/idhub
-edit_uri: ""
+edit_uri: ''
 theme:
   name: material
   logo: assets/images/initialism.png
