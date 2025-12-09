@@ -39,14 +39,15 @@ def mock_db_connection():
     conn = MagicMock()
     cursor = MagicMock()
 
+    # The cursor's connection attribute should point back to the connection
+    cursor.connection = conn
+    conn.encoding = "UTF8"
+
     # Configure cursor behavior
     cursor.fetchone.return_value = None
     cursor.fetchall.return_value = []
     cursor.rowcount = 0
     cursor.description = None
-
-    # Mock connection encoding for psycopg2.extras.execute_values
-    cursor.connection.encoding = "UTF8"
 
     # Context manager support
     cursor.__enter__ = MagicMock(return_value=cursor)
@@ -58,30 +59,6 @@ def mock_db_connection():
     conn.__exit__ = MagicMock(return_value=False)
 
     return conn, cursor
-
-
-@pytest.fixture
-def mock_db_manager(mock_db_connection):
-    """Mock DatabaseManager with connection pool"""
-    conn, cursor = mock_db_connection
-
-    with patch("core.database.DatabaseManager.get_instance") as mock_get_instance:
-        mock_manager = MagicMock()
-        mock_get_instance.return_value = mock_manager
-
-        # Mock get_connection context manager
-        mock_manager.get_connection.return_value.__enter__.return_value = conn
-        mock_manager.get_connection.return_value.__exit__.return_value = False
-
-        # Mock get_cursor context manager
-        mock_manager.get_cursor.return_value.__enter__.return_value = cursor
-        mock_manager.get_cursor.return_value.__exit__.return_value = False
-
-        # Mock bulk_insert to avoid actual psycopg2 calls
-        mock_manager.bulk_insert = MagicMock(return_value=None)
-
-        yield mock_manager
-
 
 @pytest.fixture
 def mock_execute_values():

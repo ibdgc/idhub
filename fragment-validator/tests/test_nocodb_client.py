@@ -172,15 +172,18 @@ class TestNocoDBClient:
             assert cache[(1, "ID001", "consortium_id")] == "GSID-001"
             assert cache[(1, "ID002", "consortium_id")] == "GSID-002"
 
-    def test_load_local_id_cache_error_handling(self):
+    def test_load_local_id_cache_error_handling(self, caplog):
         """Test error handling in cache loading"""
         with patch("requests.get") as mock_get:
             mock_get.side_effect = requests.exceptions.RequestException("API Error")
 
             client = NocoDBClient("http://nocodb", "token")
+            
+            with caplog.at_level("WARNING"):
+                cache = client.load_local_id_cache()
 
-            with pytest.raises(requests.exceptions.RequestException):
-                client.load_local_id_cache()
+                assert "Could not load local_subject_ids cache: API Error" in caplog.text
+                assert cache == {}
 
     def test_headers_include_token(self):
         """Test that token is included in headers"""

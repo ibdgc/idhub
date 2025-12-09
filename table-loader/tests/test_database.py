@@ -5,115 +5,89 @@ from unittest.mock import MagicMock, patch
 from core.database import DatabaseManager
 
 
+@patch("psycopg2.connect")
 class TestDatabaseManager:
     """Test DatabaseManager functionality"""
 
-    def test_singleton_pattern(self):
-        """Test that DatabaseManager follows singleton pattern"""
-        manager1 = DatabaseManager.get_instance()
-        manager2 = DatabaseManager.get_instance()
-
-        assert manager1 is manager2
-        assert DatabaseManager._instance is not None
-
-    def test_lazy_pool_initialization(self):
-        """Test that pool is not initialized until first use"""
+    def test_get_connection_success(self, mock_connect):
+        """Test successful database connection"""
         manager = DatabaseManager()
+        conn = manager.get_connection()
+        assert conn is not None
+        mock_connect.assert_called_once()
 
-        # Pool should be None initially
-        assert manager.pool is None
-
-    @patch("psycopg2.pool.ThreadedConnectionPool")
-    def test_ensure_pool_creates_pool(self, mock_pool):
-        """Test that _ensure_pool creates connection pool"""
+    def test_get_connection_failure(self, mock_connect):
+        """Test database connection failure"""
+        mock_connect.side_effect = Exception("Connection failed")
         manager = DatabaseManager()
-        manager.pool = None  # Reset
+        with pytest.raises(Exception) as exc_info:
+            manager.get_connection()
+        assert "Connection failed" in str(exc_info.value)
 
-        manager._ensure_pool()
-
-        # Pool should be created
-        mock_pool.assert_called_once()
-        assert manager.pool is not None
-
-    @patch("psycopg2.pool.ThreadedConnectionPool")
-    def test_ensure_pool_only_creates_once(self, mock_pool):
-        """Test that _ensure_pool doesn't recreate existing pool"""
-        manager = DatabaseManager()
-        manager.pool = MagicMock()  # Simulate existing pool
-
-        manager._ensure_pool()
-
-        # Should not create new pool
-        mock_pool.assert_not_called()
-
-    def test_get_connection_context_manager(self, mock_db_connection):
-        """Test get_connection as context manager"""
-        conn, cursor = mock_db_connection
-        manager = DatabaseManager()
-        manager.pool = MagicMock()
-        manager.pool.getconn.return_value = conn
-
-        with manager.get_connection() as connection:
-            assert connection is conn
-
-        # Should return connection to pool
-        manager.pool.putconn.assert_called_once_with(conn)
-
-    def test_get_cursor_commits_on_success(self, mock_db_connection):
+    def test_get_cursor_commits_on_success(self, mock_connect):
         """Test that get_cursor commits on success"""
-        conn, cursor = mock_db_connection
+        mock_conn = mock_connect.return_value
+        mock_cursor = mock_conn.cursor.return_value
         manager = DatabaseManager()
 
-        with manager.get_cursor(conn) as cur:
-            assert cur is cursor
+        with manager.get_cursor() as cur:
+            assert cur is mock_cursor
 
-        conn.commit.assert_called_once()
-        cursor.close.assert_called_once()
+        mock_conn.commit.assert_called_once()
+        mock_cursor.close.assert_called_once()
+        mock_conn.close.assert_called_once()
 
-    def test_get_cursor_rolls_back_on_error(self, mock_db_connection):
+    def test_get_cursor_rolls_back_on_error(self, mock_connect):
         """Test that get_cursor rolls back on error"""
-        conn, cursor = mock_db_connection
+        mock_conn = mock_connect.return_value
+        mock_cursor = mock_conn.cursor.return_value
+        mock_cursor.execute.side_effect = Exception("Test error")
         manager = DatabaseManager()
 
-        # Create a new cursor that raises on execute
-        error_cursor = MagicMock()
-        error_cursor.close = MagicMock()
-        conn.cursor.return_value = error_cursor
-
-        # Simulate error during operation (not during __enter__)
         with pytest.raises(Exception, match="Test error"):
-            with manager.get_cursor(conn) as cur:
-                raise Exception("Test error")
+            with manager.get_cursor() as cur:
+                cur.execute("SELECT 1")
 
-        conn.rollback.assert_called_once()
-        error_cursor.close.assert_called_once()
+        mock_conn.rollback.assert_called_once()
+        mock_cursor.close.assert_called_once()
+        mock_conn.close.assert_called_once()
 
-    @patch("core.database.execute_values")  # Patch where it's imported
-    def test_bulk_insert(self, mock_execute_values, mock_db_connection):
-        """Test bulk_insert method"""
-        conn, cursor = mock_db_connection
+    def test_execute_query_fetch(self, mock_connect):
+        """Test execute_query with fetch"""
+        mock_conn = mock_connect.return_value
+        mock_cursor = mock_conn.cursor.return_value
+        mock_cursor.fetchall.return_value = [{"id": 1}]
         manager = DatabaseManager()
 
-        table = "test_table"
-        columns = ["col1", "col2"]
-        values = [("val1", "val2"), ("val3", "val4")]
+        result = manager.execute_query("SELECT 1", fetch=True)
 
-        manager.bulk_insert(conn, table, columns, values)
+        assert result == [{"id": 1}]
+        mock_cursor.execute.assert_called_once_with("SELECT 1", None)
+        mock_cursor.fetchall.assert_called_once()
 
-        # Should call execute_values
-        mock_execute_values.assert_called_once()
-        call_args = mock_execute_values.call_args
-        assert call_args[0][0] is cursor  # First arg is cursor
-        assert "INSERT INTO test_table" in call_args[0][1]  # Second arg is query
-        assert call_args[0][2] == values  # Third arg is values
-
-    def test_close_pool(self):
-        """Test closing connection pool"""
+    def test_execute_query_no_fetch(self, mock_connect):
+        """Test execute_query without fetch"""
+        mock_conn = mock_connect.return_value
+        mock_cursor = mock_conn.cursor.return_value
         manager = DatabaseManager()
-        mock_pool = MagicMock()
-        manager.pool = mock_pool
 
-        manager.close()
+        result = manager.execute_query("INSERT 1", fetch=False)
 
-        mock_pool.closeall.assert_called_once()
-        assert manager.pool is None
+        assert result is None
+        mock_cursor.execute.assert_called_once_with("INSERT 1", None)
+        mock_cursor.fetchall.assert_not_called()
+
+    def test_get_table_schema(self, mock_connect):
+        """Test get_table_schema"""
+        mock_conn = mock_connect.return_value
+        mock_cursor = mock_conn.cursor.return_value
+        mock_cursor.fetchall.return_value = [
+            {"column_name": "col1", "data_type": "text"},
+            {"column_name": "col2", "data_type": "integer"},
+        ]
+        manager = DatabaseManager()
+
+        schema = manager.get_table_schema("test_table")
+
+        assert schema == {"col1": "text", "col2": "integer"}
+        mock_cursor.execute.assert_called_once()

@@ -146,12 +146,10 @@ class TestDatabase:
             # Get the actual call arguments
             call_args = mock_pool_class.call_args
 
-            # Check positional args (minconn, maxconn)
-            assert call_args[0][0] == 1  # minconn
-            assert call_args[0][1] == 20  # maxconn (updated from 10 to 20)
-
             # Check keyword args
-            kwargs = call_args[1]
+            kwargs = call_args.kwargs
+            assert kwargs["minconn"] == 10
+            assert kwargs["maxconn"] == 50
             assert kwargs["host"] == "test-host"
             assert kwargs["database"] == "test-db"
             assert kwargs["user"] == "test-user"

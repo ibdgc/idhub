@@ -1,3 +1,4 @@
+# fragment-validator/tests/conftest.py
 import io
 import json
 from unittest.mock import MagicMock, Mock, patch
@@ -14,9 +15,9 @@ from services import (
 )
 
 
-# ============================================================================
+# ============================================================================ 
 # MOCK CLIENT FIXTURES
-# ============================================================================
+# ============================================================================ 
 @pytest.fixture
 def mock_s3_client():
     """Mock S3 client"""
@@ -173,8 +174,16 @@ def mock_nocodb_client():
 
     mock.get_table_metadata.side_effect = get_table_metadata
 
+    def get_all_records(table_name):
+        if table_name == "centers":
+            return [
+                {"center_id": 1, "name": "MSSM"},
+                {"center_id": 2, "name": "Cedars-Sinai"},
+            ]
+        return []
+
     # Mock get_all_records for local_id cache
-    mock.get_all_records.return_value = []
+    mock.get_all_records.side_effect = get_all_records
 
     # Mock table_id
     mock.get_table_id.return_value = "table_123"
@@ -202,6 +211,7 @@ def mock_gsid_client():
                         "gsid": f"GSID-{first_identifier}",
                         "action": "link_existing",
                         "identifiers_linked": len(req["identifiers"]),
+                        "identifiers": req["identifiers"],
                     }
                 )
             else:
@@ -211,6 +221,7 @@ def mock_gsid_client():
                         "gsid": f"GSID-NEW-{first_identifier}",
                         "action": "create_new",
                         "identifiers_linked": len(req["identifiers"]),
+                        "identifiers": req["identifiers"],
                     }
                 )
         return results
@@ -219,27 +230,10 @@ def mock_gsid_client():
     return mock
 
 
-@pytest.fixture(autouse=True)
-def mock_db_connection():
-    """Mock database connection for CenterResolver"""
-    with patch("services.center_resolver.db_connection") as mock_db_conn_context:
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
-        # Simulate loading centers into the cache
-        mock_cursor.fetchall.return_value = [
-            {"center_id": 1, "name": "MSSM"},
-            {"center_id": 2, "name": "Cedars-Sinai"},
-        ]
-        mock_cursor.__enter__.return_value = mock_cursor
-        mock_conn.cursor.return_value = mock_cursor
-        mock_db_conn_context.return_value = mock_conn
-        yield mock_db_conn_context
-
-
 @pytest.fixture
-def center_resolver(mock_db_connection):
-    """Create a CenterResolver instance with a mocked DB connection."""
-    return CenterResolver()
+def center_resolver(mock_nocodb_client):
+    """Create a CenterResolver instance with a mocked NocoDB client."""
+    return CenterResolver(mock_nocodb_client)
 
 
 @pytest.fixture
@@ -253,3 +247,70 @@ def validator(
     subject_id_resolver = SubjectIDResolver(mock_gsid_client, center_resolver)
 
     return FragmentValidator(s3_client, mock_nocodb_client, subject_id_resolver)
+@pytest.fixture
+def sample_blood_data():
+    """Sample blood data as a DataFrame"""
+    data = {
+        "consortium_id": ["IBDGC001", "IBDGC002", "IBDGC003"],
+        "sample_id": ["BS-001", "BS-002", "BS-003"],
+        "sample_type": ["Blood", "Blood", "Blood"],
+        "date_collected": ["2024-01-01", "2024-01-02", "2024-01-03"],
+    }
+    return pd.DataFrame(data)
+
+
+@pytest.fixture
+def blood_mapping_config():
+    """Sample mapping config for blood data"""
+    return {
+        "field_mapping": {
+            "sample_id": "sample_id",
+            "sample_type": "sample_type",
+            "date_collected": "date_collected",
+        },
+        "subject_id_candidates": ["consortium_id"],
+        "center_id_field": None,
+        "default_center_id": 0,
+    }
+
+@pytest.fixture
+def sample_lcl_data():
+    """Sample LCL data as a DataFrame"""
+    data = {
+        "knumber": ["K123", "K456"],
+        "niddk_no": ["NIDDK-1", "NIDDK-2"],
+    }
+    return pd.DataFrame(data)
+
+@pytest.fixture
+def lcl_mapping_config():
+    """Sample mapping config for LCL data"""
+    return {
+        "field_mapping": {
+            "knumber": "knumber",
+            "niddk_no": "niddk_no",
+        },
+        "subject_id_candidates": ["knumber", "niddk_no"],
+    }
+
+@pytest.fixture
+def sample_dna_data():
+    """Sample DNA data as a DataFrame"""
+    data = {
+        "sample_id": ["DNA-001", "DNA-002"],
+        "concentration": [10.5, 20.2],
+        "center": ["MSSM", "Cedars-Sinai"],
+    }
+    return pd.DataFrame(data)
+
+@pytest.fixture
+def dna_mapping_config():
+    """Sample mapping config for DNA data"""
+    return {
+        "field_mapping": {
+            "sample_id": "sample_id",
+            "concentration": "concentration",
+        },
+        "subject_id_candidates": ["sample_id"],
+        "center_id_field": "center",
+    }

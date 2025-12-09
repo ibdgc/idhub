@@ -1,15 +1,27 @@
 ---
 version: '3.8'
 services:
-  test-gsid:
+  test_db:
+    image: postgres:15-alpine
+    container_name: test_db
+    environment:
+      - POSTGRES_DB=test_db
+      - POSTGRES_USER=test_user
+      - POSTGRES_PASSWORD=test_pass
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d test_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  gsid-service:
     build:
       context: ./gsid-service
       dockerfile: Dockerfile.test
-    container_name: test_gsid
+    container_name: gsid-service-test
     volumes: [./gsid-service:/app]
     environment:
       - GSID_API_KEY=test-api-key
-      - DB_HOST=localhost
+      - DB_HOST=test_db
       - DB_NAME=test_db
       - DB_USER=test_user
       - DB_PASSWORD=test_pass
@@ -17,28 +29,34 @@ services:
     command: >
       sh -c "pytest -v  --cov=.  --cov-report=term-missing  --cov-report=html:htmlcov  --cov-report=xml:test-reports/coverage.xml  --junitxml=test-reports/junit.xml
       --html=test-reports/report.html  --self-contained-html"
-  test-redcap:
+    depends_on:
+      test_db:
+        condition: service_healthy
+  redcap-pipeline:
     build:
       context: ./redcap-pipeline
       dockerfile: Dockerfile.test
-    container_name: test_redcap
+    container_name: redcap-pipeline-test
     volumes: [./redcap-pipeline:/app]
     environment:
       - REDCAP_API_URL=https://test.redcap.edu/api/
       - REDCAP_API_TOKEN=test_token
       - GSID_SERVICE_URL=http://localhost:8000
-      - DB_HOST=localhost
+      - DB_HOST=test_db
       - DB_NAME=test_db
       - DB_USER=test_user
       - DB_PASSWORD=test_pass
     command: >
       sh -c "pytest -v  --cov=.  --cov-report=term-missing  --cov-report=html:htmlcov  --cov-report=xml:test-reports/coverage.xml  --junitxml=test-reports/junit.xml
       --html=test-reports/report.html  --self-contained-html"
-  test-validator:
+    depends_on:
+      test_db:
+        condition: service_healthy
+  fragment-validator:
     build:
       context: ./fragment-validator
       dockerfile: Dockerfile.test
-    container_name: test_validator
+    container_name: fragment-validator-test
     volumes: [./fragment-validator:/app]
     environment:
       - AWS_ACCESS_KEY_ID=test_key
@@ -48,14 +66,14 @@ services:
     command: >
       sh -c "pytest -v  --cov=.  --cov-report=term-missing  --cov-report=html:htmlcov  --cov-report=xml:test-reports/coverage.xml  --junitxml=test-reports/junit.xml
       --html=test-reports/report.html  --self-contained-html"
-  test-loader:
+  table-loader:
     build:
       context: ./table-loader
       dockerfile: Dockerfile.test
-    container_name: test_loader
+    container_name: table-loader-test
     volumes: [./table-loader:/app]
     environment:
-      - DB_HOST=localhost
+      - DB_HOST=test_db
       - DB_NAME=test_db
       - DB_USER=test_user
       - DB_PASSWORD=test_pass
@@ -65,3 +83,17 @@ services:
     command: >-
       sh -c "pytest -v  --cov=.  --cov-report=term-missing  --cov-report=html:htmlcov  --cov-report=xml:test-reports/coverage.xml  --junitxml=test-reports/junit.xml
       --html=test-reports/report.html  --self-contained-html"
+    depends_on:
+      test_db:
+        condition: service_healthy
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: root-tests
+    volumes: [./:/app]
+    command: >
+      sh -c "pytest -v"
+networks:
+  default:
+    name: idhub_test_network

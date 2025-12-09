@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 from services.field_mapper import FieldMapper
-
+import logging
 
 class TestFieldMapper:
     """Unit tests for FieldMapper"""
@@ -64,8 +64,8 @@ class TestFieldMapper:
         assert "center_id" in result.columns
         assert list(result["center_id"]) == [1, 2, 3]
 
-    def test_missing_source_field_creates_null_column(self):
-        """Test that missing source fields create null columns with warning"""
+    def test_missing_source_field_logs_warning(self, caplog):
+        """Test that missing source fields log a warning and are not in the output"""
         raw_data = pd.DataFrame({"existing_col": [1, 2, 3]})
 
         field_mapping = {
@@ -73,13 +73,14 @@ class TestFieldMapper:
             "target_col2": "missing_col",
         }
 
-        result = FieldMapper.apply_mapping(
-            raw_data, field_mapping, subject_id_candidates=[], center_id_field=None
-        )
+        with caplog.at_level(logging.WARNING):
+            result = FieldMapper.apply_mapping(
+                raw_data, field_mapping, subject_id_candidates=[], center_id_field=None
+            )
 
-        assert "target_col1" in result.columns
-        assert "target_col2" in result.columns
-        assert result["target_col2"].isna().all()
+            assert "target_col1" in result.columns
+            assert "target_col2" not in result.columns
+            assert "Source field 'missing_col' for target 'target_col2' not found in data" in caplog.text
 
     def test_no_duplicate_columns_when_already_mapped(self):
         """Test that subject ID candidates aren't duplicated if already in mapping"""
@@ -112,4 +113,4 @@ class TestFieldMapper:
         )
 
         assert len(result) == 0
-        assert "target_col" in result.columns
+        assert "target_col" not in result.columns

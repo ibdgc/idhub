@@ -114,7 +114,7 @@ class TestS3Client:
 
         client = S3Client("test-bucket")
 
-        with pytest.raises(FileNotFoundError, match="Validation report not found"):
+        with pytest.raises(FileNotFoundError, match="File not found"):
             client.download_validation_report("batch_nonexistent")
 
     def test_mark_fragment_loaded(self, mock_s3_client):

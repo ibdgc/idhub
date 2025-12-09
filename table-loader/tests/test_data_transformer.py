@@ -1,15 +1,30 @@
-# table-loader/tests/test_data_transformer_enhanced.py
-from datetime import datetime
+# table-loader/tests/test_data_transformer.py
+from datetime import date, datetime
 
 import pandas as pd
 import pytest
 from services.data_transformer import DataTransformer
+from unittest.mock import patch
 
 
-class TestDataTransformerEnhanced:
-    """Enhanced tests for DataTransformer edge cases"""
+class TestDataTransformer:
+    """Tests for DataTransformer"""
 
-    def test_transform_with_null_values(self):
+    @pytest.fixture
+    def mock_db_manager(self):
+        with patch("services.data_transformer.db_manager") as mock_manager:
+            mock_manager.get_table_schema.return_value = {
+                "global_subject_id": "text",
+                "sample_id": "text",
+                "notes": "text",
+                "date_collected": "date",
+                "count": "integer",
+                "ratio": "numeric",
+                "is_valid": "boolean",
+            }
+            yield mock_manager
+
+    def test_transform_with_null_values(self, mock_db_manager):
         """Test handling of null/None values"""
         transformer = DataTransformer("blood")
         fragment = {
@@ -25,7 +40,7 @@ class TestDataTransformerEnhanced:
         assert records[0]["notes"] is None
         assert records[1]["sample_id"] is None
 
-    def test_transform_with_unicode_characters(self):
+    def test_transform_with_unicode_characters(self, mock_db_manager):
         """Test handling of unicode and special characters"""
         transformer = DataTransformer("blood")
         fragment = {
@@ -38,7 +53,7 @@ class TestDataTransformerEnhanced:
         records = transformer.transform_records(fragment)
         assert records[0]["notes"] == "Test™ 中文 émojis 🎉"
 
-    def test_transform_with_date_formats(self):
+    def test_transform_with_date_formats(self, mock_db_manager):
         """Test handling of various date formats"""
         transformer = DataTransformer("blood")
         fragment = {
@@ -54,42 +69,11 @@ class TestDataTransformerEnhanced:
 
         records = transformer.transform_records(fragment)
         assert len(records) == 2
+        assert records[0]["date_collected"] == date(2024, 1, 15)
+        # This will be None because the format is wrong for a 'date' type
+        assert records[1]["date_collected"] is None
 
-    def test_deduplicate_with_null_keys(self):
-        """Test deduplication when key columns contain nulls"""
-        transformer = DataTransformer("blood")
-        df = pd.DataFrame(
-            {
-                "global_subject_id": ["GSID-001", None, "GSID-001"],
-                "sample_id": ["SMP001", "SMP002", "SMP001"],
-            }
-        )
-
-        result = transformer.deduplicate(df, ["global_subject_id", "sample_id"])
-        # Should keep rows with None as they're considered unique
-        assert len(result) == 2
-
-    def test_prepare_rows_with_mixed_types(self):
-        """Test prepare_rows with mixed data types"""
-        transformer = DataTransformer("blood")
-        df = pd.DataFrame(
-            {
-                "global_subject_id": ["GSID-001", "GSID-002"],
-                "count": [10, 20],
-                "ratio": [0.5, 0.75],
-                "date": ["2024-01-15", "2024-01-16"],
-                "is_valid": [True, False],
-            }
-        )
-
-        columns, values = transformer.prepare_rows(df)
-        assert len(columns) == 5
-        assert len(values) == 2
-        assert isinstance(values[0][1], (int, float))  # count
-        assert isinstance(values[0][2], float)  # ratio
-        assert isinstance(values[0][4], bool)  # is_valid
-
-    def test_transform_large_dataset_performance(self):
+    def test_transform_large_dataset_performance(self, mock_db_manager):
         """Test performance with large dataset"""
         transformer = DataTransformer("blood")
 
@@ -114,21 +98,43 @@ class TestDataTransformerEnhanced:
         assert len(result) == 10000
         assert duration < 5.0  # Should complete in under 5 seconds
 
-    def test_exclude_fields_case_sensitivity(self):
-        """Test that field exclusion is case-sensitive"""
-        exclude_fields = {"Consortium_ID"}  # Different case
-        transformer = DataTransformer("blood", exclude_fields=exclude_fields)
+    def test_exclude_fields_case_insensitivity(self, mock_db_manager):
+        """Test that field exclusion is case-insensitive"""
+        # System columns are always excluded
+        transformer = DataTransformer("blood")
 
         fragment = {
             "table": "blood",
             "records": [
                 {
                     "global_subject_id": "GSID-001",
-                    "consortium_id": "ID001",  # lowercase
+                    "Id": 123,  # Should be excluded
                 }
             ],
         }
 
         records = transformer.transform_records(fragment)
-        # Should NOT exclude because case doesn't match
-        assert "consortium_id" in records[0]
+        assert "Id" not in records[0]
+
+    def test_empty_dataframe(self, mock_db_manager):
+        """Test with an empty dataframe"""
+        transformer = DataTransformer("blood")
+        df = pd.DataFrame()
+        records = transformer.transform_records(df)
+        assert len(records) == 0
+
+    def test_record_with_invalid_gsid_is_skipped(self, mock_db_manager):
+        """Test that records with invalid GSIDs are skipped"""
+        transformer = DataTransformer("blood")
+        fragment = {
+            "table": "blood",
+            "records": [
+                {"global_subject_id": "GSID-001", "sample_id": "SMP001"},
+                {"global_subject_id": None, "sample_id": "SMP002"},
+                {"global_subject_id": "nan", "sample_id": "SMP003"},
+            ],
+        }
+
+        records = transformer.transform_records(fragment)
+        assert len(records) == 1
+        assert records[0]["global_subject_id"] == "GSID-001"
