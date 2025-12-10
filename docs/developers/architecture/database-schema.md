@@ -42,41 +42,38 @@ erDiagram
     subjects ||--|{ local_subject_ids : "has"
 ```
 
-### `subjects`
+!!! abstract "Table: `subjects`"
+    The central registry for every individual in the biobank.
 
-The central registry for every individual in the biobank.
+    | Column              | Type      | Description                               |
+    | ------------------- | --------- | ----------------------------------------- |
+    | `global_subject_id` | `VARCHAR` | **Primary Key**: The unique ID for a subject. |
+    | `center_id`         | `INT`     | Foreign key to the `centers` table.       |
+    | `registration_year` | `DATE`    | Year the subject was registered.          |
+    | `control`           | `BOOLEAN` | Flag indicating if the subject is a control. |
+    | `withdrawn`         | `BOOLEAN` | Flag indicating if the subject has withdrawn. |
+    | `family_id`         | `VARCHAR` | Foreign key to the `family` table.        |
+    | `created_by`        | `VARCHAR` | Source system that created the record.    |
 
-| Column              | Type      | Description                               |
-| ------------------- | --------- | ----------------------------------------- |
-| `global_subject_id` | `VARCHAR` | **Primary Key**: The unique ID for a subject. |
-| `center_id`         | `INT`     | Foreign key to the `centers` table.       |
-| `registration_year` | `DATE`    | Year the subject was registered.          |
-| `control`           | `BOOLEAN` | Flag indicating if the subject is a control. |
-| `withdrawn`         | `BOOLEAN` | Flag indicating if the subject has withdrawn. |
-| `family_id`         | `VARCHAR` | Foreign key to the `family` table.        |
-| `created_by`        | `VARCHAR` | Source system that created the record.    |
+!!! abstract "Table: `centers`"
+    Defines the participating medical centers or institutions.
 
-### `centers`
+    | Column         | Type      | Description                          |
+    | -------------- | --------- | ------------------------------------ |
+    | `center_id`    | `SERIAL`  | **Primary Key**: Unique center ID.   |
+    | `name`         | `VARCHAR` | Full name of the center.             |
+    | `investigator` | `VARCHAR` | Principal investigator at the center.|
+    | `consortium`   | `VARCHAR` | Research consortium.                 |
 
-Defines the participating medical centers or institutions.
+!!! abstract "Table: `local_subject_ids`"
+    Maps the various local identifiers from different centers to a single Global Subject ID (GSID), enabling a unified subject view.
 
-| Column         | Type      | Description                          |
-| -------------- | --------- | ------------------------------------ |
-| `center_id`    | `SERIAL`  | **Primary Key**: Unique center ID.   |
-| `name`         | `VARCHAR` | Full name of the center.             |
-| `investigator` | `VARCHAR` | Principal investigator at the center.|
-| `consortium`   | `VARCHAR` | Research consortium.                 |
-
-### `local_subject_ids`
-
-Maps the various local identifiers from different centers to a single Global Subject ID (GSID), enabling a unified subject view.
-
-| Column             | Type      | Description                             |
-| ------------------ | --------- | --------------------------------------- |
-| `center_id`        | `INT`     | **Composite Key**: Center ID.           |
-| `local_subject_id` | `VARCHAR` | **Composite Key**: The ID from the source system. |
-| `identifier_type`  | `VARCHAR` | **Composite Key**: The type of local ID.  |
-| `global_subject_id`| `VARCHAR` | Foreign key to the `subjects` table.    |
+    | Column             | Type      | Description                             |
+    | ------------------ | --------- | --------------------------------------- |
+    | `center_id`        | `INT`     | **Composite Key**: Center ID.           |
+    | `local_subject_id` | `VARCHAR` | **Composite Key**: The ID from the source system. |
+    | `identifier_type`  | `VARCHAR` | **Composite Key**: The type of local ID.  |
+    | `global_subject_id`| `VARCHAR` | Foreign key to the `subjects` table.    |
 
 ## Sample & Assay Tables
 
@@ -84,99 +81,124 @@ These tables store information about the different types of biological samples a
 
 ```mermaid
 erDiagram
+    subjects ||--o{ local_subject_ids : has
+    subjects ||--o{ lcl : has
+    subjects ||--o{ genotype : "has"
+    subjects ||--o{ sequence : "has"
+    subjects ||--o{ specimen : has
+
     subjects {
-        varchar global_subject_id PK
+        uuid id PK
+        string gsid UK
+        string sex
+        string diagnosis
+        timestamp created_at
     }
-    specimen {
-        varchar sample_id PK
-        varchar global_subject_id FK
-        varchar sample_type
+
+    local_subject_ids {
+        uuid id PK
+        uuid subject_id FK
+        int center_id
+        string local_subject_id
+        string identifier_type
+        timestamp created_at
     }
-    genotype {
-        text genotype_id PK
-        varchar global_subject_id FK
-        text genotyping_project
-    }
-    sequence {
-        text sample_id PK
-        varchar global_subject_id FK
-        varchar sample_type
-    }
+
     lcl {
-        int niddk_no PK
-        varchar global_subject_id FK
-        varchar knumber
+        uuid id PK
+        uuid subject_id FK
+        string global_subject_id
+        string niddk_no
+        string knumber
+        int passage_number
+        string cell_line_status
+        timestamp created_at
     }
-    enteroid {
-        varchar sample_id PK
-        varchar global_subject_id FK
+
+    genotype {
+        uuid id PK
+        uuid subject_id FK
+        string global_subject_id
+        string genotype_id
+        string genotyping_project
+        string genotyping_barcode
+        timestamp created_at
     }
-    olink {
-        varchar sample_id PK
-        varchar global_subject_id FK
+
+    sequence {
+        uuid id PK
+        uuid subject_id FK
+        string global_subject_id
+        string sample_id
+        string sample_type
+        string vcf_sample_id
+        timestamp created_at
     }
-    subjects ||--|{ specimen : "has"
-    subjects ||--|{ genotype : "has"
-    subjects ||--|{ sequence : "has"
-    subjects ||--|{ lcl : "has"
-    subjects ||--|{ enteroid : "has"
-    subjects ||--|{ olink : "has"
+
+    specimen {
+        uuid id PK
+        string sample_id UK
+        string sample_type
+        string storage_location
+        timestamp collection_date
+        timestamp created_at
+    }
 ```
 
-### `specimen`
-General-purpose specimen tracking.
+!!! abstract "Table: `specimen`"
+    General-purpose specimen tracking.
 
-| Column              | Type      | Description                         |
-| ------------------- | --------- | ----------------------------------- |
-| `sample_id`         | `VARCHAR` | **Primary Key**: Unique sample ID.    |
-| `global_subject_id` | `VARCHAR` | Foreign key to the `subjects` table.  |
-| `sample_type`       | `VARCHAR` | The type of specimen collected.       |
-| `project`           | `VARCHAR` | The project associated with the sample. |
+    | Column              | Type      | Description                         |
+    | ------------------- | --------- | ----------------------------------- |
+    | `sample_id`         | `VARCHAR` | **Primary Key**: Unique sample ID.    |
+    | `global_subject_id` | `VARCHAR` | Foreign key to the `subjects` table.  |
+    | `sample_type`       | `VARCHAR` | The type of specimen collected.       |
+    | `project`           | `VARCHAR` | The project associated with the sample. |
 
-### `genotype`
-Stores genotype data.
+!!! abstract "Table: `genotype`"
+    Stores genotype data.
 
-| Column               | Type      | Description                         |
-| -------------------- | --------- | ----------------------------------- |
-| `genotype_id`        | `TEXT`    | **Primary Key**: Unique genotype ID.  |
-| `global_subject_id`  | `VARCHAR` | Foreign key to the `subjects` table.  |
-| `genotyping_project` | `TEXT`    | The project that performed genotyping.|
-| `genotyping_barcode` | `TEXT`    | The barcode of the genotyping array.  |
+    | Column               | Type      | Description                         |
+    | -------------------- | --------- | ----------------------------------- |
+    | `genotype_id`        | `TEXT`    | **Primary Key**: Unique genotype ID.  |
+    | `global_subject_id`  | `VARCHAR` | Foreign key to the `subjects` table.  |
+    | `genotyping_project` | `TEXT`    | The project that performed genotyping.|
+    | `genotyping_barcode` | `TEXT`    | The barcode of the genotyping array.  |
 
-### `sequence`
-Stores sequencing data.
+!!! abstract "Table: `sequence`"
+    Stores sequencing data.
 
-| Column              | Type      | Description                           |
-| ------------------- | --------- | ------------------------------------- |
-| `sample_id`         | `TEXT`    | **Primary Key**: Unique sample ID.      |
-| `global_subject_id` | `VARCHAR` | Foreign key to the `subjects` table.    |
-| `sample_type`       | `VARCHAR` | The type of sample sequenced.         |
-| `vcf_sample_id`     | `VARCHAR` | The sample ID found within the VCF file.|
+    | Column              | Type      | Description                           |
+    | ------------------- | --------- | ------------------------------------- |
+    | `sample_id`         | `TEXT`    | **Primary Key**: Unique sample ID.      |
+    | `global_subject_id` | `VARCHAR` | Foreign key to the `subjects` table.    |
+    | `sample_type`       | `VARCHAR` | The type of sample sequenced.         |
+    | `vcf_sample_id`     | `VARCHAR` | The sample ID found within the VCF file.|
 
-### `lcl`
-Lymphoblastoid cell line tracking.
+!!! abstract "Table: `lcl`"
+    Lymphoblastoid cell line tracking.
 
-| Column              | Type      | Description                         |
-| ------------------- | --------- | ----------------------------------- |
-| `niddk_no`          | `INT`     | **Primary Key**: NIDDK number.        |
-| `global_subject_id` | `VARCHAR` | Foreign key to the `subjects` table.  |
-| `knumber`           | `VARCHAR` | K-number identifier for the cell line.|
+    | Column              | Type      | Description                         |
+    | ------------------- | --------- | ----------------------------------- |
+    | `niddk_no`          | `INT`     | **Primary Key**: NIDDK number.        |
+    | `global_subject_id` | `VARCHAR` | Foreign key to the `subjects` table.  |
+    | `knumber`           | `VARCHAR` | K-number identifier for the cell line.|
 
-### `enteroid`
-Enteroid culture tracking.
+!!! abstract "Table: `enteroid`"
+    Enteroid culture tracking.
 
-| Column              | Type      | Description                         |
-| ------------------- | --------- | ----------------------------------- |
-| `sample_id`         | `VARCHAR` | **Primary Key**: Unique sample ID.    |
-| `global_subject_id` | `VARCHAR` | Foreign key to the `subjects` table.  |
+    | Column              | Type      | Description                         |
+    | ------------------- | --------- | ----------------------------------- |
+    | `sample_id`         | `VARCHAR` | **Primary Key**: Unique sample ID.    |
+    | `global_subject_id` | `VARCHAR` | Foreign key to the `subjects` table.  |
 
-### `olink`
-Olink proteomics data.
+!!! abstract "Table: `olink`"
+    Olink proteomics data.
 
-| Column              | Type      | Description                         |
-| ------------------- | --------- | ----------------------------------- |
-| `sample_id`         | `VARCHAR` | **Primary Key**: Unique sample ID.    |
-| `global_subject_id` | `VARCHAR` | Foreign key to the `subjects` table.  |
+    | Column              | Type      | Description                         |
+    | ------------------- | --------- | ----------------------------------- |
+    | `sample_id`         | `VARCHAR` | **Primary Key**: Unique sample ID.    |
+    | `global_subject_id` | `VARCHAR` | Foreign key to the `subjects` table.  |
 
 ## System & Audit Tables
 
@@ -214,8 +236,13 @@ erDiagram
     identity_resolutions }|--|| subjects : "resolves to"
 ```
 
--   **`identity_resolutions`**: Logs every attempt to resolve a local ID to a GSID, including conflicts.
--   **`conflict_resolutions`**: Tracks data conflicts (e.g., `center_mismatch`) that require manual review.
--   **`fragment_resolutions`**: Tracks the status of each data file (fragment) loaded into the system.
--   **`data_change_audit`**: Logs every single `INSERT` and `UPDATE` operation, providing a complete history of data changes.
--   **`sample_resolutions`**: Tracks the resolution of sample IDs to subjects.
+!!! abstract "Table: `identity_resolutions`"
+    Logs every attempt to resolve a local ID to a GSID, including conflicts.
+!!! abstract "Table: `conflict_resolutions`"
+    Tracks data conflicts (e.g., `center_mismatch`) that require manual review.
+!!! abstract "Table: `fragment_resolutions`"
+    Tracks the status of each data file (fragment) loaded into the system.
+!!! abstract "Table: `data_change_audit`"
+    Logs every single `INSERT` and `UPDATE` operation, providing a complete history of data changes.
+!!! abstract "Table: `sample_resolutions`"
+    Tracks the resolution of sample IDs to subjects.

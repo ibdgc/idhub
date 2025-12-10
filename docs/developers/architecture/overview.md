@@ -6,43 +6,39 @@ The IBDGC Integrated Data Hub (IDhub) is a microservices-based data integration 
 
 ## Architecture Principles
 
-### 1. **Separation of Concerns**
+!!! abstract "1. Separation of Concerns"
+    Each service has a single, well-defined responsibility:
 
-Each service has a single, well-defined responsibility:
+    -   **GSID Service**: Subject identity management
+    -   **REDCap Pipeline**: Data extraction and transformation
+    -   **Fragment Validator**: Data quality validation
+    -   **Table Loader**: Database persistence
+    -   **Nginx**: Routing and SSL termination
 
--   **GSID Service**: Subject identity management
--   **REDCap Pipeline**: Data extraction and transformation
--   **Fragment Validator**: Data quality validation
--   **Table Loader**: Database persistence
--   **Nginx**: Routing and SSL termination
+!!! abstract "2. Staged Data Pipeline"
+    Data flows through distinct stages with validation gates:
 
-### 2. **Staged Data Pipeline**
+    ```
+    Source → Extract → Stage → Validate → Queue → Load → Database
+    ```
 
-Data flows through distinct stages with validation gates:
+    Each stage can fail independently without affecting others, enabling retry logic and error recovery.
 
-```
-Source → Extract → Stage → Validate → Queue → Load → Database
-```
+!!! abstract "3. Immutable Staging"
+    Data fragments in S3 are immutable once created, providing:
 
-Each stage can fail independently without affecting others, enabling retry logic and error recovery.
+    -   Complete audit trail
+    -   Ability to replay pipelines
+    -   Source of truth for debugging
+    -   Disaster recovery capability
 
-### 3. **Immutable Staging**
+!!! abstract "4. Natural Key Strategy"
+    Records are identified by business keys (natural keys) rather than database IDs, enabling:
 
-Data fragments in S3 are immutable once created, providing:
-
--   Complete audit trail
--   Ability to replay pipelines
--   Source of truth for debugging
--   Disaster recovery capability
-
-### 4. **Natural Key Strategy**
-
-Records are identified by business keys (natural keys) rather than database IDs, enabling:
-
--   Idempotent operations
--   Cross-system reconciliation
--   Intelligent upserts
--   Data deduplication
+    -   Idempotent operations
+    -   Cross-system reconciliation
+    -   Intelligent upserts
+    -   Data deduplication
 
 ## High-Level Architecture
 
@@ -119,503 +115,484 @@ graph TB
 
 ## Component Architecture
 
-### GSID Service
+!!! abstract "GSID Service"
+    **Purpose**: Centralized global subject ID management
 
-**Purpose**: Centralized global subject ID management
+    **Technology**: FastAPI (Python), PostgreSQL
 
-**Technology**: FastAPI (Python), PostgreSQL
+    **Key Features**:
 
-**Key Features**:
+    -   GSID generation (Custom format)
+    -   Local ID to GSID resolution
+    -   Fuzzy matching for subject identification
+    -   RESTful API with authentication
 
--   GSID generation (Custom format)
--   Local ID to GSID resolution
--   Fuzzy matching for subject identification
--   RESTful API with authentication
+    ```mermaid
+    graph LR
+        A[Client Request] --> B[FastAPI Router]
+        B --> C{Endpoint}
+        C -->|/generate| D[Generate GSID]
+        C -->|/resolve| E[Resolve Local ID]
+        C -->|/batch| F[Batch Operations]
 
-```mermaid
-graph LR
-    A[Client Request] --> B[FastAPI Router]
-    B --> C{Endpoint}
-    C -->|/generate| D[Generate GSID]
-    C -->|/resolve| E[Resolve Local ID]
-    C -->|/batch| F[Batch Operations]
+        D --> G[Database]
+        E --> G
+        F --> G
 
-    D --> G[Database]
-    E --> G
-    F --> G
+        G --> H[Return Response]
+    ```
 
-    G --> H[Return Response]
-```
+    **Database Tables**:
 
-**Database Tables**:
+    -   `subjects`: Core subject records with GSID
+    -   `local_subject_ids`: Mapping of local IDs to GSIDs
 
--   `subjects`: Core subject records with GSID
--   `local_subject_ids`: Mapping of local IDs to GSIDs
+    [Detailed documentation →](../services/gsid-service.md)
 
-[Detailed documentation →](../services/gsid-service.md)
+!!! abstract "REDCap Pipeline"
+    **Purpose**: Extract and transform data from REDCap projects
 
-### REDCap Pipeline
+    **Technology**: Python, REDCap API, S3
 
-**Purpose**: Extract and transform data from REDCap projects
+    **Key Features**:
 
-**Technology**: Python, REDCap API, S3
+    -   Multi-project support
+    -   Incremental extraction
+    -   Field mapping and transformation
+    -   Fragment generation
 
-**Key Features**:
+    ```mermaid
+    graph TB
+        A[REDCap API] --> B[Extract Records]
+        B --> C[Apply Field Mappings]
+        C --> D[Transform Data]
+        D --> E[Generate Fragments]
+        E --> F[Upload to S3]
+        F --> G[Update Metadata]
+    ```
 
--   Multi-project support
--   Incremental extraction
--   Field mapping and transformation
--   Fragment generation
+    **Configuration**:
 
-```mermaid
-graph TB
-    A[REDCap API] --> B[Extract Records]
-    B --> C[Apply Field Mappings]
-    C --> D[Transform Data]
-    D --> E[Generate Fragments]
-    E --> F[Upload to S3]
-    F --> G[Update Metadata]
-```
+    -   `config/projects.json`: Project definitions
+    -   `config/*_field_mappings.json`: Field mapping rules
 
-**Configuration**:
+    [Detailed documentation →](../services/redcap-pipeline.md)
 
--   `config/projects.json`: Project definitions
--   `config/*_field_mappings.json`: Field mapping rules
+!!! abstract "Fragment Validator"
+    **Purpose**: Validate data quality before database loading
 
-[Detailed documentation →](../services/redcap-pipeline.md)
+    **Technology**: Python, S3, PostgreSQL
 
-### Fragment Validator
+    **Key Features**:
 
-**Purpose**: Validate data quality before database loading
+    -   Schema validation
+    -   GSID resolution
+    -   Business rule validation
+    -   Duplicate detection
 
-**Technology**: Python, S3, PostgreSQL
+    ```mermaid
+    graph TB
+        A[S3 Fragment] --> B[Load Fragment]
+        B --> C[Schema Validation]
+        C --> D{Valid?}
+        D -->|No| E[Reject]
+        D -->|Yes| F[Resolve GSID]
+        F --> G{GSID Found?}
+        G -->|No| H[Create Subject]
+        G -->|Yes| I[Continue]
+        H --> I
+        I --> J[Business Rules]
+        J --> K{Valid?}
+        K -->|No| E
+        K -->|Yes| L[Queue for Loading]
 
-**Key Features**:
+        E --> M[Log Error]
+        L --> N[Validation Queue]
+    ```
 
--   Schema validation
--   GSID resolution
--   Business rule validation
--   Duplicate detection
+    **Validation Steps**:
 
-```mermaid
-graph TB
-    A[S3 Fragment] --> B[Load Fragment]
-    B --> C[Schema Validation]
-    C --> D{Valid?}
-    D -->|No| E[Reject]
-    D -->|Yes| F[Resolve GSID]
-    F --> G{GSID Found?}
-    G -->|No| H[Create Subject]
-    G -->|Yes| I[Continue]
-    H --> I
-    I --> J[Business Rules]
-    J --> K{Valid?}
-    K -->|No| E
-    K -->|Yes| L[Queue for Loading]
+    1.  **Schema Validation**: Field types, required fields
+    2.  **GSID Resolution**: Map local IDs to GSIDs
+    3.  **Business Rules**: Domain-specific validation
+    4.  **Duplicate Detection**: Check for existing records
 
-    E --> M[Log Error]
-    L --> N[Validation Queue]
-```
+    [Detailed documentation →](../services/fragment-validator.md)
 
-**Validation Steps**:
+!!! abstract "Table Loader"
+    **Purpose**: Load validated data into database with update strategy
 
-1.  **Schema Validation**: Field types, required fields
-2.  **GSID Resolution**: Map local IDs to GSIDs
-3.  **Business Rules**: Domain-specific validation
-4.  **Duplicate Detection**: Check for existing records
+    **Technology**: Python, PostgreSQL
 
-[Detailed documentation →](../services/fragment-validator.md)
+    **Key Features**:
 
-### Table Loader
+    -   Natural key-based upserts
+    -   Immutable field protection
+    -   Batch processing
+    -   Transaction management
 
-**Purpose**: Load validated data into database with update strategy
+    ```mermaid
+    graph TB
+        A[Validation Queue] --> B[Read Batch]
+        B --> C[Group by Table]
+        C --> D[For Each Record]
+        D --> E{Natural Key Exists?}
+        E -->|No| F[INSERT]
+        E -->|Yes| G{Immutable Changed?}
+        G -->|Yes| H[Reject]
+        G -->|No| I{Data Changed?}
+        I -->|No| J[Skip]
+        I -->|Yes| K[UPDATE]
 
-**Technology**: Python, PostgreSQL
+        F --> L[Commit]
+        K --> L
+        H --> M[Log Error]
+        J --> N[Log Skip]
+        L --> O[Mark as Loaded]
+    ```
 
-**Key Features**:
+    **Configuration**:
 
--   Natural key-based upserts
--   Immutable field protection
--   Batch processing
--   Transaction management
+    -   `config/table_configs.json`: Natural keys, immutable fields
 
-```mermaid
-graph TB
-    A[Validation Queue] --> B[Read Batch]
-    B --> C[Group by Table]
-    C --> D[For Each Record]
-    D --> E{Natural Key Exists?}
-    E -->|No| F[INSERT]
-    E -->|Yes| G{Immutable Changed?}
-    G -->|Yes| H[Reject]
-    G -->|No| I{Data Changed?}
-    I -->|No| J[Skip]
-    I -->|Yes| K[UPDATE]
+    [Detailed documentation →](../services/table-loader.md)
 
-    F --> L[Commit]
-    K --> L
-    H --> M[Log Error]
-    J --> N[Log Skip]
-    L --> O[Mark as Loaded]
-```
+!!! abstract "Nginx Proxy"
+    **Purpose**: Reverse proxy, SSL termination, routing
 
-**Configuration**:
+    **Technology**: Nginx
 
--   `config/table_configs.json`: Natural keys, immutable fields
+    **Key Features**:
 
-[Detailed documentation →](../services/table-loader.md)
+    -   SSL/TLS termination
+    -   Request routing
+    -   Rate limiting
+    -   Static file serving
 
-### Nginx Proxy
+    ```mermaid
+    graph LR
+        A[Client] -->|HTTPS| B[Nginx]
+        B -->|/| C[NocoDB]
+        B -->|/api/gsid| D[GSID Service]
+        B -->|/api/data| E[Data API]
 
-**Purpose**: Reverse proxy, SSL termination, routing
+        style B fill:#4CAF50
+    ```
 
-**Technology**: Nginx
-
-**Key Features**:
-
--   SSL/TLS termination
--   Request routing
--   Rate limiting
--   Static file serving
-
-```mermaid
-graph LR
-    A[Client] -->|HTTPS| B[Nginx]
-    B -->|/| C[NocoDB]
-    B -->|/api/gsid| D[GSID Service]
-    B -->|/api/data| E[Data API]
-
-    style B fill:#4CAF50
-```
-
-[Detailed documentation →](../services/nginx.md)
+    [Detailed documentation →](../services/nginx.md)
 
 ## Data Flow Architecture
 
-### End-to-End Data Flow
+!!! abstract "End-to-End Data Flow"
+    ```mermaid
+    sequenceDiagram
+        participant SRC as Data Source
+        participant EXT as Extractor
+        participant S3 as S3 Staging
+        participant VAL as Validator
+        participant GSID as GSID Service
+        participant QUEUE as Validation Queue
+        participant LOAD as Loader
+        participant DB as Database
 
-```mermaid
-sequenceDiagram
-    participant SRC as Data Source
-    participant EXT as Extractor
-    participant S3 as S3 Staging
-    participant VAL as Validator
-    participant GSID as GSID Service
-    participant QUEUE as Validation Queue
-    participant LOAD as Loader
-    participant DB as Database
+        SRC->>EXT: 1. Extract data
+        EXT->>EXT: 2. Transform & map
+        EXT->>S3: 3. Upload fragment
 
-    SRC->>EXT: 1. Extract data
-    EXT->>EXT: 2. Transform & map
-    EXT->>S3: 3. Upload fragment
+        Note over S3: Fragment stored immutably
 
-    Note over S3: Fragment stored immutably
+        S3->>VAL: 4. Process fragment
+        VAL->>VAL: 5. Schema validation
 
-    S3->>VAL: 4. Process fragment
-    VAL->>VAL: 5. Schema validation
+        VAL->>GSID: 6. Resolve GSID
+        GSID->>GSID: 7. Lookup/create
+        GSID-->>VAL: 8. Return GSID
 
-    VAL->>GSID: 6. Resolve GSID
-    GSID->>GSID: 7. Lookup/create
-    GSID-->>VAL: 8. Return GSID
+        VAL->>VAL: 9. Business rules
+        VAL->>QUEUE: 10. Queue validated data
 
-    VAL->>VAL: 9. Business rules
-    VAL->>QUEUE: 10. Queue validated data
+        Note over QUEUE: Awaiting batch load
 
-    Note over QUEUE: Awaiting batch load
+        QUEUE->>LOAD: 11. Read batch
+        LOAD->>LOAD: 12. Apply update strategy
+        LOAD->>DB: 13. Upsert records
+        LOAD->>QUEUE: 14. Mark as loaded
+    ```
 
-    QUEUE->>LOAD: 11. Read batch
-    LOAD->>LOAD: 12. Apply update strategy
-    LOAD->>DB: 13. Upsert records
-    LOAD->>QUEUE: 14. Mark as loaded
-```
-
-[Detailed data flow →](data-flow.md)
+    [Detailed data flow →](data-flow.md)
 
 ## Storage Architecture
 
-### S3 Structure
+!!! abstract "S3 Structure"
+    ```
+    s3://idhub-curated-fragments/
+    ├── redcap/
+    │   ├── gap/
+    │   │   ├── batch_20240115_100000/
+    │   │   │   ├── lcl/
+    │   │   │   │   ├── fragment_001.json
+    │   │   │   │   ├── fragment_002.json
+    │   │   │   │   └── ...
+    │   │   │   ├── genotype/
+    │   │   │   ├── sequence/
+    │   │   │   └── metadata.json
+    │   │   └── batch_20240116_100000/
+    │   └── uc_demarc/
+    ├── labkey/
+    │   └── export_20240115/
+    └── manual/
+        └── upload_20240115_143000/
+    ```
 
-```
-s3://idhub-curated-fragments/
-├── redcap/
-│   ├── gap/
-│   │   ├── batch_20240115_100000/
-│   │   │   ├── lcl/
-│   │   │   │   ├── fragment_001.json
-│   │   │   │   ├── fragment_002.json
-│   │   │   │   └── ...
-│   │   │   ├── genotype/
-│   │   │   ├── sequence/
-│   │   │   └── metadata.json
-│   │   └── batch_20240116_100000/
-│   └── uc_demarc/
-├── labkey/
-│   └── export_20240115/
-└── manual/
-    └── upload_20240115_143000/
-```
+    **Key Characteristics**:
 
-**Key Characteristics**:
+    -   Organized by source and project
+    -   Batch-based organization
+    -   Immutable once written
+    -   Metadata files for tracking
 
--   Organized by source and project
--   Batch-based organization
--   Immutable once written
--   Metadata files for tracking
+!!! abstract "Database Schema"
+    ```mermaid
+    erDiagram
+        subjects ||--o{ local_subject_ids : has
+        subjects ||--o{ lcl : has
+        subjects ||--o{ genotype : "has"
+        subjects ||--o{ sequence : "has"
+        subjects ||--o{ specimen : has
 
-### Database Schema
+        subjects {
+            uuid id PK
+            string gsid UK
+            string sex
+            string diagnosis
+            timestamp created_at
+        }
 
-```mermaid
-erDiagram
-    subjects ||--o{ local_subject_ids : has
-    subjects ||--o{ lcl : has
-    subjects ||--o{ genotype : "has"
-    subjects ||--o{ sequence : "has"
-    subjects ||--o{ specimen : has
+        local_subject_ids {
+            uuid id PK
+            uuid subject_id FK
+            int center_id
+            string local_subject_id
+            string identifier_type
+            timestamp created_at
+        }
 
-    subjects {
-        uuid id PK
-        string gsid UK
-        string sex
-        string diagnosis
-        timestamp created_at
-    }
+        lcl {
+            uuid id PK
+            uuid subject_id FK
+            string global_subject_id
+            string niddk_no
+            string knumber
+            int passage_number
+            string cell_line_status
+            timestamp created_at
+        }
 
-    local_subject_ids {
-        uuid id PK
-        uuid subject_id FK
-        int center_id
-        string local_subject_id
-        string identifier_type
-        timestamp created_at
-    }
+        genotype {
+            uuid id PK
+            uuid subject_id FK
+            string global_subject_id
+            string genotype_id
+            string genotyping_project
+            string genotyping_barcode
+            timestamp created_at
+        }
 
-    lcl {
-        uuid id PK
-        uuid subject_id FK
-        string global_subject_id
-        string niddk_no
-        string knumber
-        int passage_number
-        string cell_line_status
-        timestamp created_at
-    }
+        sequence {
+            uuid id PK
+            uuid subject_id FK
+            string global_subject_id
+            string sample_id
+            string sample_type
+            string vcf_sample_id
+            timestamp created_at
+        }
 
-    genotype {
-        uuid id PK
-        uuid subject_id FK
-        string global_subject_id
-        string genotype_id
-        string genotyping_project
-        string genotyping_barcode
-        timestamp created_at
-    }
+        specimen {
+            uuid id PK
+            string sample_id UK
+            string sample_type
+            string storage_location
+            timestamp collection_date
+            timestamp created_at
+        }
+    ```
 
-    sequence {
-        uuid id PK
-        uuid subject_id FK
-        string global_subject_id
-        string sample_id
-        string sample_type
-        string vcf_sample_id
-        timestamp created_at
-    }
-
-    specimen {
-        uuid id PK
-        string sample_id UK
-        string sample_type
-        string storage_location
-        timestamp collection_date
-        timestamp created_at
-    }
-```
-
-[Detailed schema documentation →](database-schema.md)
+    [Detailed schema documentation →](database-schema.md)
 
 ## Security Architecture
 
-### Authentication & Authorization
+!!! abstract "Authentication & Authorization"
+    ```mermaid
+    graph TB
+        A[Client Request] --> B{Has API Key?}
+        B -->|No| C[401 Unauthorized]
+        B -->|Yes| D{Valid Key?}
+        D -->|No| C
+        D -->|Yes| E{Has Permission?}
+        E -->|No| F[403 Forbidden]
+        E -->|Yes| G[Process Request]
+    ```
 
-```mermaid
-graph TB
-    A[Client Request] --> B{Has API Key?}
-    B -->|No| C[401 Unauthorized]
-    B -->|Yes| D{Valid Key?}
-    D -->|No| C
-    D -->|Yes| E{Has Permission?}
-    E -->|No| F[403 Forbidden]
-    E -->|Yes| G[Process Request]
-```
+!!! abstract "Security Layers"
+    **Security Layers**:
 
-**Security Layers**:
+    1.  **Network Security**
 
-1.  **Network Security**
+        -   SSL/TLS encryption (Let's Encrypt)
+        -   Nginx reverse proxy
+        -   Firewall rules
 
-    -   SSL/TLS encryption (Let's Encrypt)
-    -   Nginx reverse proxy
-    -   Firewall rules
+    2.  **Application Security**
 
-2.  **Application Security**
+        -   API key authentication
+        -   Environment-based secrets
+        -   Input validation
 
-    -   API key authentication
-    -   Environment-based secrets
-    -   Input validation
+    3.  **Database Security**
 
-3.  **Database Security**
+        -   Connection pooling
+        -   Prepared statements
+        -   Role-based access
 
-    -   Connection pooling
-    -   Prepared statements
-    -   Role-based access
+    4.  **Data Security**
+        -   Encrypted at rest (S3, RDS)
+        -   Encrypted in transit (HTTPS)
+        -   Audit logging
 
-4.  **Data Security**
-    -   Encrypted at rest (S3, RDS)
-    -   Encrypted in transit (HTTPS)
-    -   Audit logging
-
-[Detailed security documentation →](../security-guide.md)
+    [Detailed security documentation →](../security-guide.md)
 
 ## Deployment Architecture
 
-### Environment Structure
+!!! abstract "Environment Structure"
+    ```mermaid
+    graph TB
+        subgraph "Production"
+            P_APP[Application Services]
+            P_DB[(Production DB)]
+            P_S3[(Production S3)]
+        end
 
-```mermaid
-graph TB
-    subgraph "Production"
-        P_APP[Application Services]
-        P_DB[(Production DB)]
-        P_S3[(Production S3)]
-    end
+        subgraph "QA"
+            Q_APP[Application Services]
+            Q_DB[(QA DB)]
+            Q_S3[(QA S3)]
+        end
 
-    subgraph "QA"
-        Q_APP[Application Services]
-        Q_DB[(QA DB)]
-        Q_S3[(QA S3)]
-    end
+        subgraph "Development"
+            D_APP[Application Services]
+            D_DB[(Local DB)]
+            D_S3[(Local S3/MinIO)]
+        end
 
-    subgraph "Development"
-        D_APP[Application Services]
-        D_DB[(Local DB)]
-        D_S3[(Local S3/MinIO)]
-    end
+        GH[GitHub Actions] -.->|Deploy| P_APP
+        GH -.->|Deploy| Q_APP
 
-    GH[GitHub Actions] -.->|Deploy| P_APP
-    GH -.->|Deploy| Q_APP
+        DEV[Developers] -->|Test| D_APP
+        DEV -->|PR| GH
+    ```
 
-    DEV[Developers] -->|Test| D_APP
-    DEV -->|PR| GH
-```
+    **Environments**:
 
-**Environments**:
+    | Environment     | Purpose              | Database         | S3 Bucket                    |
+    | --------------- | -------------------- | ---------------- | ---------------------------- |
+    | **Development** | Local development    | Local PostgreSQL | Local MinIO                  |
+    | **QA**          | Testing & validation | QA RDS           | `idhub-curated-fragments-qa` |
+    | **Production**  | Live system          | Production RDS   | `idhub-curated-fragments`    |
 
-| Environment     | Purpose              | Database         | S3 Bucket                    |
-| --------------- | -------------------- | ---------------- | ---------------------------- |
-| **Development** | Local development    | Local PostgreSQL | Local MinIO                  |
-| **QA**          | Testing & validation | QA RDS           | `idhub-curated-fragments-qa` |
-| **Production**  | Live system          | Production RDS   | `idhub-curated-fragments`    |
+!!! abstract "Deployment Process"
+    ```mermaid
+    graph LR
+        A[Code Push] --> B[GitHub Actions]
+        B --> C{Branch?}
+        C -->|main| D[Deploy to QA]
+        C -->|release| E[Deploy to Prod]
+        D --> F[Run Tests]
+        F --> G{Tests Pass?}
+        G -->|Yes| H[Deploy Services]
+        G -->|No| I[Rollback]
+        E --> J[Manual Approval]
+        J --> H
+    ```
 
-### Deployment Process
-
-```mermaid
-graph LR
-    A[Code Push] --> B[GitHub Actions]
-    B --> C{Branch?}
-    C -->|main| D[Deploy to QA]
-    C -->|release| E[Deploy to Prod]
-    D --> F[Run Tests]
-    F --> G{Tests Pass?}
-    G -->|Yes| H[Deploy Services]
-    G -->|No| I[Rollback]
-    E --> J[Manual Approval]
-    J --> H
-```
-
-[Detailed deployment documentation →](../deployment-guide.md)
+    [Detailed deployment documentation →](../deployment-guide.md)
 
 ## Scalability Considerations
 
-### Current Scale
+!!! abstract "Current Scale"
+    -   **Subjects**: ~50,000
+    -   **LCL Lines**: ~30,000
+    -   **Genotypes**: ~40,000
+    -   **Sequences**: ~20,000
+    -   **Daily Ingestion**: ~1,000 records
 
--   **Subjects**: ~50,000
--   **LCL Lines**: ~30,000
--   **Genotypes**: ~40,000
--   **Sequences**: ~20,000
--   **Daily Ingestion**: ~1,000 records
+!!! abstract "Scaling Strategies"
+    **Horizontal Scaling**:
 
-### Scaling Strategies
+    -   Multiple validator instances
+    -   Multiple loader instances
+    -   Load balancing via Nginx
 
-**Horizontal Scaling**:
+    **Vertical Scaling**:
 
--   Multiple validator instances
--   Multiple loader instances
--   Load balancing via Nginx
+    -   Database connection pooling
+    -   Batch processing optimization
+    -   Query optimization
 
-**Vertical Scaling**:
-
--   Database connection pooling
--   Batch processing optimization
--   Query optimization
-
-**Data Partitioning**:
-
--   S3 partitioning by date/source
--   Database table partitioning (future)
--   Archive old validation queue records
+!!! abstract "Data Partitioning"
+    -   S3 partitioning by date/source
+    -   Database table partitioning (future)
+    -   Archive old validation queue records
 
 ## Monitoring & Observability
 
-### Metrics
+!!! abstract "Metrics"
+    ```mermaid
+    graph TB
+        A[Application Metrics] --> D[Monitoring Dashboard]
+        B[Database Metrics] --> D
+        C[Infrastructure Metrics] --> D
 
-```mermaid
-graph TB
-    A[Application Metrics] --> D[Monitoring Dashboard]
-    B[Database Metrics] --> D
-    C[Infrastructure Metrics] --> D
+        A --> A1[Request Rate]
+        A --> A2[Error Rate]
+        A --> A3[Processing Time]
 
-    A --> A1[Request Rate]
-    A --> A2[Error Rate]
-    A --> A3[Processing Time]
+        B --> B1[Query Performance]
+        B --> B2[Connection Pool]
+        B --> B3[Table Sizes]
 
-    B --> B1[Query Performance]
-    B --> B2[Connection Pool]
-    B --> B3[Table Sizes]
+        C --> C1[CPU Usage]
+        C --> C2[Memory Usage]
+        C --> C3[Disk I/O]
+    ```
 
-    C --> C1[CPU Usage]
-    C --> C2[Memory Usage]
-    C --> C3[Disk I/O]
-```
-
-**Key Metrics**:
-
--   Pipeline success/failure rates
--   GSID resolution performance
--   Database load times
--   Validation queue depth
--   API response times
-
-
+!!! abstract "Key Metrics"
+    -   Pipeline success/failure rates
+    -   GSID resolution performance
+    -   Database load times
+    -   Validation queue depth
+    -   API response times
 
 ## Technology Stack
 
-### Languages & Frameworks
+!!! abstract "Languages & Frameworks"
+    | Component          | Technology      | Version      |
+    | ------------------ | --------------- | ------------ |
+    | GSID Service       | Python, FastAPI | 3.11, 0.104+ |
+    | REDCap Pipeline    | Python          | 3.11         |
+    | Fragment Validator | Python          | 3.11         |
+    | Table Loader       | Python          | 3.11         |
+    | Database           | PostgreSQL      | 15+          |
+    | Web UI             | NocoDB          | Latest       |
+    | Proxy              | Nginx           | 1.24+        |
 
-| Component          | Technology      | Version      |
-| ------------------ | --------------- | ------------ |
-| GSID Service       | Python, FastAPI | 3.11, 0.104+ |
-| REDCap Pipeline    | Python          | 3.11         |
-| Fragment Validator | Python          | 3.11         |
-| Table Loader       | Python          | 3.11         |
-| Database           | PostgreSQL      | 15+          |
-| Web UI             | NocoDB          | Latest       |
-| Proxy              | Nginx           | 1.24+        |
-
-### Key Libraries
-
--   **Database**: `asyncpg`, `psycopg2`
--   **API**: `fastapi`, `uvicorn`, `pydantic`
--   **AWS**: `boto3`
--   **Testing**: `pytest`, `pytest-asyncio`
--   **Validation**: `jsonschema`, `pydantic`
--   **ETL**: `pandas`, `openpyxl`
+!!! abstract "Key Libraries"
+    -   **Database**: `asyncpg`, `psycopg2`
+    -   **API**: `fastapi`, `uvicorn`, `pydantic`
+    -   **AWS**: `boto3`
+    -   **Testing**: `pytest`, `pytest-asyncio`
+    -   **Validation**: `jsonschema`, `pydantic`
+    -   **ETL**: `pandas`, `openpyxl`
 
 ## Related Documentation
 

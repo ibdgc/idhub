@@ -20,489 +20,502 @@ This guide covers setting up a local development environment for the IDhub platf
 
 ## Prerequisites
 
-### Required Software
+!!! info "Required Software"
+    Before starting, ensure you have the following software installed:
 
-```bash
-# Python 3.11+
-python3 --version
+    -   **Python 3.11+**
+        ```bash
+        python3 --version
+        ```
+    -   **Node.js 18+** (for NocoDB)
+        ```bash
+        node --version
+        npm --version
+        ```
+    -   **Docker & Docker Compose**
+        ```bash
+        docker --version
+        docker-compose --version
+        ```
+    -   **PostgreSQL client**
+        ```bash
+        psql --version
+        ```
+    -   **Git**
+        ```bash
+        git --version
+        ```
 
-# Node.js 18+ (for NocoDB)
-node --version
-npm --version
+!!! info "Install Development Tools"
+    === "macOS"
+        ```bash
+        # Install Homebrew
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-# Docker & Docker Compose
-docker --version
-docker-compose --version
+        # Install tools
+        brew install python@3.11 node postgresql git docker
+        brew install --cask docker
+        ```
 
-# PostgreSQL client
-psql --version
+    === "Ubuntu/Debian"
+        ```bash
+        # Update system
+        sudo apt update && sudo apt upgrade -y
 
-# Git
-git --version
-```
+        # Install Python
+        sudo apt install -y python3.11 python3.11-venv python3-pip
 
-### Install Development Tools
+        # Install Node.js
+        curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+        sudo apt install -y nodejs
 
-**macOS**:
+        # Install PostgreSQL client
+        sudo apt install -y postgresql-client
 
-```bash
-# Install Homebrew
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        # Install Docker
+        curl -fsSL https://get.docker.com -o get-docker.sh
+        sudo sh get-docker.sh
+        sudo usermod -aG docker $USER
 
-# Install tools
-brew install python@3.11 node postgresql git docker
-brew install --cask docker
-```
+        # Install Docker Compose
+        sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+        sudo chmod +x /usr/local/bin/docker-compose
+        ```
 
-**Ubuntu/Debian**:
+    === "Windows (WSL2)"
+        ```bash
+        # Install WSL2
+        wsl --install
 
-```bash
-# Update system
-sudo apt update && sudo apt upgrade -y
+        # Follow Ubuntu instructions above in WSL2 terminal
+        ```
 
-# Install Python
-sudo apt install -y python3.11 python3.11-venv python3-pip
+!!! info "IDE Setup: VS Code (Recommended)"
+    Install VS Code and recommended extensions for Python and Docker development.
 
-# Install Node.js
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-sudo apt install -y nodejs
+    1.  **Install VS Code**:
+        Download from: [https://code.visualstudio.com/](https://code.visualstudio.com/)
 
-# Install PostgreSQL client
-sudo apt install -y postgresql-client
+    2.  **Install Extensions**:
+        ```bash
+        code --install-extension ms-python.python
+        code --install-extension ms-python.vscode-pylance
+        code --install-extension ms-python.black-formatter
+        code --install-extension ms-azuretools.vscode-docker
+        code --install-extension eamodio.gitlens
+        code --install-extension GitHub.copilot
+        ```
 
-# Install Docker
-curl -fsSL https://get.docker.com -o get-docker.sh
-sudo sh get-docker.sh
-sudo usermod -aG docker $USER
+    3.  **VS Code Settings**:
+        Create a `.vscode/settings.json` file in your project root with these settings for consistent formatting and linting.
 
-# Install Docker Compose
-sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-sudo chmod +x /usr/local/bin/docker-compose
-```
-
-**Windows (WSL2)**:
-
-```bash
-# Install WSL2
-wsl --install
-
-# Follow Ubuntu instructions above in WSL2 terminal
-```
-
-### IDE Setup
-
-**VS Code** (Recommended):
-
-```bash
-# Install VS Code
-# Download from: https://code.visualstudio.com/
-
-# Install extensions
-code --install-extension ms-python.python
-code --install-extension ms-python.vscode-pylance
-code --install-extension ms-python.black-formatter
-code --install-extension ms-azuretools.vscode-docker
-code --install-extension eamodio.gitlens
-code --install-extension GitHub.copilot
-```
-
-**VS Code Settings**:
-
-```json:.vscode/settings.json
-{
-  "python.defaultInterpreterPath": "${workspaceFolder}/venv/bin/python",
-  "python.linting.enabled": true,
-  "python.linting.pylintEnabled": false,
-  "python.linting.flake8Enabled": true,
-  "python.formatting.provider": "black",
-  "python.formatting.blackArgs": ["--line-length", "88"],
-  "editor.formatOnSave": true,
-  "editor.codeActionsOnSave": {
-    "source.organizeImports": true
-  },
-  "files.exclude": {
-    "**/__pycache__": true,
-    "**/*.pyc": true,
-    "**/.pytest_cache": true,
-    "**/venv": true
-  },
-  "[python]": {
-    "editor.rulers": [88],
-    "editor.tabSize": 4
-  },
-  "[javascript]": {
-    "editor.defaultFormatter": "esbenp.prettier-vscode",
-    "editor.tabSize": 2
-  },
-  "[json]": {
-    "editor.defaultFormatter": "esbenp.prettier-vscode",
-    "editor.tabSize": 2
-  }
-}
-```
+        ```json:.vscode/settings.json
+        {
+          "python.defaultInterpreterPath": "${workspaceFolder}/venv/bin/python",
+          "python.linting.enabled": true,
+          "python.linting.pylintEnabled": false,
+          "python.linting.flake8Enabled": true,
+          "python.formatting.provider": "black",
+          "python.formatting.blackArgs": ["--line-length", "88"],
+          "editor.formatOnSave": true,
+          "editor.codeActionsOnSave": {
+            "source.organizeImports": true
+          },
+          "files.exclude": {
+            "**/__pycache__": true,
+            "**/*.pyc": true,
+            "**/.pytest_cache": true,
+            "**/venv": true
+          },
+          "[python]": {
+            "editor.rulers": [88],
+            "editor.tabSize": 4
+          },
+          "[javascript]": {
+            "editor.defaultFormatter": "esbenp.prettier-vscode",
+            "editor.tabSize": 2
+          },
+          "[json]": {
+            "editor.defaultFormatter": "esbenp.prettier-vscode",
+            "editor.tabSize": 2
+          }
+        }
+        ```
 
 ---
 
 ## Local Environment Setup
 
-### Clone Repository
+!!! tip "Clone Repository"
+    Clone the `idhub` repository and create a new feature branch for your work.
 
-```bash
-# Clone repository
-git clone https://github.com/ibdgc/idhub.git
-cd idhub
+    ```bash
+    # Clone repository
+    git clone https://github.com/ibdgc/idhub.git
+    cd idhub
 
-# Create development branch
-git checkout -b feature/your-feature-name
-```
+    # Create development branch
+    git checkout -b feature/your-feature-name
+    ```
 
-### Environment Configuration
+!!! abstract "Environment Configuration"
+    The `.env.development` file specifies environment variables for local development. Copy the example file and customize it.
 
-```bash
-# Copy example environment file
-cp .env.example .env.development
+    ```bash
+    # Copy example environment file
+    cp .env.example .env.development
 
-# Edit environment variables
-vim .env.development
-```
+    # Edit environment variables
+    vim .env.development
+    ```
 
-**Development Environment Variables**:
+    **Development Environment Variables**:
 
-```bash:.env.development
-# Environment
-ENVIRONMENT=development
-DEBUG=true
+    ```bash:.env.development
+    # Environment
+    ENVIRONMENT=development
+    DEBUG=true
 
-# Database
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_DB=idhub_dev
-POSTGRES_USER=idhub_dev
-POSTGRES_PASSWORD=dev_password
+    # Database
+    POSTGRES_HOST=localhost
+    POSTGRES_PORT=5432
+    POSTGRES_DB=idhub_dev
+    POSTGRES_USER=idhub_dev
+    POSTGRES_PASSWORD=dev_password
 
-# GSID Service
-GSID_SERVICE_URL=http://localhost:8000
-GSID_API_KEY=gsid_test_dev_key_12345678901234567890
-SECRET_KEY=dev_secret_key_not_for_production
+    # GSID Service
+    GSID_SERVICE_URL=http://localhost:8000
+    GSID_API_KEY=gsid_test_dev_key_12345678901234567890
+    SECRET_KEY=dev_secret_key_not_for_production
 
-# NocoDB
-NC_DB=pg://localhost:5432?u=idhub_dev&p=dev_password&d=nocodb_dev
-NC_AUTH_JWT_SECRET=dev_jwt_secret
-NC_PUBLIC_URL=http://localhost:8080
+    # NocoDB
+    NC_DB=pg://localhost:5432?u=idhub_dev&p=dev_password&d=nocodb_dev
+    NC_AUTH_JWT_SECRET=dev_jwt_secret
+    NC_PUBLIC_URL=http://localhost:8080
 
-# Redis
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_PASSWORD=
+    # Redis
+    REDIS_HOST=localhost
+    REDIS_PORT=6379
+    REDIS_PASSWORD=
 
-# AWS (LocalStack for local S3)
-AWS_ACCESS_KEY_ID=test
-AWS_SECRET_ACCESS_KEY=test
-AWS_ENDPOINT_URL=http://localhost:4566
-S3_BUCKET=idhub-dev-fragments
+    # AWS (LocalStack for local S3)
+    AWS_ACCESS_KEY_ID=test
+    AWS_SECRET_ACCESS_KEY=test
+    AWS_ENDPOINT_URL=http://localhost:4566
+    S3_BUCKET=idhub-dev-fragments
 
-# Logging
-LOG_LEVEL=DEBUG
-```
+    # Logging
+    LOG_LEVEL=DEBUG
+    ```
 
-### Docker Development Environment
+!!! example "Docker Development Environment (`docker-compose.dev.yml`)"
+    This Docker Compose file sets up all necessary infrastructure services (PostgreSQL, Redis, LocalStack, Adminer) for local development.
 
-```yaml:docker-compose.dev.yml
-version: "3.8"
+    ```yaml:docker-compose.dev.yml
+    version: "3.8"
 
-services:
-  # PostgreSQL
-  postgres_dev:
-    image: postgres:15-alpine
-    container_name: idhub_postgres_dev
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_DB: idhub_dev
-      POSTGRES_USER: idhub_dev
-      POSTGRES_PASSWORD: dev_password
+    services:
+      # PostgreSQL
+      postgres_dev:
+        image: postgres:15-alpine
+        container_name: idhub_postgres_dev
+        ports:
+          - "5432:5432"
+        environment:
+          POSTGRES_DB: idhub_dev
+          POSTGRES_USER: idhub_dev
+          POSTGRES_PASSWORD: dev_password
+        volumes:
+          - postgres_dev_data:/var/lib/postgresql/data
+          - ./database/init:/docker-entrypoint-initdb.d
+        healthcheck:
+          test: ["CMD-SHELL", "pg_isready -U idhub_dev"]
+          interval: 5s
+          timeout: 5s
+          retries: 5
+
+      # Redis
+      redis_dev:
+        image: redis:7-alpine
+        container_name: idhub_redis_dev
+        ports:
+          - "6379:6379"
+        volumes:
+          - redis_dev_data:/data
+
+      # LocalStack (for S3)
+      localstack:
+        image: localstack/localstack:latest
+        container_name: idhub_localstack
+        ports:
+          - "4566:4566"
+        environment:
+          - SERVICES=s3
+          - DEBUG=1
+          - DATA_DIR=/tmp/localstack/data
+        volumes:
+          - localstack_data:/tmp/localstack
+
+      # Adminer (Database UI)
+      adminer:
+        image: adminer:latest
+        container_name: idhub_adminer
+        ports:
+          - "8081:8080"
+        environment:
+          ADMINER_DEFAULT_SERVER: postgres_dev
+
     volumes:
-      - postgres_dev_data:/var/lib/postgresql/data
-      - ./database/init:/docker-entrypoint-initdb.d
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U idhub_dev"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+      postgres_dev_data:
+      redis_dev_data:
+      localstack_data:
+    ```
 
-  # Redis
-  redis_dev:
-    image: redis:7-alpine
-    container_name: idhub_redis_dev
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_dev_data:/data
+    !!! tip "Managing Docker Development Services"
+        Use these commands to manage your local Docker development services.
 
-  # LocalStack (for S3)
-  localstack:
-    image: localstack/localstack:latest
-    container_name: idhub_localstack
-    ports:
-      - "4566:4566"
-    environment:
-      - SERVICES=s3
-      - DEBUG=1
-      - DATA_DIR=/tmp/localstack/data
-    volumes:
-      - localstack_data:/tmp/localstack
+        ```bash
+        # Start development services
+        docker-compose -f docker-compose.dev.yml up -d
 
-  # Adminer (Database UI)
-  adminer:
-    image: adminer:latest
-    container_name: idhub_adminer
-    ports:
-      - "8081:8080"
-    environment:
-      ADMINER_DEFAULT_SERVER: postgres_dev
+        # View logs
+        docker-compose -f docker-compose.dev.yml logs -f
 
-volumes:
-  postgres_dev_data:
-  redis_dev_data:
-  localstack_data:
-```
-
-```bash
-# Start development services
-docker-compose -f docker-compose.dev.yml up -d
-
-# View logs
-docker-compose -f docker-compose.dev.yml logs -f
-
-# Stop services
-docker-compose -f docker-compose.dev.yml down
-```
-
+        # Stop services
+        docker-compose -f docker-compose.dev.yml down
+        ```
 ---
 
 ## Service Development
 
 ### GSID Service
 
-#### Setup
+!!! abstract "Setup"
+    Navigate to the `gsid-service` directory and set up its Python virtual environment and dependencies.
 
-```bash
-# Navigate to service directory
-cd gsid-service
+    ```bash
+    # Navigate to service directory
+    cd gsid-service
 
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+    # Create virtual environment
+    python3 -m venv venv
+    source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Install dependencies
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
+    # Install dependencies
+    pip install -r requirements.txt
+    pip install -r requirements-dev.txt
 
-# Install pre-commit hooks
-pre-commit install
-```
+    # Install pre-commit hooks
+    pre-commit install
+    ```
 
-#### Run Development Server
+!!! tip "Run Development Server"
+    Load environment variables and run database migrations before starting the GSID Service development server with auto-reload.
 
-```bash
-# Load environment variables
-export $(cat ../.env.development | xargs)
+    ```bash
+    # Load environment variables
+    export $(cat ../.env.development | xargs)
 
-# Run database migrations
-alembic upgrade head
+    # Run database migrations
+    alembic upgrade head
 
-# Start development server with auto-reload
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+    # Start development server with auto-reload
+    uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
-# Or use the run script
-python run_dev.py
-```
+    # Or use the run script
+    python run_dev.py
+    ```
 
-**Development Server Script**:
+!!! example "Development Server Script (`gsid-service/run_dev.py`)"
+    ```python:gsid-service/run_dev.py
+    #!/usr/bin/env python3
+    """Development server runner with auto-reload"""
 
-```python:gsid-service/run_dev.py
-#!/usr/bin/env python3
-"""Development server runner with auto-reload"""
+    import uvicorn
+    from dotenv import load_dotenv
 
-import uvicorn
-from dotenv import load_dotenv
+    # Load environment variables
+    load_dotenv("../.env.development")
 
-# Load environment variables
-load_dotenv("../.env.development")
+    if __name__ == "__main__":
+        uvicorn.run(
+            "main:app",
+            host="0.0.0.0",
+            port=8000,
+            reload=True,
+            reload_dirs=["." , "../core"],
+            log_level="debug",
+        )
+    ```
 
-if __name__ == "__main__":
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        reload_dirs=".", "../core"],
-        log_level="debug",
-    )
-```
+!!! tip "API Documentation"
+    Access the interactive API documentation and ReDoc for the running GSID Service.
 
-#### API Documentation
+    ```bash
+    # Access interactive API docs
+    open http://localhost:8000/docs
 
-```bash
-# Access interactive API docs
-open http://localhost:8000/docs
+    # Access ReDoc
+    open http://localhost:8000/redoc
+    ```
 
-# Access ReDoc
-open http://localhost:8000/redoc
-```
+!!! abstract "Database Migrations (GSID Service)"
+    Use Alembic for managing database schema changes for the GSID Service.
 
-#### Database Migrations
+    ```bash
+    # Create new migration
+    alembic revision --autogenerate -m "Add new table"
 
-```bash
-# Create new migration
-alembic revision --autogenerate -m "Add new table"
+    # Apply migrations
+    alembic upgrade head
 
-# Apply migrations
-alembic upgrade head
+    # Rollback migration
+    alembic downgrade -1
 
-# Rollback migration
-alembic downgrade -1
+    # View migration history
+    alembic history
 
-# View migration history
-alembic history
-
-# View current version
-alembic current
-```
+    # View current version
+    alembic current
+    ```
 
 ### REDCap Pipeline
 
-#### Setup
+!!! abstract "REDCap Pipeline Setup"
+    Navigate to the `redcap-pipeline` directory and set up its Python virtual environment and dependencies.
 
-```bash
-cd redcap-pipeline
+    ```bash
+    cd redcap-pipeline
 
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
+    # Create virtual environment
+    python3 -m venv venv
+    source venv/bin/activate
 
-# Install dependencies
-pip install -r requirements.txt
-pip install -r requirements-test.txt
-```
+    # Install dependencies
+    pip install -r requirements.txt
+    pip install -r requirements-test.txt
+    ```
 
-#### Run Pipeline
+!!! tip "Run REDCap Pipeline"
+    Load environment variables and run the REDCap Pipeline for specific projects or in dry-run mode.
 
-```bash
-# Load environment
-export $(cat ../.env.development | xargs)
+    ```bash
+    # Load environment
+    export $(cat ../.env.development | xargs)
 
-# Run for specific project
-python main.py --project gap
+    # Run for specific project
+    python main.py --project gap
 
-# Run with dry-run mode
-python main.py --project gap --dry-run
+    # Run with dry-run mode
+    python main.py --project gap --dry-run
 
-# Run all enabled projects
-python main.py --all
+    # Run all enabled projects
+    python main.py --all
 
-# Run with custom batch size
-python main.py --project gap --batch-size 10
-```
+    # Run with custom batch size
+    python main.py --project gap --batch-size 10
+    ```
 
-#### Debug Mode
+!!! example "Debug Mode Script (`redcap-pipeline/debug.py`)"
+    ```python:redcap-pipeline/debug.py
+    #!/usr/bin/env python3
+    """Debug script for REDCap pipeline"""
 
-```python:redcap-pipeline/debug.py
-#!/usr/bin/env python3
-"""Debug script for REDCap pipeline"""
+    import logging
+    from dotenv import load_dotenv
+    from services.pipeline import REDCapPipeline
+    from core.config import settings
 
-import logging
-from dotenv import load_dotenv
-from services.pipeline import REDCapPipeline
-from core.config import settings
+    # Load environment
+    load_dotenv("../.env.development")
 
-# Load environment
-load_dotenv("../.env.development")
+    # Configure detailed logging
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
 
-# Configure detailed logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+    # Run pipeline with debugging
+    pipeline = REDCapPipeline(
+        project_key="gap",
+        redcap_api_url=settings.REDCAP_API_URL,
+        api_token=settings.REDCAP_API_TOKEN_GAP,
+        gsid_service_url=settings.GSID_SERVICE_URL,
+        gsid_api_key=settings.GSID_API_KEY,
+    )
 
-# Run pipeline with debugging
-pipeline = REDCapPipeline(
-    project_key="gap",
-    redcap_api_url=settings.REDCAP_API_URL,
-    api_token=settings.REDCAP_API_TOKEN_GAP,
-    gsid_service_url=settings.GSID_SERVICE_URL,
-    gsid_api_key=settings.GSID_API_KEY,
-)
-
-# Process single record for debugging
-result = pipeline.process_single_record(record_id="1")
-print(f"Result: {result}")
-```
+    # Process single record for debugging
+    result = pipeline.process_single_record(record_id="1")
+    print(f"Result: {result}")
+    ```
 
 ### Fragment Validator
 
-#### Setup
+!!! abstract "Fragment Validator Setup"
+    Navigate to the `fragment-validator` directory and set up its Python virtual environment and dependencies.
 
-```bash
-cd fragment-validator
+    ```bash
+    cd fragment-validator
 
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
+    # Create virtual environment
+    python3 -m venv venv
+    source venv/bin/activate
 
-# Install dependencies
-pip install -r requirements.txt
-pip install -r requirements-test.txt
-```
+    # Install dependencies
+    pip install -r requirements.txt
+    pip install -r requirements-test.txt
+    ```
 
-#### Run Validator
+!!! tip "Run Fragment Validator"
+    Validate local files, optionally using LocalStack for S3.
 
-```bash
-# Validate local file
-python main.py \
-  --table-name lcl \
-  --input-file tests/fixtures/lcl_sample.csv \
-  --mapping-config config/lcl_mapping.json \
-  --source "Development Test"
+    ```bash
+    # Validate local file
+    python main.py \
+      --table-name lcl \
+      --input-file tests/fixtures/lcl_sample.csv \
+      --mapping-config config/lcl_mapping.json \
+      --source "Development Test"
 
-# Use LocalStack for S3
-export AWS_ENDPOINT_URL=http://localhost:4566
-python main.py \
-  --table-name specimen \
-  --input-file tests/fixtures/specimen_sample.csv \
-  --mapping-config config/specimen_mapping.json \
-  --source "LocalStack Test"
-```
+    # Use LocalStack for S3
+    export AWS_ENDPOINT_URL=http://localhost:4566
+    python main.py \
+      --table-name specimen \
+      --input-file tests/fixtures/specimen_sample.csv \
+      --mapping-config config/specimen_mapping.json \
+      --source "LocalStack Test"
+    ```
 
 ### Table Loader
 
-#### Setup
+!!! abstract "Table Loader Setup"
+    Navigate to the `table-loader` directory and set up its Python virtual environment and dependencies.
 
-```bash
-cd table-loader
+    ```bash
+    cd table-loader
 
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
+    # Create virtual environment
+    python3 -m venv venv
+    source venv/bin/activate
 
-# Install dependencies
-pip install -r requirements.txt
-pip install -r requirements-test.txt
-```
+    # Install dependencies
+    pip install -r requirements.txt
+    pip install -r requirements-test.txt
+    ```
 
-#### Run Loader
+!!! tip "Run Table Loader"
+    Run the Table Loader in dry-run mode or perform a live load.
 
-```bash
-# Dry-run mode (default)
-python main.py --batch-id batch_20240115_140000 --dry-run
+    ```bash
+    # Dry-run mode (default)
+    python main.py --batch-id batch_20240115_140000 --dry-run
 
-# Live load (use with caution)
-python main.py --batch-id batch_20240115_140000
+    # Live load (use with caution)
+    python main.py --batch-id batch_20240115_140000
 
-# Load specific table
-python main.py --batch-id batch_20240115_140000 --table lcl
-```
-
+    # Load specific table
+    python main.py --batch-id batch_20240115_140000 --table lcl
+    ```
 ---
 
 ## Database Development
