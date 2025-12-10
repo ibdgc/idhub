@@ -18,20 +18,20 @@ graph TD
 
 ---
 
-### Stage 1: Staging - Preparing the Data
+### 1. Staging - Preparing the Data
 
-This is the first step where data from different sources is converted into a standardized format called "fragments". A fragment is a small, structured piece of data, usually representing a single record or sample.
+This is the first step where data from different sources is converted into a standardized format called "fragments". A fragment is a small, structured piece of data, usually representing a single record or sample set. While there are structured, automated processes to execute this step, it may be necessary to perform manual curation of inputs to simplify compatibility from disparate source formats.
 
 **Data Sources:**
 
 - **REDCap Projects**: Data is **automatically** extracted by the REDCap Pipeline service.
 - **Manual Uploads**: You or other curators provide data as CSV which are then converted into fragments.
 
-At the end of this stage, all data exists as standardized fragments in a staging area, ready for validation.
+At the end of this stage, all data exists as standardized fragments in a staging area inside an AWS s3 bucket, ready for validation.
 
 ---
 
-### Stage 2: Validation - Ensuring Data Quality
+### 2. Validation - Ensuring Data Quality
 
 This is the most critical step for data curators. The **Fragment Validator** service inspects every single fragment to ensure it meets IDhub's quality standards.
 
@@ -49,9 +49,7 @@ The key validation steps include:
     - If the subject doesn't exist in IDhub, a **new GSID is created** for them automatically.
     - The correct GSID is attached to the data fragment.
 
-    > [!tip]
     > Learn more about the purpose and scope of GSIDs in the [What is a GSID?](../what-is-a-gsid.md) guide.
-
 
 3.  **Business Rule Checks**:
     - Does the data make sense? (e.g., the `genotyping_project` is a known project).
@@ -61,7 +59,7 @@ Fragments that pass all checks are placed in a **Validation Queue**, ready for t
 
 ---
 
-### Stage 3: Loading - Committing to the Database
+### 3. Loading - Committing to the Database
 
 The **Table Loader** service takes the validated fragments from the queue and loads them into the main IDhub database.
 

@@ -33,7 +33,8 @@ For general questions about how to use the NocoDB interface (e.g., how to sort, 
     *   **Product Docs**: The complete user manual for NocoDB. Use this to understand features like filtering, sorting, creating views, and more.
     *   **API Docs**: Technical documentation for NocoDB's general-purpose API.
 
-> By directing you to the official docs, we ensure you get the most accurate, up-to-date information directly from the creators of the tool, avoiding duplicated and potentially outdated guides.
+!!! info "Official Docs"
+	By directing you to the official docs, we ensure you get the most accurate, up-to-date information directly from the creators of the tool, avoiding duplicated and potentially outdated guides.
 
 ---
 

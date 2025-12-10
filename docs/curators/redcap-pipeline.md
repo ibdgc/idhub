@@ -22,8 +22,8 @@ sequenceDiagram
     end
 ```
 
-1.  **Scheduled Trigger**: The pipeline is automatically triggered by a scheduler (GitHub Actions). The production environment runs daily, while the QA environment runs more frequently.
-2.  **Extract Data**: The pipeline connects to each configured REDCap project via its API and asks for records that have been created or modified since the last successful run. This is an **incremental** process, so it only pulls in new changes.
+1.  **Scheduled Trigger**: The pipeline is automatically triggered by a scheduler (GitHub Actions). The production environment runs nightly.
+2.  **Extract Data**: The pipeline connects to each configured REDCap project via its API and asks for records that have been created or modified since the last successful run.
 3.  **Transform Data**: This is a key step. The pipeline uses a set of **field mapping configuration files** to translate the data from REDCap's format to IDhub's standard format. For example, it might:
     - Rename a field from `collection_date` in REDCap to `date_collected` for IDhub.
     - Convert a multiple-choice value (e.g., `1`) to its text equivalent (e.g., `Whole Blood`).

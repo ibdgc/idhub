@@ -18,7 +18,7 @@ Most errors are caught during the **Validation Stage**. When an error is found, 
   3.  Verify that the ID is correctly formatted and does not contain typos or extra characters. Correct the ID in your source data file.
 
 !!! tip "Advanced Subject ID Troubleshooting"
-For complex identity resolution issues, you can directly query the `identity_resolutions` table or the `v_multi_gsid_conflicts` view to see exactly how the GSID service made its decision. Learn more in the [Guide to Audit & Resolution Tables](./audit-resolution-tables.md).
+	For complex identity resolution issues, you can directly query the `identity_resolutions` table or the `v_multi_gsid_conflicts` view to see exactly how the GSID service made its decision. Learn more in the [Guide to Audit & Resolution Tables](./audit-resolution-tables.md).
 
 ---
 

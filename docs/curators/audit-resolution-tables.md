@@ -1,6 +1,6 @@
 # Understanding Audit & Resolution Tables
 
-To ensure data quality, transparency, and traceability, IDhub uses a set of powerful "audit" and "resolution" tables. As a data curator, you can use these tables (and the helpful views built on top of them) to troubleshoot ingestion issues, track the history of a record, and manage data conflicts.
+To ensure data quality, transparency, and traceability, IDhub uses a set of "audit" and "resolution" tables. As a data curator, you can use these tables (and the helpful views built on top of them) to troubleshoot ingestion issues, track the history of a record, and manage data conflicts.
 
 This guide provides a detailed overview of these tables and how to use them.
 
@@ -12,7 +12,7 @@ These tables store the raw logs and data related to the ingestion and identity r
 
 ### `data_change_audit`
 
-- **What it is**: A complete, unchangeable log of every single `INSERT` and `UPDATE` that happens in the database.
+- **What it is**: A complete, unchangeable log of every single `INSERT` and `UPDATE` that happens in the database via the ingestion workflows.
 - **Why it's useful**: This is your go-to table for answering "Who changed this record, when, and what did they change?". It provides a full history for any piece of data.
 - **Key Columns**:
   - `table_name`: The database table that was modified (e.g., `lcl`, `subjects`).
@@ -63,7 +63,7 @@ These tables store the raw logs and data related to the ingestion and identity r
 
 ## Helpful Views for Data Curation
 
-Views are essentially saved, pre-built queries that present the information from the audit tables in a more focused and user-friendly way. As a curator, you will likely interact with these views more often than the raw tables.
+Views are essentially saved, pre-built queries that present the information from the audit tables in a more focused and user-friendly way.
 
 ### `v_subjects_requiring_review`
 

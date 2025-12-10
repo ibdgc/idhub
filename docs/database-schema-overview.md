@@ -59,7 +59,8 @@ A single subject might have many different identifiers across different studies 
     *   `identifier_type`: The type of local ID (e.g., `consortium_id`, `local_id`).
     *   `center_id`: The center that this subject was recruited by.
 
-> **How to use this table**: If you have a local ID and need to find the subject's GSID, you can search this table for the `local_subject_id` to find the corresponding `global_subject_id`.
+!!! tip "How to use this table" 
+	If you have a local ID and need to find the subject's GSID, you can search this table for the `local_subject_id` to find the corresponding `global_subject_id`.
 
 ### 3. Sample & Assay Tables (`genotype`, `sequence`, `lcl`, `specimen`, etc.)
 

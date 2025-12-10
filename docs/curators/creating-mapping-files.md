@@ -6,84 +6,131 @@ This guide breaks down each section of the mapping file with explanations and ex
 
 ---
 
-### Section-by-Section Explanation
+### Section Schema
 
 #### `field_mapping`
 
-- **Purpose**: To map columns from your source CSV file to their target columns in the database.
-- **Format**: A dictionary where the `"key"` is the **target database column name** and the `"value"` is the **header name of the source column** in your CSV.
-- **Example**:
-  ```json
-  "field_mapping": {
-    "sample_id": "collaborator_sample_id"
-  }
-  ```
-  This tells the validator: "For the database's `sample_id` field, get the data from my CSV's `collaborator_sample_id` column."
+!!! abstract "Schema: `field_mapping`"
+    - **Purpose**: To map columns from your source CSV file to their target columns in the database.
+    - **Format**: A dictionary where the `"key"` is the **target database column name** and the `"value"` is the **header name of the source column** in your CSV.
+    - **Example**:
+      ```json
+      "field_mapping": {
+        "sample_id": "collaborator_sample_id"
+      }
+      ```
+      This tells the validator: "For the database table's `sample_id` field, get the data from my CSV's `collaborator_sample_id` column."
 
 #### `static_fields`
 
-- **Purpose**: To assign a fixed, constant value to a database field for **every row** in your file. This is useful when a value is the same for all records in a batch (e.g., the project name or sample type).
-- **Format**: A dictionary where the `"key"` is the **target database column name** and the `"value"` is the **static value** you want to assign.
-- **Example**:
-  ```json
-  "static_fields": {
-    "project": "IBDGC-PRO",
-    "sample_type": "bge"
-  }
-  ```
-  This will set the `project` field to "IBDGC-PRO" and the `sample_type` field to "bge" for all records processed with this mapping.
+!!! abstract "Schema: `static_fields`"
+    - **Purpose**: To assign a fixed, constant value to a database field for **every row** in your file. This is useful when a value is the same for all records in a batch (e.g., the project name or sample type).
+    - **Format**: A dictionary where the `"key"` is the **target database column name** and the `"value"` is the **static value** you want to assign.
+    - **Example**:
+      ```json
+      "static_fields": {
+        "project": "cd_ileal",
+        "sample_type": "bge"
+      }
+      ```
+      This will set the IDhub table `project` field to "cd_ileal" and the `sample_type` field to "bge" for all records processed with this mapping.
 
-#### `subject_id_candidates`
+#### `subject_id_`
 
-- **Purpose**: To tell the validator which column(s) to use to identify the subject for each row. The validator will check these in order. This is the most flexible and powerful feature for subject resolution.
-- **Format**: A dictionary where the `"key"` is the **header name of the source column** in your CSV, and the `"value"` is the **`identifier_type`** that corresponds to that ID.
-- **Example**:
+!!! abstract "Schema: `subject_id_candidates` and `subject_id_type_field`"
+    There are two primary methods for telling the validator how to find the subject associated with each row in your CSV. You should choose one method.
 
-  ```json
-  "subject_id_candidates": {
-    "consortium_id": "consortium_id",
-    "niddk_no": "local_id"
-  }
-  ```
+    **Method 1: Different ID Types in Different Columns**
 
-  This tells the validator: "For each row, first look in the `consortium_id` column. If you find a value, treat it as a `consortium_id`. If that column is empty, look in the `niddk_no` column and treat that value as a `local_id`."
+    This is the most common and flexible method. You use the `subject_id_candidates` dictionary to specify multiple columns, each with its own pre-defined identifier type.
 
-  !!! note "Backward Compatibility"
-  The validator also supports an older format where this field is a simple list of strings (e.g., `["consortium_id", "subject_id"]`). In that case, the validator will use the column name itself as the `identifier_type`. The dictionary format is preferred for clarity and flexibility.
+    - **`subject_id_candidates`**: A dictionary where the key is the CSV column name, and the value is its corresponding `identifier_type`. The validator checks these columns in the order they appear in your mapping file.
+    - **`subject_id_type_field`**: Must be set to `null`.
 
-#### `subject_id_type_field`
+    **Example**:
 
-- **Purpose**: An alternative way to specify the `identifier_type`. If this field is set, the validator will look for a column in your CSV with this name and use its value as the `identifier_type` for all candidates.
-- **Format**: A string containing a column name from your CSV.
-- **Example**:
-  ```json
-  "subject_id_type_field": "type_of_id"
-  ```
-  If your CSV has a `type_of_id` column, the validator will use the value in that column for each row (e.g., "consortium_id" or "local_id"). This is generally less flexible than the dictionary format for `subject_id_candidates` and should only be used in specific cases. Set it to `null` if you are using the dictionary format.
+    Your CSV has separate columns for consortium IDs and local IDs:
+
+    ```csv
+    consortium_id,niddk_no,other_data
+    IDG-001-A,,...
+    ,NIDDK-3333,...
+    ```
+
+    Your mapping file would define the type for each column and the search order:
+
+    ```json
+    "subject_id_candidates": {
+      "consortium_id": "consortium_id",
+      "niddk_no": "local_id"
+    },
+    "subject_id_type_field": null
+    ```
+
+    This tells the validator: "For each row, first look in the `consortium_id` column and treat any value as a `consortium_id`. Then look in the `niddk_no` column and treat that value as a `local_id`."
+
+    **Method 2: ID Value and Type in Separate Columns**
+
+    This method is used when your CSV file has one column for the subject identifier and another column that specifies the *type* of identifier for that row.
+
+    - **`subject_id_candidates`**: A dictionary or list specifying the column(s) that contain the identifier *value*.
+    - **`subject_id_type_field`**: The name of the CSV column that contains the identifier *type* (e.g., "consortium_id", "local_id").
+
+    **Example**:
+
+    Your CSV has a generic `subject_id` column and an `identifier_type` column:
+
+    ```csv
+    subject_id,identifier_type,other_data
+    IDG-001-A,consortium_id,...
+    LOCAL-999,local_id,...
+    ```
+
+    Your mapping file would point to these two columns:
+
+    ```json
+    "subject_id_candidates": {
+      "subject_id": "consortium_id" // The type here is a fallback and is overridden by the column value.
+    },
+    "subject_id_type_field": "identifier_type"
+    ```
+
+    This configuration tells the validator: "For each row, get the identifier value from the `subject_id` column. Then, get the identifier's type from the `identifier_type` column for that same row."
+
+    !!! warning "Do Not Mix Methods"
+        Do not mix these two methods. If you use the recommended dictionary format in `subject_id_candidates` to define types for each column, you **must** set `subject_id_type_field` to `null`.
+
+    !!! note "Backward Compatibility"
+        The `subject_id_candidates` field also supports a simple list of strings (e.g., `["consortium_id", "subject_id"]`). In that case, the validator will use the column name itself as the `identifier_type`. The dictionary format is preferred for clarity and flexibility.
 
 #### `center_id_field`
 
-- **Purpose**: To specify which column in your CSV contains the **name** of the center associated with the record.
-- **Format**: A string containing a column name.
-- **Example**:
-  ```json
-  "center_id_field": "center_name"
-  ```
-  The validator will take the value from this column (e.g., "MSSM", "Cedars-Sinai") and use its fuzzy-matching and alias logic to find the correct numeric center ID.
+!!! abstract "Schema: `center_id_field`"
+    - **Purpose**: To specify which column in your CSV contains the **name** of the center associated with the record.
+    - **Format**: A string containing a column name.
+    - **Example**:
+      ```json
+      "center_id_field": "center_name"
+      ```
+      The validator will take the value from this column (e.g., "MSSM", "Cedars-Sinai") and use its fuzzy-matching and alias logic to find the correct numeric center ID.
 
 #### `default_center_id`
 
-- **Purpose**: A fallback numeric ID to use if the `center_id_field` is not provided in the mapping, or if the column is empty for a given row.
-- **Format**: An integer.
+!!! abstract "Schema: `default_center_id`"
+    - **Purpose**: A fallback numeric ID to use if the `center_id_field` is not provided in the mapping, or if the column is empty for a given row. The `center_id = 1` is `Unknown` in IDhub.
+    - **Format**: An integer.
 
 #### `exclude_from_load`
 
-- **Purpose**: To list any columns from your source CSV that are needed for validation (like `consortium_id`) but should **not** be loaded into the final data table itself. This prevents metadata used for mapping from being incorrectly inserted as data.
-- **Format**: A list of strings.
-- **Example**:
-  ```json
-  "exclude_from_load": ["consortium_id", "center_id"]
-  ```
+!!! abstract "Schema: `exclude_from_load`"
+    - **Purpose**: To list any columns from your source CSV that are needed for validation (like `consortium_id`) but should **not** be loaded into the final sample table itself. This prevents metadata used for mapping from being incorrectly inserted as data.
+    - **Format**: A list of strings.
+    - **Example**:
+      ```json
+      "exclude_from_load": ["consortium_id", "center_id"]
+      ```
+    !!! note "Clarifying Exclusions"
+    	Exclusion of some of these fields may seem counterintuitive since the values still end up in the database. This is necessary because while something like `center_id` may get mapped in the `subjects` table, it doesn't get loaded in the corresponding sample table that the rest of the data gets loaded into. Each loading is typically filling multiple tables.
 
 ---
 
@@ -91,7 +138,7 @@ This guide breaks down each section of the mapping file with explanations and ex
 
 === "Full Template"
 
-    Here is a complete example of a mapping file that uses all available features.
+    Here is a complete example of a mapping file. It demonstrates the recommended method for subject identification (Method 1), where different ID types are in different columns in the source file. Note how `subject_id_candidates` defines the types, and `subject_id_type_field` is set to `null`.
 
     ```json
     {
