@@ -6,9 +6,7 @@ This guide breaks down each section of the mapping file with explanations and ex
 
 ---
 
-### Section Schema
-
-#### `field_mapping`
+### Configuration Schema
 
 !!! abstract "Schema: `field_mapping`"
     - **Purpose**: To map columns from your source CSV file to their target columns in the database.
@@ -21,8 +19,6 @@ This guide breaks down each section of the mapping file with explanations and ex
       ```
       This tells the validator: "For the database table's `sample_id` field, get the data from my CSV's `collaborator_sample_id` column."
 
-#### `static_fields`
-
 !!! abstract "Schema: `static_fields`"
     - **Purpose**: To assign a fixed, constant value to a database field for **every row** in your file. This is useful when a value is the same for all records in a batch (e.g., the project name or sample type).
     - **Format**: A dictionary where the `"key"` is the **target database column name** and the `"value"` is the **static value** you want to assign.
@@ -34,8 +30,6 @@ This guide breaks down each section of the mapping file with explanations and ex
       }
       ```
       This will set the IDhub table `project` field to "cd_ileal" and the `sample_type` field to "bge" for all records processed with this mapping.
-
-#### `subject_id_`
 
 !!! abstract "Schema: `subject_id_candidates` and `subject_id_type_field`"
     There are two primary methods for telling the validator how to find the subject associated with each row in your CSV. You should choose one method.
@@ -103,8 +97,6 @@ This guide breaks down each section of the mapping file with explanations and ex
     !!! note "Backward Compatibility"
         The `subject_id_candidates` field also supports a simple list of strings (e.g., `["consortium_id", "subject_id"]`). In that case, the validator will use the column name itself as the `identifier_type`. The dictionary format is preferred for clarity and flexibility.
 
-#### `center_id_field`
-
 !!! abstract "Schema: `center_id_field`"
     - **Purpose**: To specify which column in your CSV contains the **name** of the center associated with the record.
     - **Format**: A string containing a column name.
@@ -114,13 +106,9 @@ This guide breaks down each section of the mapping file with explanations and ex
       ```
       The validator will take the value from this column (e.g., "MSSM", "Cedars-Sinai") and use its fuzzy-matching and alias logic to find the correct numeric center ID.
 
-#### `default_center_id`
-
 !!! abstract "Schema: `default_center_id`"
     - **Purpose**: A fallback numeric ID to use if the `center_id_field` is not provided in the mapping, or if the column is empty for a given row. The `center_id = 1` is `Unknown` in IDhub.
     - **Format**: An integer.
-
-#### `exclude_from_load`
 
 !!! abstract "Schema: `exclude_from_load`"
     - **Purpose**: To list any columns from your source CSV that are needed for validation (like `consortium_id`) but should **not** be loaded into the final sample table itself. This prevents metadata used for mapping from being incorrectly inserted as data.

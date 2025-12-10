@@ -46,40 +46,37 @@ Custom grid views can be created to establish permanant, modified representation
 
 NocoDB provides powerful tools to help you find the specific data you need without having to scroll through thousands of rows.
 
-### 1. Sorting
+!!! tip "Sorting Data"
+    You can sort the entire table by the values in a specific column.
 
-You can sort the entire table by the values in a specific column.
+    *   Click the **down arrow** icon in a column header.
+    *   Select **"Sort Ascending"** (A-Z, 1-100) or **"Sort Descending"** (Z-A, 100-1).
+    *   A small arrow will appear in the column header to indicate that the table is being sorted by that column.
 
-*   Click the **down arrow** icon in a column header.
-*   Select **"Sort Ascending"** (A-Z, 1-100) or **"Sort Descending"** (Z-A, 100-1).
-*   A small arrow will appear in the column header to indicate that the table is being sorted by that column.
+!!! tip "Filtering Data"
+    Filtering allows you to show only the rows that meet certain criteria. This is one of the most useful features for exploring data.
 
-### 2. Filtering
+    *   Click the **"Filter"** button, usually located at the top of the grid view.
+    *   Click **"Add Filter"**.
+    *   Build your filter condition by choosing:
+        1.  The **column** you want to filter on (e.g., `genotyping_project`).
+        2.  The **operator** (e.g., `is`, `is not`, `contains`, `is empty`).
+        3.  The **value** to compare against (e.g., `ProjectX`).
 
-Filtering allows you to show only the rows that meet certain criteria. This is one of the most useful features for exploring data.
+    **Example: Find all genotype records from a specific project.**
 
-*   Click the **"Filter"** button, usually located at the top of the grid view.
-*   Click **"Add Filter"**.
-*   Build your filter condition by choosing:
-    1.  The **column** you want to filter on (e.g., `genotyping_project`).
-    2.  The **operator** (e.g., `is`, `is not`, `contains`, `is empty`).
-    3.  The **value** to compare against (e.g., `ProjectX`).
+    1.  Open the `genotype` table.
+    2.  Click **Filter -> Add Filter**.
+    3.  Set the condition to: `genotyping_project` `is` `ProjectX`.
+    4.  The grid will update to show only the genotype records belonging to "ProjectX".
 
-**Example: Find all genotype records from a specific project.**
+    You can add multiple filter conditions to create more complex queries. For example, you could add a second condition: `AND` `quality_score` `is greater than` `8.5`.
 
-1.  Open the `genotype` table.
-2.  Click **Filter -> Add Filter**.
-3.  Set the condition to: `genotyping_project` `is` `ProjectX`.
-4.  The grid will update to show only the genotype records belonging to "ProjectX".
+!!! tip "Searching Data"
+    For a quick lookup, use the **Search** bar, typically located at the top right of the view.
 
-You can add multiple filter conditions to create more complex queries. For example, you could add a second condition: `AND` `quality_score` `is greater than` `8.5`.
-
-### 3. Searching
-
-For a quick lookup, use the **Search** bar, typically located at the top right of the view.
-
-*   Enter a term you are looking for (e.g., a specific `sample_id` or `global_subject_id`).
-*   NocoDB will search across all fields in the current table and show you the matching rows.
+    *   Enter a term you are looking for (e.g., a specific `sample_id` or `global_subject_id`).
+    *   NocoDB will search across all fields in the current table and show you the matching rows.
 
 ---
 

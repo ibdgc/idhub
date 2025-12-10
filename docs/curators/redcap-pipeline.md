@@ -22,13 +22,14 @@ sequenceDiagram
     end
 ```
 
-1.  **Scheduled Trigger**: The pipeline is automatically triggered by a scheduler (GitHub Actions). The production environment runs nightly.
-2.  **Extract Data**: The pipeline connects to each configured REDCap project via its API and asks for records that have been created or modified since the last successful run.
-3.  **Transform Data**: This is a key step. The pipeline uses a set of **field mapping configuration files** to translate the data from REDCap's format to IDhub's standard format. For example, it might:
-    - Rename a field from `collection_date` in REDCap to `date_collected` for IDhub.
-    - Convert a multiple-choice value (e.g., `1`) to its text equivalent (e.g., `Whole Blood`).
-    - Identify which field should be used as the subject identifier (e.g., `consortium_id`).
-4.  **Stage Fragments**: Each transformed record is saved as a standardized data "fragment" and uploaded to a secure staging area in IDhub.
+!!! info "Pipeline Steps"
+    1.  **Scheduled Trigger**: The pipeline is automatically triggered by a scheduler (GitHub Actions). The production environment runs nightly.
+    2.  **Extract Data**: The pipeline connects to each configured REDCap project via its API and asks for records that have been created or modified since the last successful run.
+    3.  **Transform Data**: This is a key step. The pipeline uses a set of **field mapping configuration files** to translate the data from REDCap's format to IDhub's standard format. For example, it might:
+        - Rename a field from `collection_date` in REDCap to `date_collected` for IDhub.
+        - Convert a multiple-choice value (e.g., `1`) to its text equivalent (e.g., `Whole Blood`).
+        - Identify which field should be used as the subject identifier (e.g., `consortium_id`).
+    4.  **Stage Fragments**: Each transformed record is saved as a standardized data "fragment" and uploaded to a secure staging area in IDhub.
 
 From this point, the fragments enter the standard [Validation and Loading](./ingestion-summary.md#stage-2-validation-ensuring-data-quality) process.
 
@@ -36,31 +37,30 @@ From this point, the fragments enter the standard [Validation and Loading](./ing
 
 While software maintainers manage the core configuration, it's useful for data curators to know what is being configured.
 
-### Project Configuration
+!!! abstract "Project Configuration (`projects.json`)"
+    A central file (`projects.json`) tells the pipeline which REDCap projects to connect to. Each project has its own settings, including:
 
-A central file (`projects.json`) tells the pipeline which REDCap projects to connect to. Each project has its own settings, including:
+    - **Project ID**: The ID of the project in REDCap.
+    - **API Token**: The credentials needed to access the project's data.
+    - **Field Mappings File**: Which mapping file to use for transforming the data from this specific project.
+    - **Enabled Flag**: Whether the project should be included in the automated runs.
 
-- **Project ID**: The ID of the project in REDCap.
-- **API Token**: The credentials needed to access the project's data.
-- **Field Mappings File**: Which mapping file to use for transforming the data from this specific project.
-- **Enabled Flag**: Whether the project should be included in the automated runs.
+!!! abstract "Field Mappings"
+    This is the most important configuration from a data curator's perspective. Each project has one or more mapping files that act as a "Rosetta Stone" between the REDCap data dictionary and the IDhub database schema.
 
-### Field Mappings
+    These files define rules such as:
 
-This is the most important configuration from a data curator's perspective. Each project has one or more mapping files that act as a "Rosetta Stone" between the REDCap data dictionary and the IDhub database schema.
+    - `"target_field": "source_field"`: Maps a REDCap field to an IDhub field.
+    - `subject_id_candidates`: A list of fields to try, in order, to identify the subject.
+    - `transformations`: Rules for converting data, like changing date formats or mapping codes to values.
 
-These files define rules such as:
-
-- `"target_field": "source_field"`: Maps a REDCap field to an IDhub field.
-- `subject_id_candidates`: A list of fields to try, in order, to identify the subject.
-- `transformations`: Rules for converting data, like changing date formats or mapping codes to values.
-
-If you notice that data from a REDCap project is not appearing correctly in IDhub, it is often an issue with these mapping files.
+    If you notice that data from a REDCap project is not appearing correctly in IDhub, it is often an issue with these mapping files.
 
 ## What You Need to Do
 
-For the most part, the REDCap pipeline is a "hands-off" system for data curators. Your main responsibilities are:
+!!! warning "Curator Responsibilities"
+    For the most part, the REDCap pipeline is a "hands-off" system for data curators. Your main responsibilities are:
 
-1.  **Ensure Data Quality in REDCap**: The pipeline can only extract what is in REDCap. Correcting data at the source is always the best approach.
-2.  **Communicate Changes**: If you or your team are planning to change the data dictionary of a connected REDCap project (e.g., renaming fields, adding new fields), you **must** notify the IDhub software maintainers. The pipeline's field mapping configurations will need to be updated to match, otherwise the pipeline will fail or data will be missed.
-3.  **Review Validation Errors**: If records extracted by the pipeline fail the [Validation Stage](./ingestion-summary.md#stage-2-validation-ensuring-data-quality), the errors will be logged. You may be asked to review these errors and correct the data in REDCap.
+    1.  **Ensure Data Quality in REDCap**: The pipeline can only extract what is in REDCap. Correcting data at the source is always the best approach.
+    2.  **Communicate Changes**: If you or your team are planning to change the data dictionary of a connected REDCap project (e.g., renaming fields, adding new fields), you **must** notify the IDhub software maintainers. The pipeline's field mapping configurations will need to be updated to match, otherwise the pipeline will fail or data will be missed.
+    3.  **Review Validation Errors**: If records extracted by the pipeline fail the [Validation Stage](./ingestion-summary.md#stage-2-validation-ensuring-data-quality), the errors will be logged. You may be asked to review these errors and correct the data in REDCap.

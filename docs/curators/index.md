@@ -2,18 +2,70 @@
 
 This section provides guides and documentation for data curators who are responsible for preparing, validating, and loading data into IDhub.
 
-Here you will find a set of guides to walk you through the process of getting data into IDhub. They recommend following them in order:
+<div class="grid cards" markdown>
 
-1.  **[Ingestion Overview](./ingestion-summary.md)**: A high-level overview of the entire data ingestion process.
-2.  **[Manual Ingestion Guide](./fragment-ingestion-guide.md)**: The main guide, which includes:
-    - Setting up your local computer to run the validator.
-    - Preparing your data file.
-    - Running the validation and loading process.
-3.  **[Creating a Mapping File](./creating-mapping-files.md)**: A detailed walkthrough of how to create the JSON mapping file required by the validator.
-4.  **[Example Data Templates](./creating-mapping-files.md#table-specific-templates)**: A collection of annotated CSV and JSON examples for each sample type.
-5.  **[Audit & Resolution Tables](./audit-resolution-tables.md)**: An advanced guide to using the audit tables for in-depth troubleshooting.
-6.  **[Troubleshooting Ingestion](./troubleshooting.md)**: A guide to understanding and fixing common data quality errors.
-7.  **[Automated REDCap Pipeline](./redcap-pipeline.md)**: Information on how the automated pipeline from REDCap works.
-8.  **Exploring Data**:
-    - [Exploring Data with NocoDB](../exploring-with-nocodb.md)
-    - [Finding Help and Documentation](../finding-help-and-documentation.md)
+-   :material-list-box-outline: **Ingestion Overview**
+
+    ***
+
+    Start here for a high-level overview of the entire data ingestion process from start to finish.
+
+    [:octicons-arrow-right-24: Read the Overview](./ingestion-summary.md)
+
+-   :material-upload-outline: **Manual Ingestion Guide**
+
+    ***
+
+    The main step-by-step guide for validating and loading data that does not come from an automated source.
+
+    [:octicons-arrow-right-24: Follow the Guide](./fragment-ingestion-guide.md)
+
+-   :material-file-code-outline: **Creating Mapping Files**
+
+    ***
+
+    A detailed walkthrough of how to create the JSON mapping file required by the validator.
+
+    [:octicons-arrow-right-24: Learn about Mappings](./creating-mapping-files.md)
+
+-   :material-table-large: **Example Templates**
+
+    ***
+
+    A collection of annotated CSV and JSON examples for each sample type to help you structure your data.
+
+    [:octicons-arrow-right-24: See Examples](./creating-mapping-files.md#table-specific-templates)
+
+-   :material-database-search-outline: **Audit & Resolution**
+
+    ***
+
+    An advanced guide to using the audit tables for in-depth troubleshooting and data history tracking.
+
+    [:octicons-arrow-right-24: Troubleshoot with Audit Tables](./audit-resolution-tables.md)
+
+-   :material-alert-outline: **Troubleshooting Guide**
+
+    ***
+
+    A guide to understanding and fixing the most common data quality and ingestion errors.
+
+    [:octicons-arrow-right-24: Fix Common Errors](./troubleshooting.md)
+
+-   :material-robot-outline: **Automated REDCap Pipeline**
+
+    ***
+
+    Learn how the automated data pipeline from our REDCap projects works.
+
+    [:octicons-arrow-right-24: Understand the Pipeline](./redcap-pipeline.md)
+
+-   :material-magnify: **Exploring Data**
+
+    ***
+
+    Learn how to browse data with NocoDB and find additional help and documentation.
+
+    [:octicons-arrow-right-24: Explore Data in NocoDB](../exploring-with-nocodb.md)
+
+</div>
