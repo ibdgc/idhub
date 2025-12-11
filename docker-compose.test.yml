@@ -13,7 +13,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-  gsid-service:
+  test-gsid:
     build:
       context: ./gsid-service
       dockerfile: Dockerfile.test
@@ -32,7 +32,7 @@ services:
     depends_on:
       test_db:
         condition: service_healthy
-  redcap-pipeline:
+  test-redcap:
     build:
       context: ./redcap-pipeline
       dockerfile: Dockerfile.test
@@ -52,7 +52,7 @@ services:
     depends_on:
       test_db:
         condition: service_healthy
-  fragment-validator:
+  test-validator:
     build:
       context: ./fragment-validator
       dockerfile: Dockerfile.test
@@ -66,7 +66,7 @@ services:
     command: >
       sh -c "pytest -v  --cov=.  --cov-report=term-missing  --cov-report=html:htmlcov  --cov-report=xml:test-reports/coverage.xml  --junitxml=test-reports/junit.xml
       --html=test-reports/report.html  --self-contained-html"
-  table-loader:
+  test-loader:
     build:
       context: ./table-loader
       dockerfile: Dockerfile.test
