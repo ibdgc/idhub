@@ -34,7 +34,22 @@ Before you can run the validator script on your local machine, you need to set u
         - **`NOCODB_TOKEN`**: Generate this key yourself from the NocoDB web interface. Log into `idhub.ibdgc.org`, click the gear settings icon in the left navigation, and go to the "Tokens" section.
         - **`GSID_API_KEY`**: This key is managed by the system administrators. Please contact them to obtain the **Production** key.
 
-!!! abstract "Step 3: Create a Secure `.env` File"
+
+!!! abstract "Step 3: Configure AWS Credentials"
+    The `fragment-validator` interacts with AWS S3 staging buckets. To authenticate these interactions in your local environment, you need to configure your AWS credentials. The validator will automatically pick up credentials configured for the AWS Command Line Interface (CLI).
+
+    1.  **Install AWS CLI**: If you don't have it, install the [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html).
+    2.  **Configure AWS CLI**: Open your terminal and run the following command. You will be prompted to enter your `AWS Access Key ID`, `AWS Secret Access Key`, and your preferred default region.
+        ```bash
+        aws configure
+        ```
+    3.  **Verify Configuration**: You can verify your setup by trying to list S3 buckets (ensure you have permissions for this):
+        ```bash
+        aws s3 ls
+        ```
+        This step is crucial for the fragment validator to be able to read and write to the S3 staging buckets.
+
+!!! abstract "Step 4: Create a Secure `.env` File"
     The validator requires secret API keys to communicate with other IDhub services. These are managed in a local `.env` file, which is a plain text file you create in the root of the `idhub` project directory.
 
     !!! warning "DO NOT COMMIT OR SHARE THIS FILE"
