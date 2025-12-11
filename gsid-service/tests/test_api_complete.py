@@ -132,7 +132,7 @@ class TestRegisterSubject:
         """Test registering a new subject"""
         with (
             patch("api.routes.get_db_connection"),
-            patch("api.routes.resolve_subject_with_multiple_ids") as mock_resolve,
+            patch("services.identity_resolution.resolve_subject_with_multiple_ids") as mock_resolve,
         ):
             mock_resolve.return_value = {
                 "gsid": "GSID-NEW123456",
@@ -157,7 +157,7 @@ class TestRegisterSubject:
         """Test linking to existing subject"""
         with (
             patch("api.routes.get_db_connection"),
-            patch("api.routes.resolve_subject_with_multiple_ids") as mock_resolve,
+            patch("services.identity_resolution.resolve_subject_with_multiple_ids") as mock_resolve,
         ):
             mock_resolve.return_value = {
                 "gsid": "GSID-EXISTING123",
