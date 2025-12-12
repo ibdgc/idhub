@@ -1,0 +1,105 @@
+name: Purge Records
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment. Only "qa" is supported for this workflow.'
+        required: true
+        type: choice
+        options:
+          - qa
+      confirm:
+        description: 'This is a destructive action. Type "purge qa" to confirm.'
+        required: true
+        type: string
+  schedule:
+    - cron: '0 6 * * *' # 1 AM ET / 6 AM UTC
+jobs:
+  purge-records:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: qa # Always targets 'qa' environment
+    # Allow workflow_dispatch with confirmation OR any scheduled run
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'qa' && github.event.inputs.confirm == 'purge qa') ||
+      (github.event_name == 'schedule')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Display environment info
+        run: |
+          # For workflow_dispatch, use the input. For schedule, it's implicitly 'qa'.
+          ENV_NAME="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || 'qa' }}"
+          echo "::warning::Purging records in environment: $ENV_NAME"
+          echo "::warning::This is a destructive operation."
+
+      - name: Set up SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY_QA }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.SSH_HOST_QA }} >> ~/.ssh/known_hosts
+
+      - name: Purge records on server
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST_QA }}
+          SSH_USER: ${{ secrets.SSH_USER_QA }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_HOST} << 'ENDSSH'
+            set -e
+            echo "=== Starting Purge Records on QA ==="
+            # Navigate to project directory
+            cd /opt/idhub
+            # Verify .env file exists
+            if [ ! -f .env ]; then
+              echo "ERROR: .env file not found"
+              exit 1
+            fi
+            echo "Stopping services..."
+            docker-compose down
+            echo "Removing database volume..."
+            docker volume rm idhub_idhub_db_data || echo "Volume idhub_idhub_db_data not found or could not be removed."
+            echo "Starting services..."
+            docker-compose up -d
+            echo "Waiting for services to initialize..."
+            sleep 10
+            echo "Verifying services are running..."
+            docker-compose ps
+            echo "=== Purge completed successfully ==="
+          ENDSSH
+
+      - name: Cleanup SSH key
+        if: always()
+        run: |
+          rm -f ~/.ssh/deploy_key
+          
+      - name: Purge summary
+        if: success()
+        run: |
+          ENV_NAME_SUMMARY="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || 'qa' }}"
+          echo "## ✅ Purge Successful" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Purge Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: \`${ENV_NAME_SUMMARY}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+      - name: Purge failure notification
+        if: failure()
+        run: |-
+          ENV_NAME_FAILURE="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || 'qa' }}"
+          echo "## ❌ Purge Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Purge Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: \`${ENV_NAME_FAILURE}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Troubleshooting" >> $GITHUB_STEP_SUMMARY
+          echo "1. Check the workflow logs above for detailed error messages" >> $GITHUB_STEP_SUMMARY
+          echo "2. SSH into the server to inspect service logs:" >> $GITHUB_STEP_SUMMARY
+          echo "   \`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "   cd /opt/idhub" >> $GITHUB_STEP_SUMMARY
+          echo "   docker-compose logs --tail=100" >> $GITHUB_STEP_SUMMARY
+          echo "   \`\`\`" >> $GITHUB_STEP_SUMMARY

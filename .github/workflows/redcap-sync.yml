@@ -2,7 +2,8 @@
 name: REDCap Sync Pipeline
 on:
   schedule:
-    - cron: 0 8 * * *
+    - cron: '0 8 * * *' # Existing schedule: 3 AM ET / 8 AM UTC, targeting prod
+    - cron: '0 7 * * *' # New schedule: 2 AM ET / 7 AM UTC, targeting qa
   workflow_dispatch:
     inputs:
       environment:
@@ -18,7 +19,8 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment || 'prod' }}
+    # Dynamically set the environment for the job based on trigger
+    environment: ${{ github.event_name == 'schedule' && (github.event.schedule == '0 7 * * *' && 'qa' || 'prod') || github.event.inputs.environment || 'prod' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -29,10 +31,15 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             ENV="${{ github.event.inputs.environment }}"
-          elif [ "${{ github.event_name }}" = "schedule" ]; then
-            ENV="prod"
+          elif [ "${{ github.event.name }}" = "schedule" ]; then
+            # Determine environment based on which cron schedule triggered it
+            if [ "${{ github.event.schedule }}" = "0 7 * * *" ]; then
+              ENV="qa"
+            else
+              ENV="prod"
+            fi
           else
-            ENV="qa"
+            ENV="prod" # Default for other non-dispatch/non-schedule events
           fi
           echo "environment=$ENV" >> $GITHUB_OUTPUT
           echo "::notice::Running in $ENV environment"
