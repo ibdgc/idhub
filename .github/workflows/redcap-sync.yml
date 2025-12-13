@@ -1,4 +1,3 @@
----
 name: REDCap Sync Pipeline
 on:
   schedule:
@@ -20,12 +19,8 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     # Dynamically set the environment for the job based on trigger
-    environment: ${{ github.event_name == 'schedule' && (github.event.schedule == '0 7 * * *' && 'qa' || 'prod') || github.event.inputs.environment || 'prod' }}
+    environment: ${{ (github.event_name == 'schedule' && contains(github.event.schedule, '0 7 * * *') && 'qa') || (github.event_name == 'schedule' && 'prod') || github.event.inputs.environment || 'prod' }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref_name }}
       - name: Determine environment
         id: env
         run: |
@@ -33,7 +28,7 @@ jobs:
             ENV="${{ github.event.inputs.environment }}"
           elif [ "${{ github.event.name }}" = "schedule" ]; then
             # Determine environment based on which cron schedule triggered it
-            if [ "${{ github.event.schedule }}" = "0 7 * * *" ]; then
+            if [[ "${{ github.event.schedule }}" == *"0 7 * * *"* ]]; then
               ENV="qa"
             else
               ENV="prod"
@@ -43,6 +38,10 @@ jobs:
           fi
           echo "environment=$ENV" >> $GITHUB_OUTPUT
           echo "::notice::Running in $ENV environment"
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.env.outputs.environment }}
       - name: Set up SSH tunnel
         env:
           SSH_PRIVATE_KEY: ${{ secrets[format('SSH_PRIVATE_KEY_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
@@ -128,7 +127,8 @@ jobs:
           echo "## REDCap Sync Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Environment**: ${{ steps.env.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ steps.env.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Project**: ${{ github.event.inputs.project_key || 'All enabled projects' }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Triggered by**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by**: @${{ github.actor }}"
+ >> $GITHUB_STEP_SUMMARY
