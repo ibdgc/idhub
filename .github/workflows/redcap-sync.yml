@@ -130,5 +130,4 @@ jobs:
           echo "- **Branch**: ${{ steps.env.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Project**: ${{ github.event.inputs.project_key || 'All enabled projects' }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Triggered by**: @${{ github.actor }}"
- >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
