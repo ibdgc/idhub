@@ -1,8 +1,9 @@
+---
 name: REDCap Sync Pipeline
 on:
   schedule:
-    - cron: '0 8 * * *' # Existing schedule: 3 AM ET / 8 AM UTC, targeting prod
-    - cron: '0 7 * * *' # New schedule: 2 AM ET / 7 AM UTC, targeting qa
+    - cron: 0 8 * * *  # 3 AM ET / 8 AM UTC - prod
+    - cron: 0 7 * * *  # 2 AM ET / 7 AM UTC - qa
   workflow_dispatch:
     inputs:
       environment:
@@ -16,37 +17,52 @@ on:
         required: false
         type: string
 jobs:
-  sync:
+  determine-environment:
     runs-on: ubuntu-latest
-    # Dynamically set the environment for the job based on trigger
-    environment: ${{ (github.event_name == 'schedule' && contains(github.event.schedule, '0 7 * * *') && 'qa') || (github.event_name == 'schedule' && 'prod') || github.event.inputs.environment || 'prod' }}
+    outputs:
+      run-qa: ${{ steps.check.outputs.run-qa }}
+      run-prod: ${{ steps.check.outputs.run-prod }}
+      project-key: ${{ steps.check.outputs.project-key }}
     steps:
-      - name: Determine environment
-        id: env
+      - name: Determine which environments to run
+        id: check
         run: |
+          HOUR=$(date -u +%H)
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            ENV="${{ github.event.inputs.environment }}"
-          elif [ "${{ github.event.name }}" = "schedule" ]; then
-            # Determine environment based on which cron schedule triggered it
-            if [[ "${{ github.event.schedule }}" == *"0 7 * * *"* ]]; then
-              ENV="qa"
+            if [ "${{ github.event.inputs.environment }}" = "qa" ]; then
+              echo "run-qa=true" >> $GITHUB_OUTPUT
+              echo "run-prod=false" >> $GITHUB_OUTPUT
             else
-              ENV="prod"
+              echo "run-qa=false" >> $GITHUB_OUTPUT
+              echo "run-prod=true" >> $GITHUB_OUTPUT
             fi
-          else
-            ENV="prod" # Default for other non-dispatch/non-schedule events
+            echo "project-key=${{ github.event.inputs.project_key }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            # 7 AM UTC = QA, 8 AM UTC = prod
+            if [ "$HOUR" = "07" ]; then
+              echo "run-qa=true" >> $GITHUB_OUTPUT
+              echo "run-prod=false" >> $GITHUB_OUTPUT
+            else
+              echo "run-qa=false" >> $GITHUB_OUTPUT
+              echo "run-prod=true" >> $GITHUB_OUTPUT
+            fi
+            echo "project-key=" >> $GITHUB_OUTPUT
           fi
-          echo "environment=$ENV" >> $GITHUB_OUTPUT
-          echo "::notice::Running in $ENV environment"
+  sync-qa:
+    needs: determine-environment
+    if: needs.determine-environment.outputs.run-qa == 'true'
+    runs-on: ubuntu-latest
+    environment: qa
+    steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.env.outputs.environment }}
+          ref: qa
       - name: Set up SSH tunnel
         env:
-          SSH_PRIVATE_KEY: ${{ secrets[format('SSH_PRIVATE_KEY_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          SSH_HOST: ${{ secrets[format('SSH_HOST_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
-          SSH_USER: ${{ secrets[format('SSH_USER_{0}', steps.env.outputs.environment == 'prod' && 'PROD' || 'QA')] }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY_QA }}
+          SSH_HOST: ${{ secrets.SSH_HOST_QA }}
+          SSH_USER: ${{ secrets.SSH_USER_QA }}
         run: |
           mkdir -p ~/.ssh
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
@@ -82,12 +98,12 @@ jobs:
         run: mkdir -p redcap-pipeline/logs
       - name: Run REDCap pipeline
         env:
-          ENVIRONMENT: ${{ steps.env.outputs.environment }}
+          ENVIRONMENT: qa
           REDCAP_API_URL: ${{ secrets.REDCAP_API_URL }}
           REDCAP_API_TOKEN_GAP: ${{ secrets.REDCAP_API_TOKEN_GAP }}
           REDCAP_API_TOKEN_CD_ILEAL: ${{ secrets.REDCAP_API_TOKEN_CD_ILEAL }}
           REDCAP_API_TOKEN_UC_DEMARC: ${{ secrets.REDCAP_API_TOKEN_UC_DEMARC }}
-          GSID_SERVICE_URL: ${{ steps.env.outputs.environment == 'prod' && 'https://api.idhub.ibdgc.org' || 'https://api.qa.idhub.ibdgc.org' }}
+          GSID_SERVICE_URL: https://api.qa.idhub.ibdgc.org
           GSID_API_KEY: ${{ secrets.GSID_API_KEY }}
           DB_HOST: localhost
           DB_PORT: 5432
@@ -97,8 +113,8 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: us-east-1
-          S3_BUCKET: ${{ steps.env.outputs.environment == 'prod' && 'idhub-curated-fragments' || 'idhub-curated-fragments-qa' }}
-          PROJECT_KEY: ${{ github.event.inputs.project_key }}
+          S3_BUCKET: idhub-curated-fragments-qa
+          PROJECT_KEY: ${{ needs.determine-environment.outputs.project-key }}
         run: |
           cd redcap-pipeline
           if [ -n "$PROJECT_KEY" ]; then
@@ -112,8 +128,105 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pipeline-logs-${{ steps.env.outputs.environment }}-${{ github.run_id
-            }}
+          name: pipeline-logs-qa-${{ github.run_id }}
+          path: redcap-pipeline/logs/
+          retention-days: 30
+      - name: Cleanup SSH tunnel
+        if: always()
+        run: |
+          pkill -f "ssh.*127.0.0.1:5432" || true
+          echo "✓ SSH tunnel closed"
+      - name: Summary
+        if: always()
+        run: |
+          echo "## REDCap Sync Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: qa" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: qa" >> $GITHUB_STEP_SUMMARY
+          echo "- **Project**: ${{ needs.determine-environment.outputs.project-key || 'All enabled projects' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+  sync-prod:
+    needs: determine-environment
+    if: needs.determine-environment.outputs.run-prod == 'true'
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: prod
+      - name: Set up SSH tunnel
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY_PROD }}
+          SSH_HOST: ${{ secrets.SSH_HOST_PROD }}
+          SSH_USER: ${{ secrets.SSH_USER_PROD }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts
+          ssh -4 -v -f -N \
+            -o ServerAliveInterval=60 \
+            -o ServerAliveCountMax=3 \
+            -L 127.0.0.1:5432:127.0.0.1:5432 \
+            $SSH_USER@$SSH_HOST
+          echo "Waiting for SSH tunnel..."
+          for i in {1..30}; do
+            if nc -zv 127.0.0.1 5432 2>&1 | grep -q succeeded; then
+              echo "Tunnel ready!"
+              exit 0
+            fi
+            echo "Attempt $i/30..."
+            sleep 2
+          done
+          echo "Tunnel failed to establish"
+          exit 1
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: redcap-pipeline/requirements.txt
+      - name: Install dependencies
+        run: |
+          cd redcap-pipeline
+          pip install -r requirements.txt
+      - name: Create logs directory
+        run: mkdir -p redcap-pipeline/logs
+      - name: Run REDCap pipeline
+        env:
+          ENVIRONMENT: prod
+          REDCAP_API_URL: ${{ secrets.REDCAP_API_URL }}
+          REDCAP_API_TOKEN_GAP: ${{ secrets.REDCAP_API_TOKEN_GAP }}
+          REDCAP_API_TOKEN_CD_ILEAL: ${{ secrets.REDCAP_API_TOKEN_CD_ILEAL }}
+          REDCAP_API_TOKEN_UC_DEMARC: ${{ secrets.REDCAP_API_TOKEN_UC_DEMARC }}
+          GSID_SERVICE_URL: https://api.idhub.ibdgc.org
+          GSID_API_KEY: ${{ secrets.GSID_API_KEY }}
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          S3_BUCKET: idhub-curated-fragments
+          PROJECT_KEY: ${{ needs.determine-environment.outputs.project-key }}
+        run: |
+          cd redcap-pipeline
+          if [ -n "$PROJECT_KEY" ]; then
+            echo "Running pipeline for specific project: $PROJECT_KEY"
+            python main.py --project "$PROJECT_KEY"
+          else
+            echo "Running pipeline for all enabled projects"
+            python main.py --all
+          fi
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-logs-prod-${{ github.run_id }}
           path: redcap-pipeline/logs/
           retention-days: 30
       - name: Cleanup SSH tunnel
@@ -126,8 +239,8 @@ jobs:
         run: |-
           echo "## REDCap Sync Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Environment**: ${{ steps.env.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Branch**: ${{ steps.env.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Project**: ${{ github.event.inputs.project_key || 'All enabled projects' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: prod" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: prod" >> $GITHUB_STEP_SUMMARY
+          echo "- **Project**: ${{ needs.determine-environment.outputs.project-key || 'All enabled projects' }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Triggered by**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
