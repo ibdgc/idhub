@@ -3,7 +3,7 @@ name: REDCap Sync Pipeline
 on:
   schedule:
     - cron: 0 8 * * * # 3 AM ET / 8 AM UTC - prod
-    - cron: 15 17 * * * # TEST - qa
+    - cron: 30 17 * * * # TEST - qa
   workflow_dispatch:
     inputs:
       environment:
@@ -39,8 +39,8 @@ jobs:
             echo "project-key=${{ github.event.inputs.project_key }}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" = "schedule" ]; then
             SCHEDULE="${{ github.event.schedule }}"
-            # 20 17 * * * = QA (Test)
-            if [[ "$SCHEDULE" == *"20 17 * * *"* ]]; then
+            # 30 17 * * * = QA (Test)
+            if [[ "$SCHEDULE" == *"30 17 * * *"* ]]; then
               echo "run-qa=true" >> $GITHUB_OUTPUT
               echo "run-prod=false" >> $GITHUB_OUTPUT
             else
