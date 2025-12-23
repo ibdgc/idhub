@@ -2,8 +2,8 @@
 name: REDCap Sync Pipeline
 on:
   schedule:
-    - cron: 0 8 * * *  # 3 AM ET / 8 AM UTC - prod
-    - cron: 19 55 * * *  # TEST - qa
+    - cron: 0 8 * * * # 3 AM ET / 8 AM UTC - prod
+    - cron: 55 19 * * * # TEST - qa
   workflow_dispatch:
     inputs:
       environment:
@@ -89,7 +89,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
           cache: pip
           cache-dependency-path: redcap-pipeline/requirements.txt
       - name: Install dependencies
@@ -187,7 +187,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
           cache: pip
           cache-dependency-path: redcap-pipeline/requirements.txt
       - name: Install dependencies
