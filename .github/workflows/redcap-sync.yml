@@ -3,7 +3,7 @@ name: REDCap Sync Pipeline
 on:
   schedule:
     - cron: 0 8 * * * # 3 AM ET / 8 AM UTC - prod
-    - cron: 55 19 * * * # TEST - qa
+    - cron: 5 17 * * * # TEST - qa
   workflow_dispatch:
     inputs:
       environment:
