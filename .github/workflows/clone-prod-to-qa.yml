@@ -1,0 +1,104 @@
+name: Clone Prod DB to QA
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'This acts as a "Force Reset". Type "clone prod" to confirm.'
+        required: true
+        type: string
+
+jobs:
+  clone-to-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: qa
+    if: github.event.inputs.confirm == 'clone prod'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY_QA }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.SSH_HOST_QA }} >> ~/.ssh/known_hosts
+
+      - name: Perform Clone on QA
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST_QA }}
+          SSH_USER: ${{ secrets.SSH_USER_QA }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_HOST} << 'ENDSSH'
+            set -e
+            echo "=== Starting Clone (Prod -> QA) ==="
+            cd /opt/idhub
+            
+            # Verify .env exists and load it
+            if [ ! -f .env ]; then
+              echo "ERROR: .env file not found"
+              exit 1
+            fi
+            export $(grep -v '^#' .env | xargs)
+            
+            echo "1. Finding latest Prod backup in S3..."
+            # List files in the prod backup folder, sort by time, pick the last one
+            LATEST_BACKUP=$(docker run --rm \
+              -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+              -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
+              -e AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION \
+              amazon/aws-cli s3 ls "s3://idhub-backup/prod/" | sort | tail -n 1 | awk '{print $4}')
+            
+            if [ -z "$LATEST_BACKUP" ]; then
+              echo "ERROR: No backup found in s3://idhub-backup/prod/"
+              exit 1
+            fi
+            
+            echo "Found: $LATEST_BACKUP"
+            
+            echo "2. Downloading backup..."
+            docker run --rm -v "$(pwd):/data" \
+              -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+              -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
+              -e AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION \
+              amazon/aws-cli s3 cp "s3://idhub-backup/prod/${LATEST_BACKUP}" "/data/restore.sql.gz"
+            
+            echo "3. Stopping services and resetting Database..."
+            docker-compose down
+            
+            # Remove the specific volume for the main IDHub DB
+            docker volume rm idhub_idhub_db_data || echo "Volume not found or already removed."
+            
+            echo "4. Starting Database Service..."
+            docker-compose up -d idhub_db
+            
+            echo "Waiting for DB to be ready..."
+            # Simple retry loop to wait for pg_isready
+            for i in {1..30}; do
+              if docker-compose exec -T idhub_db pg_isready -U idhub_user; then
+                echo "DB is ready."
+                break
+              fi
+              echo "Waiting for DB..."
+              sleep 2
+            done
+            
+            echo "5. Restoring Data..."
+            # Unzip and pipe directly into psql
+            zcat restore.sql.gz | docker-compose exec -T -e PGPASSWORD=$DB_PASSWORD idhub_db \
+              psql -U idhub_user -d idhub
+            
+            echo "6. Restarting all services..."
+            docker-compose up -d
+            
+            echo "7. Cleaning up..."
+            rm restore.sql.gz
+            
+            echo "=== Clone Completed Successfully ==="
+          ENDSSH
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
