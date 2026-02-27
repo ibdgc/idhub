@@ -1,0 +1,17 @@
+{
+  "field_mapping": {
+    "sample_id": "Sample_ID",
+    "collaborator_sample_id": "Alias_collaborator_sample_ID"
+  },
+  "static_fields": {
+    "project": "GAP",
+    "sample_type": "dna_blood"
+  },
+  "subject_id_candidates": {
+    "Consortium_ID": "consortium_id"
+  },
+  "subject_id_type_field": null,
+  "center_id_field": null,
+  "default_center_id": 13,
+  "exclude_from_load": ["Consortium_ID"]
+}

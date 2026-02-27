@@ -1,0 +1,17 @@
+{
+  "field_mapping": {
+    "sample_id": "sample_id"
+  },
+  "static_fields": {
+    "sample_type": "dna_unknown",
+    "center_id": 8
+  },
+  "subject_id_candidates": {
+    "collaborator_participant_id": "local_id",
+    "collaborator_sample_id": "local_id"
+  },
+  "subject_id_type_field": null,
+  "center_id_field": null,
+  "default_center_id": 8,
+  "exclude_from_load": ["collaborator_participant_id", "collaborator_sample_id"]
+}

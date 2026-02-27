@@ -1,0 +1,17 @@
+{
+  "field_mapping": {
+    "sample_id": "Sample_id_1",
+    "specimen_id": "Sample_id_2"
+  },
+  "static_fields": {
+    "sample_type": "dna_blood"
+  },
+  "subject_id_candidates": {
+    "Specimen_id_1": "consortium_id",
+    "Specimen_id_2": "local_id"
+  },
+  "subject_id_type_field": null,
+  "center_id_field": "Center",
+  "default_center_id": 1,
+  "exclude_from_load": ["Specimen_id_1", "Specimen_id_2"]
+}
