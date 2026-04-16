@@ -1,13 +1,22 @@
 {
   "field_mapping": {
-    "knumber": "knumber",
-    "niddk_no": "niddk_no"
+    "genotype_id": "genotype_id",
+    "batch": "batch"
   },
   "subject_id_candidates": {
-    "consortium_id": "consortium_id",
-    "niddk_no": "niddk_no"
+    "genotyping_id": "gmID",
+    "genotyping_id_alias": "gmID",
+    "genotyping_id_alias1": "gmID",
+    "genotyping_id_alias2": "gmID",
+    "genotyping_id_alias3": "gmID",
+    "genotyping_id_alias4": "gmID",
+    "genotyping_id_alias5": "gmID",
+    "niddk_cid": "consortium_id",
+    "niddk_cid_alias": "consortium_id",
+    "center_id": "local_id",
+    "center_alt_id": "local_id"
   },
-  "center_id_field": "center_name",
+  "center_id_field": "center",
   "default_center_id": 1,
-  "exclude_from_load": ["consortium_id"]
+  "exclude_from_load": ["consortium_id", "gmID"]
 }
