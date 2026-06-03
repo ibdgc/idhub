@@ -1,0 +1,15 @@
+{
+  "field_mapping": {
+    "sample_id": "specimen_id"
+  },
+  "static_fields": {
+    "sample_type": "dna_unknown"
+  },
+  "subject_id_candidates": {
+    "Consortium_ID": "consortium_id"
+  },
+  "subject_id_type_field": null,
+  "center_id_field": null,
+  "default_center_id": 1,
+  "exclude_from_load": ["Consortium_ID"]
+}
